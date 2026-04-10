@@ -6,23 +6,29 @@
         "-y",
         "@modelcontextprotocol/server-github"
       ],
-      "env": {}
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub API (PR, issue, repo, 코드 검색)"
     },
     "excel": {
-      "command": "npx",
+      "command": "cmd",
       "args": [
-        "-y",
-        "@modelcontextprotocol/server-excel"
+        "/c",
+        "npx",
+        "--yes",
+        "@negokaz/excel-mcp-server"
       ],
-      "env": {}
+      "description": "Excel 읽기/쓰기 (.xlsx, .xlsm)"
     },
     "filesystem": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem"
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\workspace"
       ],
-      "env": {}
+      "description": "파일 읽기/쓰기 (호스트 C:\\workspace 루트)"
     }
   }
 }
