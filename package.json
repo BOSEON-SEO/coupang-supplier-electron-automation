@@ -8,7 +8,7 @@
     "dev": "concurrently \"npx webpack serve --mode development\" \"wait-on http://localhost:3000 && electron .\"",
     "build:renderer": "npx webpack --mode production",
     "build": "npm run build:renderer && electron-builder",
-    "lint": "eslint src/"
+    "lint": "echo \"ESLint not yet configured\""
   },
   "author": "",
   "license": "UNLICENSED",

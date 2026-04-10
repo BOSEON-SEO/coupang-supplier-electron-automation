@@ -94,7 +94,8 @@ ipcMain.handle('file:exists', async (_event, filePath) => {
 
 ipcMain.handle('file:read', async (_event, filePath) => {
   try {
-    return { data: fs.readFileSync(filePath), success: true };
+    const buf = fs.readFileSync(filePath);
+    return { data: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), success: true };
   } catch (err) {
     return { success: false, error: err.message };
   }
