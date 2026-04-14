@@ -36,10 +36,24 @@ function createWindow() {
   });
 
   // 개발 모드: webpack-dev-server / 프로덕션: 빌드된 파일
-  const isDev = !app.isPackaged;
+  const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools({ mode: 'bottom' });
+    // webpack-dev-server가 실행 중이면 연결, 아니면 빌드된 파일로 폴백
+    const http = require('http');
+    const devUrl = 'http://localhost:3000';
+    const checkDevServer = () => new Promise((resolve) => {
+      const req = http.get(devUrl, () => resolve(true));
+      req.on('error', () => resolve(false));
+      req.setTimeout(1000, () => { req.destroy(); resolve(false); });
+    });
+    checkDevServer().then((isRunning) => {
+      if (isRunning) {
+        mainWindow.loadURL(devUrl);
+        mainWindow.webContents.openDevTools({ mode: 'bottom' });
+      } else {
+        mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+      }
+    });
   } else {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
