@@ -578,27 +578,101 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
   // ── 자격증명 관리 ──────────────────────────────────────────────
 
   /**
-   * credentials:check — 벤더별 자격증명 환경변수 존재 여부 확인
+   * credentials:check — 벤더별 자격증명 저장 상태 확인
    *
-   * 자격증명은 환경변수로만 관리된다 (COUPANG_ID_{VENDOR}, COUPANG_PW_{VENDOR}).
-   * 민감 정보는 값을 반환하지 않고 존재 여부만 알린다.
+   * 우선순위: safeStorage(credentials.enc) → 환경변수(COUPANG_ID_/PW_{VENDOR}) 폴백.
+   * password는 절대 반환하지 않는다. id는 사용자가 확인할 수 있도록 평문 반환.
    *
-   * @param {string} vendorId — 벤더 식별자 (예: 'basic')
-   * @returns {{ hasId: boolean, hasPassword: boolean, envIdKey: string, envPwKey: string }}
+   * @param {string} vendorId
+   * @returns {{
+   *   hasId: boolean, hasPassword: boolean, id: string|null,
+   *   source: { id: 'safeStorage'|'env'|null, password: 'safeStorage'|'env'|null },
+   *   envIdKey: string, envPwKey: string, encryptionAvailable: boolean
+   * }}
    */
   ipcMain.handle('credentials:check', async (_e, vendorId) => {
     if (!vendorId || typeof vendorId !== 'string') {
-      return { hasId: false, hasPassword: false, envIdKey: '', envPwKey: '', error: 'vendorId required' };
+      return {
+        hasId: false, hasPassword: false, id: null,
+        source: { id: null, password: null },
+        envIdKey: '', envPwKey: '',
+        encryptionAvailable: safeStorage.isEncryptionAvailable(),
+        error: 'vendorId required',
+      };
     }
     const upper = vendorId.toUpperCase();
     const envIdKey = `COUPANG_ID_${upper}`;
     const envPwKey = `COUPANG_PW_${upper}`;
+
+    const stored = getCredentialFor(vendorId);
+    const hasStoredId = !!stored.id;
+    const hasStoredPw = !!stored.password;
+    const hasEnvId = !!process.env[envIdKey];
+    const hasEnvPw = !!process.env[envPwKey];
+
     return {
-      hasId: !!process.env[envIdKey],
-      hasPassword: !!process.env[envPwKey],
+      hasId: hasStoredId || hasEnvId,
+      hasPassword: hasStoredPw || hasEnvPw,
+      id: stored.id || process.env[envIdKey] || null,
+      source: {
+        id: hasStoredId ? 'safeStorage' : (hasEnvId ? 'env' : null),
+        password: hasStoredPw ? 'safeStorage' : (hasEnvPw ? 'env' : null),
+      },
       envIdKey,
       envPwKey,
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
     };
+  });
+
+  /**
+   * credentials:save — 벤더별 ID/PW를 safeStorage로 암호화하여 저장
+   * 빈 문자열/null은 "변경 없음"으로 해석 (삭제는 credentials:delete).
+   */
+  ipcMain.handle('credentials:save', async (_e, vendorId, id, password) => {
+    if (!vendorId || typeof vendorId !== 'string') {
+      return { success: false, error: 'vendorId required' };
+    }
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { success: false, error: 'OS encryption (safeStorage) not available on this system' };
+    }
+    try {
+      const store = loadCredentialStore();
+      store.entries = store.entries || {};
+      const current = store.entries[vendorId] || {};
+      if (typeof id === 'string' && id.length > 0) {
+        current.id = encryptToBase64(id);
+      }
+      if (typeof password === 'string' && password.length > 0) {
+        current.pw = encryptToBase64(password);
+      }
+      if (!current.id && !current.pw) {
+        return { success: false, error: 'nothing to save: both id and password are empty' };
+      }
+      store.entries[vendorId] = current;
+      saveCredentialStore(store);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * credentials:delete — 특정 벤더의 저장된 자격증명 전체 삭제
+   */
+  ipcMain.handle('credentials:delete', async (_e, vendorId) => {
+    if (!vendorId || typeof vendorId !== 'string') {
+      return { success: false, error: 'vendorId required' };
+    }
+    try {
+      const store = loadCredentialStore();
+      if (store.entries && store.entries[vendorId]) {
+        delete store.entries[vendorId];
+        saveCredentialStore(store);
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 
   // ── 세션 유효성 검증 (CDP 기반) ─────────────────────────────────

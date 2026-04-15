@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 자격증명·세션 관리 ──
   checkCredentials: (vendorId) => ipcRenderer.invoke('credentials:check', vendorId),
+  saveCredentials: (vendorId, id, password) =>
+    ipcRenderer.invoke('credentials:save', vendorId, id, password),
+  deleteCredentials: (vendorId) => ipcRenderer.invoke('credentials:delete', vendorId),
   checkSession: () => ipcRenderer.invoke('session:check'),
 
   // ── 위험 동작 ──
