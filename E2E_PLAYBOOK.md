@@ -158,8 +158,16 @@ npm start
 - Electron 창이 열림
 - 상단에 **탭 네비게이션**: "웹 뷰" / "작업 뷰"
 - **벤더 선택 드롭다운**이 표시됨
-- DevTools (Ctrl+Shift+I → Console 탭)가 자동으로 열림 (개발 모드)
 - 앱 타이틀 바에 **"쿠팡 서플라이어 자동화"** 표시
+
+**개발 모드 DevTools 검증** (`Ctrl+Shift+I` → Console 탭):
+```
+[IPC] registerIpcHandlers — ready
+[App] dataDir: C:\Users\{username}\AppData\Local\CoupangAutomation
+[App] cdpPort: 9222
+```
+> 위 로그가 보이면 IPC 핸들러와 데이터 경로가 정상 초기화된 것입니다.
+> 로그가 없어도 탭·드롭다운이 보이면 진행 가능합니다.
 
 ### 예상 오류 및 트러블슈팅
 
@@ -656,4 +664,4 @@ npm run test:po-download
 | `COUPANG_PW_{VENDOR}` | ✅ | — | 벤더별 비밀번호 |
 | `CDP_PORT` | — | `9222` | Chrome 원격 디버깅 포트 |
 | `PYTHON_BIN` | — | 자동 탐지 | Python 인터프리터 절대 경로 |
-| `COUPANG_DATA_DIR` | — | `%LOCALAPPDATA%\CoupangAutomation` | 앱이 자동 설정 |
+| `COUPANG_DATA_DIR` | — | `%LOCALAPPDATA%\CoupangAutomation` | 앱 시작 시 자동 설정 (미설정 시 `AppData\Local\CoupangAutomation` 사용) |
