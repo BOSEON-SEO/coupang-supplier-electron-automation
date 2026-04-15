@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * 위험 동작 3초 카운트다운 모달 (재사용)
@@ -30,7 +31,7 @@ export default function CountdownModal({
 
   const progress = Math.max(0, Math.min(1, (seconds - remaining) / seconds));
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal modal--countdown">
         <h2 className="modal__title">⚠️ 위험 동작 실행 대기</h2>
@@ -57,6 +58,7 @@ export default function CountdownModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

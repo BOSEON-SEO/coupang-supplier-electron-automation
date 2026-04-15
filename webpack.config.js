@@ -1,8 +1,12 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
-module.exports = {
+module.exports = (env, argv) => ({
   entry: './src/index.jsx',
+  // dev/prod 공통: eval 계열 소스맵 금지 (CSP 'unsafe-eval' 회피)
+  // - production: source-map (외부 .map 파일)
+  // - development: cheap-module-source-map (eval 미사용, 빠른 빌드)
+  devtool: argv.mode === 'production' ? 'source-map' : 'cheap-module-source-map',
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'bundle.js',
@@ -41,4 +45,4 @@ module.exports = {
       directory: path.join(__dirname, 'public'),
     },
   },
-};
+});

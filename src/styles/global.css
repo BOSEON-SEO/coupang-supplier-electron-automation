@@ -23,6 +23,10 @@
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
+html, body {
+  height: 100%;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'Noto Sans KR', sans-serif;
@@ -59,6 +63,109 @@ body {
   flex: 1;
   overflow: auto;
   padding: 16px;
+}
+
+/* ── 스택 레이아웃 (웹 뷰 메인 + 하단 슬라이드 작업뷰 패널) ── */
+.app-main--stack {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-pane--web {
+  flex: 1;                                 /* 패널 외 나머지 공간 다 차지 */
+  min-height: 0;
+  background: #eceef1;                     /* frame 바깥 회색 */
+  padding: 10px;                           /* 액자 여백 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* 작업 뷰 슬라이드 패널 */
+.work-panel {
+  flex-grow: 0;
+  flex-shrink: 0;
+  flex-basis: 0px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
+  padding: 12px 16px;
+  /* flex-basis(높이), padding 모두 부드럽게 트랜지션 */
+  transition:
+    flex-basis 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    padding-top 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    padding-bottom 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    border-top-width 0.2s ease-out;
+  /* z-index 일부러 안 줌 — stacking context 만들면 내부 모달이 외부 형제(work-bar) 위로 못 올라옴 */
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.work-panel--closed {
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  box-shadow: none;
+}
+
+.work-panel-splitter {
+  height: 6px;
+  background: var(--color-border);
+  cursor: row-resize;
+  flex-shrink: 0;
+  opacity: 1;
+  transition: background 0.15s, height 0.25s ease-out, opacity 0.2s;
+  /* z-index 안 줌 — stacking context 회피 */
+}
+
+.work-panel-splitter:hover {
+  background: var(--color-primary);
+}
+
+.work-panel-splitter--closed {
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 화면 하단의 항상 보이는 아코디언 토글 바 */
+.work-bar {
+  flex-shrink: 0;
+  height: 36px;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s;
+  /* z-index 안 줌 — stacking context 만들면 모달이 위로 못 옴 */
+}
+
+.work-bar:hover {
+  background: var(--color-bg);
+}
+
+.work-bar--open {
+  background: var(--color-bg);
+  border-top-color: var(--color-primary);
+}
+
+.work-bar__label {
+  letter-spacing: 0.02em;
+}
+
+.work-bar__chevron {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 400;
 }
 
 /* ── 탭 네비게이션 ────────────────────────────────────────── */
@@ -184,25 +291,56 @@ body {
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* 헤더 우측 수동 로그인 버튼 */
+.login-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+  margin-left: 4px;
+}
+
+.login-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.login-btn:disabled {
+  opacity: 0.6;
+}
+
 /* ── 모달 (공통) ─────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  animation: modal-fade-in 0.15s ease-out;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .modal {
   background: var(--color-surface);
   border-radius: 10px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   min-width: 360px;
   max-width: 520px;
   display: flex;
   flex-direction: column;
+  animation: modal-pop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: none; }
 }
 
 .modal__title {
@@ -384,6 +522,7 @@ body {
 .vendor-mgmt__cred-header {
   font-size: 13px;
   font-weight: 600;
+  color: var(--color-text);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -516,6 +655,43 @@ body {
   font-family: 'Consolas', 'D2Coding', monospace;
 }
 
+/* 작업 일시 선택 (Date Picker) */
+.workview-toolbar__date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.workview-toolbar__date-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.workview-toolbar__date input[type="date"] {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text);
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.workview-toolbar__date input[type="date"]:focus {
+  outline: none;
+}
+
+.workview-toolbar__date input[type="date"]:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
 /* ── Python 상태 표시 ────────────────────────────────────── */
 .python-status {
   font-size: 12px;
@@ -629,6 +805,110 @@ button.session-badge:disabled {
 }
 
 /* ── 웹 뷰 ───────────────────────────────────────────────── */
+.webview-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.webview-wrapper > .webview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.webview-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+}
+
+.webview-icon-btn:hover {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+}
+
+.webview-urlbar {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  overflow: hidden;
+  height: 32px;
+  min-width: 0;
+}
+
+.webview-urlbar:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
+}
+
+.webview-urlbar__input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text);
+  min-width: 0;
+}
+
+.webview-urlbar__input:focus {
+  outline: none;
+}
+
+.webview-urlbar__go {
+  width: 36px;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.webview-urlbar__go:hover {
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+
+/*
+ * WCV(WebContentsView)가 이 div 의 화면 좌표 위에 overlay 된다.
+ * 자체 콘텐츠는 없고 자리만 차지하면 됨. 배경은 회색으로 두어
+ * WCV 로딩 전에도 위치 식별 가능.
+ */
+.webview-host {
+  flex: 1;
+  min-height: 0;
+  background: #f1f3f4;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
 .webview-container {
   height: 100%;
   display: flex;
@@ -660,14 +940,16 @@ button.session-badge:disabled {
 .workview-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  height: 100%;
+  gap: 12px;
+  height: 100%;            /* 부모(.work-panel)가 고정 높이를 가짐 */
+  min-height: 0;
 }
 
 .workview-toolbar {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .workview-table-section {
@@ -676,9 +958,68 @@ button.session-badge:disabled {
   overflow: auto;
 }
 
+/* 작업 로그 아코디언 — 토글바와 패널을 하나의 블록으로 묶음 */
+.workview-log-accordion {
+  flex-shrink: 0;
+  margin-top: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workview-log-accordion--open {
+  border-color: var(--color-primary);
+}
+
+.workview-log-bar {
+  flex-shrink: 0;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.1s;
+}
+
+.workview-log-bar:hover {
+  background: var(--color-bg);
+}
+
+.workview-log-accordion--open .workview-log-bar {
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.workview-log-bar__count {
+  color: var(--color-text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.workview-log-bar__chev {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
 .workview-log-section {
   flex-shrink: 0;
-  height: 180px;
+  height: 200px;
+  overflow: hidden;
+}
+
+/* 아코디언 안의 LogPanel 은 자체 border 제거 (wrapper 가 이미 가짐) */
+.workview-log-accordion .log-panel {
+  border: none;
+  border-radius: 0;
 }
 
 /* ── Editable Table ───────────────────────────────────────── */

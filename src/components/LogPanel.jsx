@@ -7,7 +7,7 @@ import React, { useEffect, useRef } from 'react';
  *
  * @param {{ logs: { time: string, level: string, message: string }[] }} props
  */
-export default function LogPanel({ logs }) {
+export default function LogPanel({ logs, hideHeader = false }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -24,10 +24,12 @@ export default function LogPanel({ logs }) {
 
   return (
     <div className="log-panel">
-      <div className="log-panel__header">
-        <span>📋 작업 로그</span>
-        <span className="log-panel__count">{logs.length}건</span>
-      </div>
+      {!hideHeader && (
+        <div className="log-panel__header">
+          <span>📋 작업 로그</span>
+          <span className="log-panel__count">{logs.length}건</span>
+        </div>
+      )}
       <div className="log-panel__body">
         {logs.map((log, i) => (
           <div key={i} className={`log-entry ${getLevelClass(log.level)}`}>

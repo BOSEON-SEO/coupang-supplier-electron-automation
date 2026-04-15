@@ -65,6 +65,7 @@ from common.ipc import send_log, send_error, send_progress
 from common.browser import (
     create_cdp_connection,
     get_existing_page,
+    find_vendor_page,
     check_session_and_log,
 )
 from common.login import (
@@ -315,9 +316,16 @@ def main():
     send_progress(20, "CDP 연결 성공")
 
     try:
-        # ── 3. 기존 페이지(탭) 획득 ──
-        send_progress(25, "기존 페이지 획득 중")
-        page = get_existing_page(conn.browser)
+        # ── 3. 쿠팡 페이지(WebContentsView) 획득 ──
+        # Electron 앱은 main window(React UI) + WebContentsView(쿠팡 사이트)
+        # 두 페이지를 CDP에 노출한다. URL 기반으로 supplier/keycloak/coupang
+        # 페이지를 골라야 React UI를 건드리지 않는다.
+        send_progress(25, "쿠팡 페이지 탐색 중")
+        page = find_vendor_page(conn.browser)
+        if page is None:
+            # 폴백: 인덱스 기반 (단일 페이지 환경)
+            send_log("URL 기반 페이지 탐색 실패 — get_existing_page 폴백")
+            page = get_existing_page(conn.browser)
         send_log(f"현재 URL: {page.url}")
 
         # ── 4. 모달 좀비 사전 정리 ──

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * 벤더 선택 드롭다운 + 통합 관리 모달
@@ -9,7 +10,8 @@ import React, { useEffect, useState, useCallback } from 'react';
  *
  * 관리 모달 (2-pane):
  *   왼쪽: 벤더 리스트 + "+ 새 벤더" 버튼
- *   오른쪽: 선택된 벤더 편집 폼 (이름, shippingSeq, ID, PW, 저장/삭제)
+ *   오른쪽: 선택된 벤더 편집 폼 (이름, ID, PW, 저장/삭제)
+ *   ※ shippingSeq 등 밀크런 관련 설정은 별도 "밀크런 관리" 메뉴에서 처리
  *
  * 자격증명은 Electron safeStorage로 암호화 저장.
  * 평문 password는 Renderer에 절대 반환되지 않는다 (hasPassword boolean만).
@@ -19,7 +21,7 @@ import React, { useEffect, useState, useCallback } from 'react';
  *   - onChange: (vendorId) => void
  */
 
-const EMPTY_DRAFT = { id: '', name: '', shippingSeq: '', newId: '', newPw: '' };
+const EMPTY_DRAFT = { id: '', name: '', newId: '', newPw: '' };
 const LAST_VENDOR_KEY = 'coupang-supplier:lastVendor';
 
 export default function VendorSelector({ value, onChange }) {
@@ -85,6 +87,14 @@ export default function VendorSelector({ value, onChange }) {
     }
   }, [value]);
 
+  // 관리 모달 열림/닫힘 시 WCV 숨김/표시 — WCV는 native overlay라
+  // 그렇게 하지 않으면 React 모달이 WCV에 가려져 조작 불가
+  useEffect(() => {
+    const api = window.electronAPI?.webview;
+    if (!api) return;
+    api.setVisible(!showMgmt);
+  }, [showMgmt]);
+
   // 관리 모달: 벤더 선택 시 드래프트/자격증명 로드
   useEffect(() => {
     if (!showMgmt) return;
@@ -102,7 +112,6 @@ export default function VendorSelector({ value, onChange }) {
     setDraft({
       id: target.id,
       name: target.name ?? '',
-      shippingSeq: target.shippingSeq ? String(target.shippingSeq) : '',
       newId: '',
       newPw: '',
     });
@@ -120,7 +129,6 @@ export default function VendorSelector({ value, onChange }) {
 
     const id = (selectedId ?? draft.id).trim().toLowerCase();
     const name = draft.name.trim() || id;
-    const shippingSeq = draft.shippingSeq.trim();
 
     if (selectedId === null) {
       if (!/^[a-z0-9_]{2,20}$/.test(id)) {
@@ -136,14 +144,8 @@ export default function VendorSelector({ value, onChange }) {
     setBusy(true);
     try {
       const nextVendors = selectedId === null
-        ? [...vendors, { id, name, ...(shippingSeq ? { shippingSeq } : {}) }]
-        : vendors.map((v) => {
-            if (v.id !== id) return v;
-            const updated = { ...v, name };
-            if (shippingSeq) updated.shippingSeq = shippingSeq;
-            else delete updated.shippingSeq;
-            return updated;
-          });
+        ? [...vendors, { id, name }]
+        : vendors.map((v) => (v.id === id ? { ...v, name } : v));
 
       const saveRes = await api.saveVendors({ schemaVersion: 1, vendors: nextVendors });
       if (!saveRes?.success) {
@@ -256,7 +258,7 @@ export default function VendorSelector({ value, onChange }) {
         ⚙ 관리
       </button>
 
-      {showMgmt && (
+      {showMgmt && createPortal(
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal modal--vendor-mgmt">
             <h2 className="modal__title">벤더 관리</h2>
@@ -312,17 +314,6 @@ export default function VendorSelector({ value, onChange }) {
                     placeholder="베이직"
                   />
                 </div>
-                <div className="form-row">
-                  <label htmlFor="vm-ship">shippingSeq (선택)</label>
-                  <input
-                    id="vm-ship"
-                    type="text"
-                    value={draft.shippingSeq}
-                    onChange={(e) => setDraft((d) => ({ ...d, shippingSeq: e.target.value }))}
-                    placeholder="(출고지 시퀀스 — 밀크런용)"
-                  />
-                </div>
-
                 <div className="vendor-mgmt__cred-section">
                   <div className="vendor-mgmt__cred-header">
                     <span>쿠팡 서플라이어 자격증명</span>
@@ -426,7 +417,8 @@ export default function VendorSelector({ value, onChange }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

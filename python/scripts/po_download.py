@@ -76,6 +76,7 @@ from common.ipc import send_log, send_error, send_progress, send
 from common.browser import (
     create_cdp_connection,
     get_existing_page,
+    find_vendor_page,
     check_session_and_log,
 )
 from common.login import (
@@ -109,22 +110,23 @@ REMOVE_MODAL_BACKDROP_JS = """
 }
 """
 
-# 쿠팡 PO SKU 페이지 셀렉터
+# 쿠팡 PO SKU 페이지 셀렉터 (명세 기준)
+# 페이지 이동은 query string 으로 끝나므로 폼 입력/검색 셀렉터는 사용하지 않는다.
 SEL = {
-    # 날짜 필터
-    "date_from": "input[name='searchStartDate'], input#searchStartDate, input.datepicker:first-of-type",
-    "date_to": "input[name='searchEndDate'], input#searchEndDate, input.datepicker:last-of-type",
-
-    # 검색 버튼
-    "search_btn": "#searchBtn, button.btn-search, button[type='submit'].search",
-
-    # 다운로드 버튼
-    "download_btn": "#downloadBtn, button.btn-download, a.btn-download, button:has-text('다운로드'), button:has-text('엑셀'), button:has-text('Excel')",
-
-    # 테이블
-    "data_table": "table.table, table#dataTable, .table-responsive table",
-    "table_rows": "table.table tbody tr, table#dataTable tbody tr",
-    "no_data": ".no-data, .empty-data, td:has-text('데이터가 없습니다'), td:has-text('조회 결과가 없습니다')",
+    # 빈 결과 마커 (둘 중 하나라도 보이면 다운로드 단계 스킵)
+    "no_data": [
+        "text=No search results",
+        "text=검색 결과가 없습니다",
+    ],
+    # 1차 다운로드 트리거 (상품목록 다운로드 버튼)
+    "select_download_btn": "#selectDownloadButton",
+    # 다운로드 모달 내 전체 다운로드 버튼
+    "down_all": "#down-all",
+    # Fallback — 일부 환경에서 표시되는 "Manual Download" 버튼
+    "manual_download": [
+        'button[name="Manual Download1"]',
+        'button[name="Manual Download"]',
+    ],
 }
 
 
@@ -137,8 +139,33 @@ _config = {
 
 
 def _get_po_url() -> str:
-    """현재 config의 base_url로 PO SKU 목록 URL을 구성한다."""
+    """현재 config의 base_url로 PO SKU 목록 URL을 구성한다 (필터 없음, 호환용)."""
     return f"{_config['base_url']}{PO_SKU_LIST_PATH}"
+
+
+def _build_po_list_url(date_from: str, date_to: str) -> str:
+    """
+    필터 query string이 박힌 PO SKU 목록 URL을 생성한다.
+
+    명세:
+      - searchDateType = WAREHOUSING_PLAN_DATE  (입고예정일 기준)
+      - searchStartDate / searchEndDate = YYYY-MM-DD
+      - purchaseOrderStatus = REQUEST_CONFIRM_PARTNER (발주확정 요청만)
+      - 나머지 필터 (purchaseOrderSeq, centerCode, skuSeq, purchaseOrderType) 는 빈 값
+    """
+    base = _config["base_url"]
+    qs = (
+        "page=1"
+        "&searchDateType=WAREHOUSING_PLAN_DATE"
+        f"&searchStartDate={date_from}"
+        f"&searchEndDate={date_to}"
+        "&purchaseOrderSeq="
+        "&centerCode="
+        "&skuSeq="
+        "&purchaseOrderStatus=REQUEST_CONFIRM_PARTNER"
+        "&purchaseOrderType="
+    )
+    return f"{base}{PO_SKU_LIST_PATH}?{qs}"
 
 
 def _step_log(step: str, status: str, message: str = "") -> None:
@@ -194,15 +221,18 @@ def _get_data_dir() -> str:
     return data_dir
 
 
-def _build_filename(vendor_id: str, ymd: str, seq: int) -> str:
-    """벤더 파일명 생성: {vendor}-{YYYYMMDD}-{seq:02d}.xlsx"""
-    return f"{vendor_id}-{ymd}-{seq:02d}.xlsx"
+def _build_filename(vendor_id: str, ymd: str, seq: int, ext: str = "csv") -> str:
+    """벤더 파일명 생성: {vendor}-{YYYYMMDD}-{seq:02d}.{ext}"""
+    return f"{vendor_id}-{ymd}-{seq:02d}.{ext}"
 
 
 def _next_sequence(data_dir: str, vendor_id: str, ymd: str) -> int:
-    """해당 벤더/날짜의 다음 차수 번호를 계산한다."""
+    """
+    해당 벤더/날짜의 다음 차수 번호를 계산한다.
+    csv·xlsx 둘 다 카운트하여 확장자가 달라도 seq 가 충돌하지 않도록 한다.
+    """
     pattern = re.compile(
-        rf"^{re.escape(vendor_id)}-{re.escape(ymd)}-(\d{{2}})\.xlsx$", re.IGNORECASE
+        rf"^{re.escape(vendor_id)}-{re.escape(ymd)}-(\d{{2}})\.(csv|xlsx)$", re.IGNORECASE
     )
     max_seq = 0
     if os.path.isdir(data_dir):
@@ -215,9 +245,13 @@ def _next_sequence(data_dir: str, vendor_id: str, ymd: str) -> int:
 
 # ─── 페이지 네비게이션 ────────────────────────────────────────────
 
-def _navigate_to_po_list(page) -> bool:
+def _navigate_to_po_list(page, po_url: Optional[str] = None) -> bool:
     """
     PO SKU 목록 페이지로 이동한다.
+
+    Args:
+        page: Playwright Page
+        po_url: 이동할 URL (필터 query 포함). 미지정 시 path만 사용.
 
     SPA 라우팅 함정 대응:
         1. page.goto() 시도
@@ -225,15 +259,13 @@ def _navigate_to_po_list(page) -> bool:
         3. URL에 /scm/purchase/order/sku/list 포함 확인
 
     Returns:
-        True — 이동 성공
-        False — 실패
-    """
-    current_url = page.url
-    if PO_SKU_LIST_PATH in current_url:
-        send_log(f"이미 PO SKU 목록 페이지에 있습니다: {current_url}")
-        return True
+        True — 이동 성공 / False — 실패
 
-    po_url = _get_po_url()
+    주의: 이전과 달리 "이미 같은 path에 있어도 query string이 다를 수 있으므로"
+    현재 URL이 /scm/purchase/order/sku/list 더라도 항상 새로 goto 한다.
+    """
+    if po_url is None:
+        po_url = _get_po_url()
     send_log(f"PO SKU 목록 페이지로 이동: {po_url}")
     try:
         page.goto(po_url, timeout=LOGIN_NAVIGATION_TIMEOUT, wait_until="domcontentloaded")
@@ -266,149 +298,84 @@ def _navigate_to_po_list(page) -> bool:
     return True
 
 
-# ─── 필터 설정 ────────────────────────────────────────────────────
+# ─── 다운로드 ─────────────────────────────────────────────────────
 
-def _set_date_filter(page, date_from: str, date_to: str) -> bool:
+def _is_empty_result(page) -> bool:
     """
-    날짜 필터를 설정한다.
-
-    쿠팡 사이트의 datepicker는 readonly input에 jQuery datepicker가 바인딩되어 있어
-    직접 fill()이 안 되는 경우가 있다. evaluate()로 JS 직접 조작.
-
-    Args:
-        page: Playwright Page
-        date_from: YYYY-MM-DD 형식
-        date_to: YYYY-MM-DD 형식
-
-    Returns:
-        True — 설정 성공
+    빈 결과 마커("No search results" 또는 "검색 결과가 없습니다")가
+    현재 페이지에 표시되어 있으면 True.
     """
-    send_log(f"날짜 필터 설정: {date_from} ~ {date_to}")
-
-    # 방법 1: JS로 직접 input value 설정 + change 이벤트 발생
-    set_date_js = """
-    (selector, value) => {
-        const inputs = document.querySelectorAll(selector);
-        if (inputs.length === 0) return false;
-        const input = inputs[0];
-        // readonly 속성 일시 제거
-        const wasReadonly = input.readOnly;
-        input.readOnly = false;
-        input.value = value;
-        input.readOnly = wasReadonly;
-        // jQuery datepicker 동기화
-        if (window.jQuery && jQuery(input).datepicker) {
-            try { jQuery(input).datepicker('setDate', value); } catch(e) {}
-        }
-        // 변경 이벤트 발생
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-    }
-    """
-
-    try:
-        # 시작일 설정
-        for sel in SEL["date_from"].split(", "):
-            result = page.evaluate(set_date_js, sel.strip(), date_from)
-            if result:
-                send_log(f"시작일 설정 완료: {date_from} (셀렉터: {sel.strip()})")
-                break
-        else:
-            send_log("시작일 input을 찾지 못함 — 기본값 사용")
-
-        # 종료일 설정
-        for sel in SEL["date_to"].split(", "):
-            result = page.evaluate(set_date_js, sel.strip(), date_to)
-            if result:
-                send_log(f"종료일 설정 완료: {date_to} (셀렉터: {sel.strip()})")
-                break
-        else:
-            send_log("종료일 input을 찾지 못함 — 기본값 사용")
-
-    except Exception as exc:
-        send_log(f"날짜 필터 설정 중 에러 (무시하고 계속): {exc}")
-
-    return True
-
-
-def _click_search(page) -> bool:
-    """
-    검색 버튼을 클릭한다.
-
-    Returns:
-        True — 클릭 성공
-    """
-    send_log("검색 버튼 클릭")
-
-    for sel in SEL["search_btn"].split(", "):
-        sel = sel.strip()
+    for sel in SEL["no_data"]:
         try:
             el = page.query_selector(sel)
-            if el:
-                el.click()
-                send_log(f"검색 버튼 클릭 완료 (셀렉터: {sel})")
-                # 검색 결과 로드 대기
-                page.wait_for_timeout(PAGE_LOAD_WAIT_MS)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15000)
-                except Exception:
-                    pass  # networkidle 타임아웃은 치명적이지 않음
+            if el and el.is_visible():
                 return True
         except Exception:
             continue
-
-    # 폴백: Enter 키로 검색 시도
-    send_log("검색 버튼을 찾지 못함 — Enter 키 폴백")
-    try:
-        page.keyboard.press("Enter")
-        page.wait_for_timeout(PAGE_LOAD_WAIT_MS)
-        return True
-    except Exception as exc:
-        send_error(f"검색 실행 실패: {exc}")
-        return False
+    return False
 
 
-# ─── 다운로드 ─────────────────────────────────────────────────────
-
-def _click_download(page) -> Optional[object]:
+def _click_with_fallback(page, selectors: list, label: str) -> bool:
     """
-    다운로드 버튼을 클릭하고 다운로드를 시작한다.
-
-    Playwright의 expect_download()를 사용하여 다운로드 이벤트를 캡처.
-
-    Returns:
-        Download 객체 또는 None (다운로드 시작 실패)
+    selectors 리스트에서 첫 번째로 발견된 visible element를 클릭한다.
     """
-    send_log("다운로드 버튼 탐색")
-    _clean_modal_backdrops(page)
-
-    for sel in SEL["download_btn"].split(", "):
-        sel = sel.strip()
+    for sel in selectors:
         try:
             el = page.query_selector(sel)
-            if el:
-                send_log(f"다운로드 버튼 발견 (셀렉터: {sel})")
-
-                # expect_download로 다운로드 이벤트 캡처
-                try:
-                    with page.expect_download(timeout=DOWNLOAD_TIMEOUT_SEC * 1000) as download_info:
-                        el.click()
-                        send_log("다운로드 버튼 클릭 완료 — 다운로드 대기 중...")
-
-                    download = download_info.value
-                    send_log(f"다운로드 시작됨: {download.suggested_filename}")
-                    return download
-
-                except Exception as exc:
-                    send_log(f"expect_download 실패 (셀렉터: {sel}): {exc}")
-                    # 다음 셀렉터 시도
-                    continue
+            if el and el.is_visible():
+                send_log(f"{label} 클릭 (셀렉터: {sel})")
+                el.click()
+                return True
         except Exception:
             continue
+    return False
 
-    send_error("다운로드 버튼을 찾을 수 없습니다")
-    return None
+
+def _download_csv(page) -> Optional[object]:
+    """
+    상품목록 다운로드 버튼 → 모달의 전체 다운로드 → 다운로드 이벤트 캡처.
+
+    흐름 (명세):
+        1. #selectDownloadButton 클릭
+        2. #down-all 모달 visible 대기 (최대 30초)
+        3. #down-all 클릭 → 다운로드 시작
+        4. (Fallback) "Manual Download1" / "Manual Download" 버튼이 뜨면 클릭
+
+    Returns:
+        Playwright Download 객체 또는 None
+    """
+    sel_btn = SEL["select_download_btn"]
+    sel_modal = SEL["down_all"]
+
+    # 1) 메인 다운로드 버튼 visible 대기
+    try:
+        page.wait_for_selector(sel_btn, state="visible", timeout=30_000)
+    except Exception as exc:
+        send_error(f"{sel_btn} 버튼 미발견: {exc}")
+        return None
+
+    # 2) expect_download 컨텍스트 안에서 두 단계 클릭
+    try:
+        with page.expect_download(timeout=DOWNLOAD_TIMEOUT_SEC * 1000) as dl_info:
+            send_log(f"{sel_btn} 클릭")
+            page.click(sel_btn)
+
+            # 모달 표시 대기 → #down-all 클릭
+            try:
+                page.wait_for_selector(sel_modal, state="visible", timeout=30_000)
+                send_log(f"{sel_modal} 클릭 (전체 다운로드)")
+                page.click(sel_modal)
+            except Exception:
+                send_log(f"{sel_modal} 미표시 — Manual Download fallback 시도")
+                if not _click_with_fallback(page, SEL["manual_download"], "Manual Download"):
+                    send_log("Manual Download 버튼도 없음 — 단일 클릭으로 진행")
+
+        download = dl_info.value
+        send_log(f"다운로드 시작됨: {download.suggested_filename}")
+        return download
+    except Exception as exc:
+        send_error(f"다운로드 캡처 실패: {exc}")
+        return None
 
 
 def _poll_download_complete(download, timeout_sec: int = DOWNLOAD_TIMEOUT_SEC) -> Optional[str]:
@@ -462,7 +429,7 @@ def _poll_download_complete(download, timeout_sec: int = DOWNLOAD_TIMEOUT_SEC) -
 
 def _save_download(tmp_path: str, data_dir: str, vendor_id: str) -> Optional[str]:
     """
-    다운로드된 임시 파일을 {vendor}-{YYYYMMDD}-{seq}.xlsx로 저장한다.
+    다운로드된 임시 파일을 {vendor}-{YYYYMMDD}-{seq}.csv 로 저장한다.
 
     Args:
         tmp_path: 다운로드된 임시 파일 경로
@@ -485,129 +452,6 @@ def _save_download(tmp_path: str, data_dir: str, vendor_id: str) -> Optional[str
         return dest_path
     except Exception as exc:
         send_error(f"파일 저장 실패: {exc}")
-        return None
-
-
-# ─── 테이블 데이터 추출 (다운로드 실패 시 폴백) ────────────────────
-
-def _extract_table_data(page) -> list:
-    """
-    페이지의 테이블에서 데이터를 직접 추출한다.
-    다운로드 버튼이 없거나 다운로드 실패 시 폴백으로 사용.
-
-    Returns:
-        dict 리스트 (rows)
-    """
-    send_log("테이블 데이터 직접 추출 시도")
-
-    extract_js = """
-    () => {
-        const table = document.querySelector('table.table, table#dataTable, .table-responsive table');
-        if (!table) return { error: 'table not found' };
-
-        const headers = [];
-        const headerCells = table.querySelectorAll('thead th, thead td');
-        headerCells.forEach(th => headers.push(th.innerText.trim()));
-
-        const rows = [];
-        const bodyRows = table.querySelectorAll('tbody tr');
-        bodyRows.forEach(tr => {
-            const cells = [];
-            tr.querySelectorAll('td').forEach(td => cells.push(td.innerText.trim()));
-            if (cells.length > 0 && cells.some(c => c !== '')) {
-                rows.push(cells);
-            }
-        });
-
-        return { headers, rows, count: rows.length };
-    }
-    """
-
-    try:
-        result = page.evaluate(extract_js)
-
-        if isinstance(result, dict) and result.get("error"):
-            send_log(f"테이블 추출 실패: {result['error']}")
-            return []
-
-        headers = result.get("headers", [])
-        raw_rows = result.get("rows", [])
-        count = result.get("count", 0)
-
-        send_log(f"테이블 추출: {count}행, 컬럼: {headers}")
-
-        if not raw_rows:
-            return []
-
-        # 헤더-값 매핑
-        rows = []
-        for raw in raw_rows:
-            row = {}
-            for i, val in enumerate(raw):
-                if i < len(headers):
-                    row[headers[i]] = val
-                else:
-                    row[f"col{i}"] = val
-            rows.append(row)
-
-        return rows
-
-    except Exception as exc:
-        send_error(f"테이블 추출 에러: {exc}")
-        return []
-
-
-def _save_extracted_data(rows: list, data_dir: str, vendor_id: str) -> Optional[str]:
-    """
-    추출된 테이블 데이터를 openpyxl로 xlsx 파일로 저장한다.
-
-    Returns:
-        저장된 파일 경로 또는 None
-    """
-    if not rows:
-        send_error("저장할 데이터가 없습니다")
-        return None
-
-    ymd = _today_str()
-    seq = _next_sequence(data_dir, vendor_id, ymd)
-    filename = _build_filename(vendor_id, ymd, seq)
-    dest_path = os.path.join(data_dir, filename)
-
-    try:
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws_data = wb.active
-        ws_data.title = "data"
-
-        # 헤더
-        if rows:
-            headers = list(rows[0].keys())
-            ws_data.append(headers)
-
-            # 데이터
-            for row in rows:
-                ws_data.append([row.get(h, "") for h in headers])
-
-        # _meta 시트
-        ws_meta = wb.create_sheet("_meta")
-        ws_meta.append(["schemaVersion", 1])
-        ws_meta.append(["format", "coupang"])
-        ws_meta.append(["vendor", vendor_id])
-        ws_meta.append(["date", ymd])
-        ws_meta.append(["sequence", seq])
-        ws_meta.append(["savedAt", datetime.now().isoformat()])
-        ws_meta.append(["source", "po_download_extract"])
-
-        wb.save(dest_path)
-        send_log(f"추출 데이터 저장 완료: {dest_path} ({len(rows)}행)")
-        return dest_path
-
-    except ImportError:
-        send_error("openpyxl 미설치 — pip install openpyxl 필요")
-        return None
-    except Exception as exc:
-        send_error(f"데이터 저장 실패: {exc}")
         return None
 
 
@@ -670,8 +514,10 @@ def main():
     send_progress(10, "CDP 연결 성공")
 
     try:
-        # ── 2. 페이지 획득 ──
-        page = get_existing_page(conn.browser)
+        # ── 2. 페이지 획득 (URL 기반 — React UI 회피) ──
+        page = find_vendor_page(conn.browser)
+        if page is None:
+            page = get_existing_page(conn.browser)
         _clean_modal_backdrops(page)
         _step_log("PAGE_ACQUIRE", "OK", f"URL: {page.url}")
 
@@ -690,10 +536,11 @@ def main():
             send_progress(25, "로그인 완료")
             check_session_and_log(page)
 
-        # ── 4. PO SKU 목록 페이지 이동 ──
-        _step_log("NAVIGATE", "START", _get_po_url())
+        # ── 4. PO SKU 목록 페이지 이동 (필터 query 포함 URL) ──
+        po_url = _build_po_list_url(date_from, date_to)
+        _step_log("NAVIGATE", "START", po_url)
         send_progress(30, "PO 목록 페이지 이동 중")
-        if not _navigate_to_po_list(page):
+        if not _navigate_to_po_list(page, po_url):
             if _config["skip_login"]:
                 _step_log("NAVIGATE", "FAIL", "PO 목록 페이지 이동 실패")
                 send_error("PO 목록 페이지 이동 최종 실패")
@@ -701,7 +548,7 @@ def main():
             # 세션 만료 시 재로그인 후 재시도
             send_log("PO 페이지 이동 실패 — 재로그인 후 재시도")
             if ensure_logged_in(page, vendor_id):
-                if not _navigate_to_po_list(page):
+                if not _navigate_to_po_list(page, po_url):
                     _step_log("NAVIGATE", "FAIL", "재시도 실패")
                     send_error("PO 목록 페이지 이동 최종 실패")
                     sys.exit(1)
@@ -711,34 +558,40 @@ def main():
                 sys.exit(1)
 
         _step_log("NAVIGATE", "OK", page.url)
-        send_progress(40, "PO 목록 페이지 도달")
-
-        # ── 5. 필터 설정 ──
-        _step_log("FILTER", "START", f"{date_from} ~ {date_to}")
-        send_progress(45, "필터 설정 중")
-        _set_date_filter(page, date_from, date_to)
-        _step_log("FILTER", "OK")
-
-        # ── 6. 검색 실행 ──
-        _step_log("SEARCH", "START")
-        send_progress(50, "검색 실행 중")
-        _click_search(page)
+        send_progress(45, "PO 목록 페이지 도달")
         _clean_modal_backdrops(page)
-        _step_log("SEARCH", "OK")
 
-        # ── 7. 다운로드 시도 ──
+        # ── 5. 빈 결과 감지 — 검색 결과 0건이면 다운로드 단계 건너뛴다 ──
+        # 페이지 안정화 잠시 대기 (결과 마커는 #selectDownloadButton 보다 먼저
+        # 렌더링되는 경우가 많음)
+        page.wait_for_timeout(800)
+        if _is_empty_result(page):
+            _step_log("EMPTY", "OK", f"{date_from} ~ {date_to}: 검색 결과 없음")
+            send_progress(100, "검색 결과 없음")
+            result = {
+                "success": True,
+                "empty": True,
+                "vendor": vendor_id,
+                "dateFrom": date_from,
+                "dateTo": date_to,
+            }
+            send({"type": "result", "data": json.dumps(result, ensure_ascii=False)})
+            send_log(f"[PO Download] 검색 결과 없음 ({date_from} ~ {date_to})")
+            send_log("=" * 60)
+            return  # finally 블록에서 CDP 정리
+
+        # ── 6. 다운로드: #selectDownloadButton → #down-all → CSV 캡처 ──
         _step_log("DOWNLOAD", "START")
-        send_progress(60, "다운로드 시도 중")
+        send_progress(55, "다운로드 시도 중")
 
         saved_path = None
-        download = _click_download(page)
+        download = _download_csv(page)
 
         if download:
-            send_progress(70, "다운로드 대기 중")
+            send_progress(75, "파일 다운로드 대기 중")
             tmp_path = _poll_download_complete(download)
-
             if tmp_path:
-                send_progress(85, "파일 저장 중")
+                send_progress(90, "파일 저장 중")
                 saved_path = _save_download(tmp_path, data_dir, vendor_id)
                 if saved_path:
                     _step_log("DOWNLOAD", "OK", f"저장: {saved_path}")
@@ -748,28 +601,7 @@ def main():
             else:
                 _step_log("DOWNLOAD", "FAIL", "다운로드 완료 대기 실패")
         else:
-            _step_log("DOWNLOAD", "FAIL", "다운로드 버튼 미발견")
-            send_log("다운로드 버튼 미발견 — 테이블 데이터 직접 추출 시도")
-
-        # ── 8. 폴백: 테이블 데이터 직접 추출 ──
-        if not saved_path:
-            _step_log("EXTRACT", "START")
-            send_progress(75, "테이블 데이터 추출 중")
-            rows = _extract_table_data(page)
-            if rows:
-                send_progress(85, "추출 데이터 저장 중")
-                saved_path = _save_extracted_data(rows, data_dir, vendor_id)
-                if saved_path:
-                    _step_log("EXTRACT", "OK", f"저장: {saved_path}")
-                    _step_log("SAVE", "OK", saved_path)
-                else:
-                    _step_log("EXTRACT", "FAIL", "추출 데이터 저장 실패")
-            else:
-                _step_log("EXTRACT", "FAIL", "테이블 데이터 없음")
-                send_error(
-                    "다운로드와 테이블 추출 모두 실패했습니다. "
-                    "페이지에 데이터가 없거나 셀렉터가 변경되었을 수 있습니다."
-                )
+            _step_log("DOWNLOAD", "FAIL", "다운로드 트리거 실패")
 
         # ── 9. 결과 출력 ──
         _step_log("RESULT", "START")

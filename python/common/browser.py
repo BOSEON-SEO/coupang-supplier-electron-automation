@@ -276,7 +276,7 @@ def find_vendor_page(browser):
             return page
 
     # 2순위: Keycloak 로그인 페이지
-    keycloak_hosts = ["login.coupang.com", "sso.coupang.com"]
+    keycloak_hosts = ["login.coupang.com", "sso.coupang.com", "xauth.coupang.com"]
     for page, url in all_pages:
         parsed = urlparse(url)
         if parsed.hostname in keycloak_hosts:
