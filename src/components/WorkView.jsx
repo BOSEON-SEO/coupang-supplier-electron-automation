@@ -44,7 +44,7 @@ const SESSION_STATUS = {
   ERROR: 'error',
 };
 
-export default function WorkView({ vendor }) {
+export default function WorkView({ vendor, job }) {
   // ── 데이터 상태 ──
   const [rows, setRows] = useState([]);
   const [logs, setLogs] = useState([
@@ -60,10 +60,6 @@ export default function WorkView({ vendor }) {
   const [logOpen, setLogOpen] = useState(() => {
     try { return window.localStorage?.getItem('coupang-supplier:logOpen') === 'true'; }
     catch { return false; }
-  });
-  const [workDate, setWorkDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
 
   // ── Refs ──
@@ -490,32 +486,29 @@ export default function WorkView({ vendor }) {
     appendLog('info', `${format === 'integrated' ? '통합' : '쿠팡'} 양식 저장: ${fileName}`);
   }, [vendor, rows, appendLog]);
 
-  // ── PO 다운로드 실행 ──
-  const handlePoDownload = useCallback(async () => {
-    if (!vendor) {
-      appendLog('warn', '벤더를 먼저 선택해주세요.');
-      return;
-    }
-    if (!workDate) {
-      appendLog('warn', '작업 일시를 선택해주세요.');
+  // ── PO 갱신 (현재 job 의 date/vendor/sequence 로 재다운로드) ──
+  const handlePoRefresh = useCallback(async () => {
+    if (!job) {
+      appendLog('warn', '활성 작업이 없습니다. 달력에서 작업을 선택하세요.');
       return;
     }
     const api = window.electronAPI;
     if (!api) return;
 
-    appendLog('info', `PO 다운로드 시작: 벤더 '${vendor}', 일자 ${workDate}`);
+    appendLog('info', `PO 갱신 시작: ${job.date} · ${job.vendor} · ${job.sequence}차`);
     const res = await api.runPython('scripts/po_download.py', [
-      '--vendor', vendor,
-      '--date-from', workDate,
-      '--date-to', workDate,
+      '--vendor', job.vendor,
+      '--date-from', job.date,
+      '--date-to', job.date,
+      '--sequence', String(job.sequence),
     ]);
     if (res.success) {
       setPythonRunning(true);
-      appendLog('info', `PO 다운로드 프로세스 시작됨 (pid=${res.pid})`);
+      appendLog('info', `PO 갱신 프로세스 시작됨 (pid=${res.pid})`);
     } else {
-      appendLog('error', `PO 다운로드 실행 실패: ${res.error}`);
+      appendLog('error', `PO 갱신 실행 실패: ${res.error}`);
     }
-  }, [vendor, workDate, appendLog]);
+  }, [job, appendLog]);
 
   // ── Python 실행 취소 ──
   const handleCancelPython = useCallback(async () => {
@@ -565,73 +558,18 @@ export default function WorkView({ vendor }) {
   return (
     <div className="workview-container">
       <div className="workview-toolbar">
-        {/* ── 작업 일시 선택 ── */}
-        <label className="workview-toolbar__date">
-          <span className="workview-toolbar__date-label">작업 일시</span>
-          <input
-            type="date"
-            value={workDate}
-            onChange={(e) => setWorkDate(e.target.value)}
-            disabled={pythonRunning}
-          />
-        </label>
-
-        {/* ── PO 다운로드 버튼 ── */}
         <button
           className="btn btn--primary"
-          onClick={() => requestDangerous('PO SKU 다운로드', handlePoDownload)}
+          onClick={() => requestDangerous('PO 갱신', handlePoRefresh)}
           type="button"
-          disabled={!vendor || pythonRunning}
+          disabled={!job || pythonRunning}
+          title={!job ? '활성 작업 없음' : `${job.date} · ${job.vendor} · ${job.sequence}차 PO 재다운로드`}
         >
-          📦 PO 다운로드
+          🔄 PO 갱신
         </button>
 
-        <button
-          className="btn btn--secondary"
-          onClick={() => requestDangerous('쿠팡 양식 저장', () => saveAs('coupang'))}
-          type="button"
-          disabled={!vendor || rows.length === 0}
-        >
-          📥 쿠팡 양식 저장
-        </button>
-        <button
-          className="btn btn--secondary"
-          onClick={() => requestDangerous('통합 양식 저장', () => saveAs('integrated'))}
-          type="button"
-          disabled={!vendor || rows.length === 0}
-        >
-          📥 통합 양식 저장
-        </button>
-
-        <span className="workview-toolbar__separator" />
-
-        {/* ── 세션 배지 ── */}
-        <button
-          className={`session-badge session-badge--${loginStatus}`}
-          onClick={() => checkSessionStatus(false)}
-          type="button"
-          disabled={loginScriptRunning}
-          title="클릭하여 세션 상태 확인"
-        >
-          {loginStatus === SESSION_STATUS.VALID && '● 세션 유효'}
-          {loginStatus === SESSION_STATUS.EXPIRED && '○ 미로그인'}
-          {loginStatus === SESSION_STATUS.LOGGING_IN && '◌ 로그인 중...'}
-          {loginStatus === SESSION_STATUS.CHECKING && '◌ 확인 중...'}
-          {loginStatus === SESSION_STATUS.ERROR && '✕ 로그인 오류'}
-          {loginStatus === SESSION_STATUS.UNKNOWN && '— 상태 미확인'}
-        </button>
-
-        {/* ── 자격증명 경고 ── */}
-        {vendor && credentialStatus && (!credentialStatus.hasId || !credentialStatus.hasPassword) && (
-          <span className="credential-warning" title={`환경변수를 설정하세요: ${credentialStatus.envIdKey}, ${credentialStatus.envPwKey}`}>
-            ⚠ 자격증명 미설정
-          </span>
-        )}
-
-        {/* Python 실행 중일 때만 취소 버튼 노출 (PO 다운로드/로그인 등 진행 중) */}
         {pythonRunning && (
           <>
-            <span className="workview-toolbar__separator" />
             <button
               className="btn btn--danger btn--cancel-python"
               onClick={handleCancelPython}
@@ -639,22 +577,11 @@ export default function WorkView({ vendor }) {
             >
               ⏹ 실행 취소
             </button>
+            <span className="python-status python-status--running">● 실행 중</span>
           </>
         )}
 
         <div className="workview-toolbar__spacer" />
-
-        {pythonRunning && (
-          <span className="python-status python-status--running">● 실행 중</span>
-        )}
-
-        {dirty && (
-          <span className="save-indicator save-indicator--dirty">● 미저장</span>
-        )}
-
-        <span className="workview-toolbar__status">
-          {statusText}
-        </span>
       </div>
 
       <div className="workview-table-section">

@@ -67,6 +67,19 @@ function ensureWebView(vendorId) {
   wcv.setBounds(webViewVisible ? webViewBounds : { x: 0, y: 0, width: 0, height: 0 });
   wcv.webContents.loadURL(COUPANG_HOME_URL);
 
+  // 다운로드 발생 시 OS 저장 대화상자 / Chromium 다운로드 바 등장을 막는다.
+  // 임시 디렉토리로 자동 저장 — Playwright 가 expect_download + download.save_as 로
+  // 최종 위치(데이터 폴더)로 옮겨 적기 때문에 여기서는 임시 경로면 충분하다.
+  wcv.webContents.session.on('will-download', (_event, item) => {
+    try {
+      const filename = item.getFilename() || `download-${Date.now()}`;
+      const tmpPath = path.join(os.tmpdir(), `coupang-wcv-${Date.now()}-${filename}`);
+      item.setSavePath(tmpPath);
+    } catch {
+      // setSavePath 실패 — 무시 (Playwright 가 CDP 로 별도 처리 가능)
+    }
+  });
+
   // URL 변경 이벤트를 Renderer 의 주소창에 전달
   const notifyUrl = (url) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

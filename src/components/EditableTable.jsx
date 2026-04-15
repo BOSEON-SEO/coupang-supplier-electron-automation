@@ -36,9 +36,7 @@ export default function EditableTable({ columns, rows, onCellChange }) {
               <td
                 colSpan={columns.length + 1}
                 className="editable-table__empty"
-              >
-                데이터가 없습니다. PO 다운로드를 실행해주세요.
-              </td>
+              >&nbsp;</td>
             </tr>
           ) : (
             rows.map((row, rowIndex) => (
