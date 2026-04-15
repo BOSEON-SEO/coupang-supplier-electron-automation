@@ -57,6 +57,14 @@ export default function WorkView({ vendor }) {
   const [pythonRunning, setPythonRunning] = useState(false);
   const [loginStatus, setLoginStatus] = useState(SESSION_STATUS.UNKNOWN);
   const [loginScriptRunning, setLoginScriptRunning] = useState(false);
+  const [logOpen, setLogOpen] = useState(() => {
+    try { return window.localStorage?.getItem('coupang-supplier:logOpen') === 'true'; }
+    catch { return false; }
+  });
+  const [workDate, setWorkDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
 
   // ── Refs ──
   const cleanupRef = useRef([]);
@@ -435,10 +443,13 @@ export default function WorkView({ vendor }) {
     }
   }, [vendor, appendLog]);
 
-  const handleLogin = useCallback(async (forceRelogin = false) => {
-    autoLoginTriggeredRef.current = true;
-    await handleLoginInternal(forceRelogin);
-  }, [handleLoginInternal]);
+  // ── 카운트다운 모달 열림/닫힘 시 WCV 숨김/표시 ──
+  // WCV는 native overlay라 React 모달이 가려진다.
+  useEffect(() => {
+    const api = window.electronAPI?.webview;
+    if (!api) return;
+    api.setVisible(!pendingAction);
+  }, [pendingAction]);
 
   // ── 셀 변경 + 자동 저장 트리거 ──
   const handleCellChange = useCallback((rowIndex, columnKey, newValue) => {
@@ -485,33 +496,28 @@ export default function WorkView({ vendor }) {
       appendLog('warn', '벤더를 먼저 선택해주세요.');
       return;
     }
+    if (!workDate) {
+      appendLog('warn', '작업 일시를 선택해주세요.');
+      return;
+    }
     const api = window.electronAPI;
     if (!api) return;
 
-    appendLog('info', `PO 다운로드 시작: 벤더 '${vendor}'`);
-    const res = await api.runPython('scripts/po_download.py', ['--vendor', vendor]);
+    appendLog('info', `PO 다운로드 시작: 벤더 '${vendor}', 일자 ${workDate}`);
+    const res = await api.runPython('scripts/po_download.py', [
+      '--vendor', vendor,
+      '--date-from', workDate,
+      '--date-to', workDate,
+    ]);
     if (res.success) {
       setPythonRunning(true);
       appendLog('info', `PO 다운로드 프로세스 시작됨 (pid=${res.pid})`);
     } else {
       appendLog('error', `PO 다운로드 실행 실패: ${res.error}`);
     }
-  }, [vendor, appendLog]);
+  }, [vendor, workDate, appendLog]);
 
-  // ── Python 실행/취소 (범용) ──
-  const handleRunPython = useCallback(async (scriptName, args) => {
-    const api = window.electronAPI;
-    if (!api) return;
-    appendLog('info', `Python 실행 요청: ${scriptName}`);
-    const res = await api.runPython(scriptName, args || []);
-    if (res.success) {
-      setPythonRunning(true);
-      appendLog('info', `Python 프로세스 시작됨 (pid=${res.pid})`);
-    } else {
-      appendLog('error', `Python 실행 실패: ${res.error}`);
-    }
-  }, [appendLog]);
-
+  // ── Python 실행 취소 ──
   const handleCancelPython = useCallback(async () => {
     const api = window.electronAPI;
     if (!api) return;
@@ -559,6 +565,17 @@ export default function WorkView({ vendor }) {
   return (
     <div className="workview-container">
       <div className="workview-toolbar">
+        {/* ── 작업 일시 선택 ── */}
+        <label className="workview-toolbar__date">
+          <span className="workview-toolbar__date-label">작업 일시</span>
+          <input
+            type="date"
+            value={workDate}
+            onChange={(e) => setWorkDate(e.target.value)}
+            disabled={pythonRunning}
+          />
+        </label>
+
         {/* ── PO 다운로드 버튼 ── */}
         <button
           className="btn btn--primary"
@@ -588,33 +605,6 @@ export default function WorkView({ vendor }) {
 
         <span className="workview-toolbar__separator" />
 
-        {/* ── 로그인 버튼 ── */}
-        {!loginScriptRunning ? (
-          <button
-            className="btn btn--login"
-            onClick={() => handleLogin(false)}
-            type="button"
-            disabled={!vendor || pythonRunning || (credentialStatus && (!credentialStatus.hasId || !credentialStatus.hasPassword))}
-            title={
-              !vendor ? '벤더를 먼저 선택하세요'
-                : credentialStatus && !credentialStatus.hasId ? `환경변수 ${credentialStatus.envIdKey} 미설정`
-                : credentialStatus && !credentialStatus.hasPassword ? `환경변수 ${credentialStatus.envPwKey} 미설정`
-                : pythonRunning ? 'Python 실행 중'
-                : '쿠팡 서플라이어 로그인'
-            }
-          >
-            🔑 로그인
-          </button>
-        ) : (
-          <button
-            className="btn btn--danger btn--cancel-python"
-            onClick={handleCancelPython}
-            type="button"
-          >
-            ⏹ 로그인 취소
-          </button>
-        )}
-
         {/* ── 세션 배지 ── */}
         <button
           className={`session-badge session-badge--${loginStatus}`}
@@ -638,24 +628,18 @@ export default function WorkView({ vendor }) {
           </span>
         )}
 
-        <span className="workview-toolbar__separator" />
-
-        {!pythonRunning ? (
-          <button
-            className="btn btn--primary btn--run-python"
-            onClick={() => handleRunPython('echo_test.py', ['--steps', '5', '--delay', '0.3'])}
-            type="button"
-          >
-            ▶ Python 실행
-          </button>
-        ) : (
-          <button
-            className="btn btn--danger btn--cancel-python"
-            onClick={handleCancelPython}
-            type="button"
-          >
-            ⏹ Python 취소
-          </button>
+        {/* Python 실행 중일 때만 취소 버튼 노출 (PO 다운로드/로그인 등 진행 중) */}
+        {pythonRunning && (
+          <>
+            <span className="workview-toolbar__separator" />
+            <button
+              className="btn btn--danger btn--cancel-python"
+              onClick={handleCancelPython}
+              type="button"
+            >
+              ⏹ 실행 취소
+            </button>
+          </>
         )}
 
         <div className="workview-toolbar__spacer" />
@@ -681,8 +665,27 @@ export default function WorkView({ vendor }) {
         />
       </div>
 
-      <div className="workview-log-section">
-        <LogPanel logs={logs} />
+      <div className={`workview-log-accordion${logOpen ? ' workview-log-accordion--open' : ''}`}>
+        <button
+          type="button"
+          className="workview-log-bar"
+          onClick={() => {
+            setLogOpen((o) => {
+              const next = !o;
+              try { window.localStorage?.setItem('coupang-supplier:logOpen', String(next)); } catch { /* 무시 */ }
+              return next;
+            });
+          }}
+          aria-expanded={logOpen}
+        >
+          <span>📋 작업 로그 <span className="workview-log-bar__count">({logs.length})</span></span>
+          <span className="workview-log-bar__chev">{logOpen ? '▼' : '▲'}</span>
+        </button>
+        {logOpen && (
+          <div className="workview-log-section">
+            <LogPanel logs={logs} hideHeader />
+          </div>
+        )}
       </div>
 
       {pendingAction && (

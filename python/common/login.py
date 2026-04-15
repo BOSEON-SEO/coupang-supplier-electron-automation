@@ -39,10 +39,15 @@ from common.ipc import send_log, send_error, send_progress
 
 # ─── 상수 ────────────────────────────────────────────────────────
 
-# Keycloak 로그인 폼 셀렉터 (쿠팡 서플라이어 허브 공통)
-SEL_USERNAME = "#username"
-SEL_PASSWORD = "#password"
-SEL_LOGIN_BTN = "#kc-login"
+# 쿠팡 supplier-hub 로그인 폼은 Keycloak 기본 페이지를 customize한 형태:
+#   <form class="re-login-form">
+#     <input type="text"     name="username" ...>   ← id 속성 없음
+#     <input type="password" name="password" ...>   ← id 속성 없음
+#     <button type="submit" class="btn btn-primary">로그인</button>
+# Keycloak 표준 #username/#password/#kc-login 셀렉터가 아닌 name 기반 사용.
+SEL_USERNAME = 'form.re-login-form input[name="username"]'
+SEL_PASSWORD = 'form.re-login-form input[name="password"]'
+SEL_LOGIN_BTN = 'form.re-login-form button[type="submit"]'
 
 # 비밀번호 만료 모달 — "나중에 변경하기" 버튼
 # Keycloak은 로케일에 따라 텍스트가 달라지므로 영문·한글 모두 매칭
@@ -64,6 +69,7 @@ KEYCLOAK_URL_PATTERNS = [
 KEYCLOAK_HOSTS = [
     "login.coupang.com",
     "sso.coupang.com",
+    "xauth.coupang.com",  # supplier-hub realm: xauth.coupang.com/auth/realms/seller/...
 ]
 
 # 세션 유효 판단 도메인

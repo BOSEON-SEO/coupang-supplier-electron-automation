@@ -31,6 +31,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCredentials: (vendorId) => ipcRenderer.invoke('credentials:delete', vendorId),
   checkSession: () => ipcRenderer.invoke('session:check'),
 
+  // ── 웹 뷰 (WebContentsView) ──
+  webview: {
+    setVendor: (vendorId) => ipcRenderer.invoke('webview:setVendor', vendorId),
+    setBounds: (bounds) => ipcRenderer.invoke('webview:setBounds', bounds),
+    setVisible: (visible) => ipcRenderer.invoke('webview:setVisible', visible),
+    navigate: (url) => ipcRenderer.invoke('webview:navigate', url),
+    reload: () => ipcRenderer.invoke('webview:reload'),
+    getUrl: () => ipcRenderer.invoke('webview:getUrl'),
+    onUrlChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('webview:url-changed', handler);
+      return () => ipcRenderer.removeListener('webview:url-changed', handler);
+    },
+  },
+
   // ── 위험 동작 ──
   confirmDangerous: (actionName) => ipcRenderer.invoke('action:confirmDangerous', actionName),
 
