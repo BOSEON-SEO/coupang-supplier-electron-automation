@@ -10,6 +10,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
+const { safeStorage } = require('electron');
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -129,12 +130,70 @@ let activeProcessId = 0; // 고유 실행 ID
 
 function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
+  const CREDENTIALS_PATH = path.join(dataDir, 'credentials.enc');
   const SCRIPTS_DIR = path.join(__dirname, 'python');
   // CDP 포트: main.js에서 주입, 없으면 환경변수/기본값 사용
   const _cdpPort = cdpPort || parseInt(process.env.CDP_PORT, 10) || 9222;
 
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  // ── 자격증명 저장소 (safeStorage 암호화) ──────────────────────
+  // 파일 포맷:
+  //   {
+  //     "schemaVersion": 1,
+  //     "entries": {
+  //       "<vendorId>": { "id": "<base64(encrypted)>", "pw": "<base64(encrypted)>" }
+  //     }
+  //   }
+  // 암호화는 Electron safeStorage: Windows DPAPI / macOS Keychain / Linux libsecret.
+  function loadCredentialStore() {
+    try {
+      if (!fs.existsSync(CREDENTIALS_PATH)) return { schemaVersion: 1, entries: {} };
+      const raw = fs.readFileSync(CREDENTIALS_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (!parsed.entries || typeof parsed.entries !== 'object') parsed.entries = {};
+      return parsed;
+    } catch {
+      return { schemaVersion: 1, entries: {} };
+    }
+  }
+
+  function saveCredentialStore(store) {
+    fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(store, null, 2), 'utf-8');
+  }
+
+  function encryptToBase64(plaintext) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('OS encryption (safeStorage) not available');
+    }
+    const buf = safeStorage.encryptString(String(plaintext));
+    return buf.toString('base64');
+  }
+
+  function decryptFromBase64(b64) {
+    try {
+      const buf = Buffer.from(b64, 'base64');
+      return safeStorage.decryptString(buf);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 특정 벤더의 암호화된 자격증명을 복호화해 평문으로 반환한다.
+   * Main 프로세스 내부에서만 사용 (Python subprocess 주입용).
+   * Renderer에는 절대 평문 password를 노출하지 않는다.
+   */
+  function getCredentialFor(vendorId) {
+    const store = loadCredentialStore();
+    const entry = store.entries?.[vendorId];
+    if (!entry) return { id: null, password: null };
+    return {
+      id: entry.id ? decryptFromBase64(entry.id) : null,
+      password: entry.pw ? decryptFromBase64(entry.pw) : null,
+    };
   }
 
   // ── 헬퍼: Renderer로 이벤트 전송 ──
@@ -289,17 +348,22 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
     const safeArgs = Array.isArray(args) ? args.map(String) : [];
 
     // ── 벤더별 자격증명 환경변수 추출 ──
-    // --vendor 인자가 있으면 해당 벤더의 COUPANG_ID_{VENDOR}, COUPANG_PW_{VENDOR}를
-    // subprocess 환경에 명시적으로 전달한다.
+    // 우선순위: safeStorage(credentials.enc) → 환경변수(COUPANG_ID_/PW_{VENDOR}) 폴백.
+    // Python 스크립트에는 항상 env 변수 형태로 주입 (기존 인터페이스 유지).
     const vendorEnv = {};
     const vendorIdx = safeArgs.indexOf('--vendor');
     if (vendorIdx !== -1 && vendorIdx + 1 < safeArgs.length) {
-      const vid = safeArgs[vendorIdx + 1].toUpperCase();
+      const vendorIdRaw = safeArgs[vendorIdx + 1];
+      const vid = vendorIdRaw.toUpperCase();
       const idKey = `COUPANG_ID_${vid}`;
       const pwKey = `COUPANG_PW_${vid}`;
-      if (process.env[idKey]) vendorEnv[idKey] = process.env[idKey];
-      if (process.env[pwKey]) vendorEnv[pwKey] = process.env[pwKey];
-      vendorEnv.COUPANG_VENDOR_ID = safeArgs[vendorIdx + 1];
+
+      const stored = getCredentialFor(vendorIdRaw);
+      const idVal = stored.id || process.env[idKey];
+      const pwVal = stored.password || process.env[pwKey];
+      if (idVal) vendorEnv[idKey] = idVal;
+      if (pwVal) vendorEnv[pwKey] = pwVal;
+      vendorEnv.COUPANG_VENDOR_ID = vendorIdRaw;
     }
 
     // ── subprocess 실행 ──

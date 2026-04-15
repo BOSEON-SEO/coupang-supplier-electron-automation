@@ -158,11 +158,8 @@ npm start
 - Electron 창이 열림
 - 상단에 **탭 네비게이션**: "웹 뷰" / "작업 뷰"
 - **벤더 선택 드롭다운**이 표시됨
-- 콘솔 로그 (DevTools):
-  ```
-  [Main] CDP port: 9222
-  [Main] Data dir: C:\Users\{username}\AppData\Local\CoupangAutomation
-  ```
+- DevTools (Ctrl+Shift+I → Console 탭)가 자동으로 열림 (개발 모드)
+- 앱 타이틀 바에 **"쿠팡 서플라이어 자동화"** 표시
 
 ### 예상 오류 및 트러블슈팅
 
@@ -444,8 +441,9 @@ dir "$env:LOCALAPPDATA\CoupangAutomation\basic-20260415-*.xlsx"
 
 # 2. 최신 파일 내용 검증 (Python으로)
 python -c "
-import openpyxl, json
-wb = openpyxl.load_workbook(r'$env:LOCALAPPDATA\CoupangAutomation\basic-20260415-03.xlsx')
+import os, openpyxl
+data_dir = os.path.join(os.environ['LOCALAPPDATA'], 'CoupangAutomation')
+wb = openpyxl.load_workbook(os.path.join(data_dir, 'basic-20260415-03.xlsx'))
 print('시트 목록:', wb.sheetnames)
 
 # data 시트
