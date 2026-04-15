@@ -44,11 +44,15 @@ body {
   color: #fff;
   padding: 12px 20px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .app-title {
   font-size: 18px;
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .app-main {
@@ -116,6 +120,314 @@ body {
 
 .btn--secondary:hover {
   background: var(--color-bg);
+}
+
+.btn--danger {
+  background: var(--color-danger);
+  color: #fff;
+  border-color: var(--color-danger);
+}
+
+.btn--danger:hover {
+  background: #b5281f;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 벤더 선택 ────────────────────────────────────────────── */
+.vendor-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.vendor-selector__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.vendor-selector__select {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 13px;
+  min-width: 180px;
+  cursor: pointer;
+}
+
+.vendor-selector__select:focus {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.vendor-selector__select option {
+  color: var(--color-text);
+  background: #fff;
+}
+
+.vendor-selector__add {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.vendor-selector__add:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ── 모달 (공통) ─────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-surface);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  min-width: 360px;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal__title {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal__body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal__footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal__error {
+  color: var(--color-danger);
+  font-size: 13px;
+  background: rgba(217, 48, 37, 0.08);
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-row label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.form-row input {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.form-row input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
+}
+
+/* ── 카운트다운 모달 ─────────────────────────────────────── */
+.modal--countdown {
+  min-width: 380px;
+}
+
+.countdown__action {
+  text-align: center;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.countdown__number {
+  text-align: center;
+  font-size: 72px;
+  font-weight: 700;
+  color: var(--color-danger);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown__bar {
+  height: 6px;
+  background: var(--color-bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.countdown__bar-fill {
+  height: 100%;
+  background: var(--color-danger);
+  transition: width 0.3s ease-out;
+}
+
+.countdown__help {
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* ── 작업 뷰 툴바 확장 ───────────────────────────────────── */
+.workview-toolbar__spacer {
+  flex: 1;
+}
+
+.workview-toolbar__separator {
+  width: 1px;
+  height: 24px;
+  background: var(--color-border);
+  align-self: center;
+  margin: 0 4px;
+}
+
+.workview-toolbar__status {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-family: 'Consolas', 'D2Coding', monospace;
+}
+
+/* ── Python 상태 표시 ────────────────────────────────────── */
+.python-status {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  align-self: center;
+}
+
+.python-status--running {
+  color: var(--color-success);
+  background: rgba(30, 142, 62, 0.1);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── 저장 상태 표시 ───────────────────────────────────── */
+.save-indicator {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.save-indicator--dirty {
+  color: var(--color-warning);
+  background: rgba(249, 171, 0, 0.12);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* ── 로그인 버튼 ─────────────────────────────────────────── */
+.btn--login {
+  background: #6d28d9;
+  color: #fff;
+  border-color: #6d28d9;
+}
+
+.btn--login:hover:not(:disabled) {
+  background: #5b21b6;
+}
+
+/* ── 세션 상태 배지 ──────────────────────────────────────── */
+.session-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 10px;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.session-badge--valid {
+  color: var(--color-success);
+  background: rgba(30, 142, 62, 0.1);
+}
+
+.session-badge--expired {
+  color: var(--color-text-muted);
+  background: rgba(95, 99, 104, 0.1);
+}
+
+.session-badge--logging_in,
+.session-badge--checking {
+  color: var(--color-primary);
+  background: rgba(26, 115, 232, 0.1);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+.session-badge--error {
+  color: var(--color-danger);
+  background: rgba(217, 48, 37, 0.08);
+}
+
+.session-badge--unknown {
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
+/* 배지를 버튼으로 사용할 때 */
+button.session-badge {
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+button.session-badge:hover:not(:disabled) {
+  border-color: var(--color-border);
+}
+
+button.session-badge:disabled {
+  cursor: default;
+}
+
+/* ── 자격증명 경고 ──────────────────────────────────────── */
+.credential-warning {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-warning);
+  background: rgba(249, 171, 0, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  align-self: center;
+  white-space: nowrap;
+  cursor: help;
 }
 
 /* ── 웹 뷰 ───────────────────────────────────────────────── */

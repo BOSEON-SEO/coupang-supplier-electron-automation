@@ -15,9 +15,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fileExists: (filePath) => ipcRenderer.invoke('file:exists', filePath),
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   writeFile: (filePath, buffer) => ipcRenderer.invoke('file:write', filePath, buffer),
+  listVendorFiles: (vendorId) => ipcRenderer.invoke('file:listVendorFiles', vendorId),
+  resolveVendorPath: (fileName) => ipcRenderer.invoke('file:resolveVendorPath', fileName),
 
   // ── Python subprocess ──
   runPython: (scriptName, args) => ipcRenderer.invoke('python:run', scriptName, args),
+  cancelPython: () => ipcRenderer.invoke('python:cancel'),
+  pythonStatus: () => ipcRenderer.invoke('python:status'),
+  detectPythonPath: () => ipcRenderer.invoke('python:detectPath'),
+
+  // ── 자격증명·세션 관리 ──
+  checkCredentials: (vendorId) => ipcRenderer.invoke('credentials:check', vendorId),
+  checkSession: () => ipcRenderer.invoke('session:check'),
 
   // ── 위험 동작 ──
   confirmDangerous: (actionName) => ipcRenderer.invoke('action:confirmDangerous', actionName),
@@ -39,5 +48,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('python:error', handler);
     return () => ipcRenderer.removeListener('python:error', handler);
+  },
+
+  onPythonDone: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('python:done', handler);
+    return () => ipcRenderer.removeListener('python:done', handler);
   },
 });

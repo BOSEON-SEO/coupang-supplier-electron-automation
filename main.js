@@ -2,6 +2,13 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { registerIpcHandlers } = require('./ipc-handlers');
+
+// ── CDP 원격 디버깅 포트 ────────────────────────────────────
+// Playwright가 connect_over_cdp()로 attach하기 위한 엔드포인트.
+// 환경변수 CDP_PORT로 오버라이드 가능 (기본: 9222).
+const CDP_PORT = parseInt(process.env.CDP_PORT, 10) || 9222;
+app.commandLine.appendSwitch('remote-debugging-port', String(CDP_PORT));
 
 // ── 경로 상수 ──────────────────────────────────────────────
 const DATA_DIR = path.join(
@@ -10,9 +17,7 @@ const DATA_DIR = path.join(
   'Local',
   'CoupangAutomation'
 );
-const VENDORS_PATH = path.join(DATA_DIR, 'vendors.json');
 
-// 데이터 디렉토리 보장
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
@@ -35,10 +40,8 @@ function createWindow() {
     title: '쿠팡 서플라이어 자동화',
   });
 
-  // 개발 모드: webpack-dev-server / 프로덕션: 빌드된 파일
   const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
   if (isDev) {
-    // webpack-dev-server가 실행 중이면 연결, 아니면 빌드된 파일로 폴백
     const http = require('http');
     const devUrl = 'http://localhost:3000';
     const checkDevServer = () => new Promise((resolve) => {
@@ -63,7 +66,15 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  registerIpcHandlers({
+    ipcMain,
+    getWindow: () => mainWindow,
+    dataDir: DATA_DIR,
+    cdpPort: CDP_PORT,
+  });
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   app.quit();
@@ -73,68 +84,4 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
-});
-
-// ── IPC 핸들러: 벤더 관리 ──────────────────────────────────
-ipcMain.handle('vendors:load', async () => {
-  try {
-    if (!fs.existsSync(VENDORS_PATH)) {
-      const defaults = { schemaVersion: 1, vendors: [] };
-      fs.writeFileSync(VENDORS_PATH, JSON.stringify(defaults, null, 2), 'utf-8');
-      return defaults;
-    }
-    const raw = fs.readFileSync(VENDORS_PATH, 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    return { schemaVersion: 1, vendors: [], error: err.message };
-  }
-});
-
-ipcMain.handle('vendors:save', async (_event, data) => {
-  try {
-    fs.writeFileSync(VENDORS_PATH, JSON.stringify(data, null, 2), 'utf-8');
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-// ── IPC 핸들러: 파일 I/O ──────────────────────────────────
-ipcMain.handle('file:getDataDir', async () => DATA_DIR);
-
-ipcMain.handle('file:exists', async (_event, filePath) => {
-  return fs.existsSync(filePath);
-});
-
-ipcMain.handle('file:read', async (_event, filePath) => {
-  try {
-    const buf = fs.readFileSync(filePath);
-    return { data: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('file:write', async (_event, filePath, buffer) => {
-  try {
-    fs.writeFileSync(filePath, Buffer.from(buffer));
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-// ── IPC 핸들러: Python subprocess (Phase 1 스텁) ──────────
-ipcMain.handle('python:run', async (_event, scriptName, args) => {
-  // TODO: Phase 1에서 child_process.spawn으로 Python 스크립트 실행
-  // stdout/stderr를 renderer로 스트리밍
-  return { success: false, error: 'Python bridge not yet implemented' };
-});
-
-// ── IPC 핸들러: 위험 동작 카운트다운 확인 ──────────────────
-ipcMain.handle('action:confirmDangerous', async (_event, actionName) => {
-  // Renderer에서 3초 카운트다운 UI를 표시하고 결과를 반환
-  // 여기서는 Renderer → Main 확인 흐름의 엔드포인트
-  mainWindow?.webContents.send('action:countdown', { actionName });
-  return { acknowledged: true };
 });

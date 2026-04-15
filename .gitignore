@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+python/.venv/
 node_modules/
 .env
 .env.*
@@ -10,3 +11,4 @@ node_modules/
 .idea/
 dist/
 build/
+.test-tmp-*
