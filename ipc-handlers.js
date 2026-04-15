@@ -16,6 +16,52 @@ function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// ── Job 폴더 헬퍼 (date/vendor/seq) ──────────────────────────
+const JOB_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const JOB_VENDOR_RE = /^[a-z0-9_]{2,20}$/;
+const JOB_SEQ_RE = /^\d{2}$/;
+
+function isValidDate(s) { return typeof s === 'string' && JOB_DATE_RE.test(s); }
+function isValidVendor(s) { return typeof s === 'string' && JOB_VENDOR_RE.test(s); }
+function isValidSeq(n) {
+  return Number.isInteger(n) && n >= 1 && n <= 99;
+}
+
+function jobDir(dataDir, date, vendor, seq) {
+  return path.join(dataDir, date, vendor, String(seq).padStart(2, '0'));
+}
+function manifestPath(dataDir, date, vendor, seq) {
+  return path.join(jobDir(dataDir, date, vendor, seq), 'manifest.json');
+}
+
+function readManifest(dataDir, date, vendor, seq) {
+  const p = manifestPath(dataDir, date, vendor, seq);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeManifest(dataDir, manifest) {
+  const dir = jobDir(dataDir, manifest.date, manifest.vendor, manifest.sequence);
+  fs.mkdirSync(dir, { recursive: true });
+  manifest.updatedAt = new Date().toISOString();
+  fs.writeFileSync(manifestPath(dataDir, manifest.date, manifest.vendor, manifest.sequence),
+    JSON.stringify(manifest, null, 2), 'utf-8');
+  return manifest;
+}
+
+function listVendorSequences(dataDir, date, vendor) {
+  const dir = path.join(dataDir, date, vendor);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((n) => JOB_SEQ_RE.test(n))
+    .map((n) => parseInt(n, 10))
+    .sort((a, b) => a - b);
+}
+
 // ── Python 인터프리터 자동 탐지 ────────────────────────────────
 let _cachedPythonPath = null;
 
@@ -127,6 +173,7 @@ function resetPythonCache() {
 // 동시 실행 방지용: 현재 실행 중인 Python child process 참조
 let activeProcess = null;
 let activeProcessId = 0; // 고유 실행 ID
+let activeScriptName = null; // 현재 실행 중인 script 표시 이름 (python:status 노출용)
 
 function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
@@ -227,6 +274,172 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
     try {
       fs.writeFileSync(VENDORS_PATH, JSON.stringify(data, null, 2), 'utf-8');
       return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── 작업(Job) 관리 ───────────────────────────────────────────
+  // 폴더 구조: {dataDir}/{YYYY-MM-DD}/{vendor}/{seq:02d}/{po.csv, manifest.json, ...}
+  // manifest schema: { schemaVersion, vendor, date, sequence,
+  //                    phase: 'po_downloaded'|'matched'|'assigned'|'uploaded',
+  //                    completed: bool, createdAt, updatedAt, stats? }
+
+  /** jobs:list — 특정 날짜의 모든 작업 (manifest 배열) */
+  ipcMain.handle('jobs:list', async (_e, date) => {
+    if (!isValidDate(date)) return { success: false, error: 'invalid date', jobs: [] };
+    const dayDir = path.join(dataDir, date);
+    if (!fs.existsSync(dayDir)) return { success: true, jobs: [] };
+
+    const jobs = [];
+    for (const vendor of fs.readdirSync(dayDir)) {
+      if (!isValidVendor(vendor)) continue;
+      for (const seq of listVendorSequences(dataDir, date, vendor)) {
+        const m = readManifest(dataDir, date, vendor, seq);
+        if (m) jobs.push(m);
+      }
+    }
+    return { success: true, jobs };
+  });
+
+  /** jobs:listMonth — 해당 연·월에 작업이 있는 날짜별 카운트 (달력 표시용) */
+  ipcMain.handle('jobs:listMonth', async (_e, year, month) => {
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+      return { success: false, error: 'invalid year/month', byDate: {} };
+    }
+    const prefix = `${year}-${String(month).padStart(2, '0')}-`;
+    if (!fs.existsSync(dataDir)) return { success: true, byDate: {} };
+
+    const byDate = {};
+    for (const name of fs.readdirSync(dataDir)) {
+      if (!name.startsWith(prefix) || !isValidDate(name)) continue;
+      const dayDir = path.join(dataDir, name);
+      let count = 0;
+      let hasIncomplete = false;
+      try {
+        for (const vendor of fs.readdirSync(dayDir)) {
+          if (!isValidVendor(vendor)) continue;
+          for (const seq of listVendorSequences(dataDir, name, vendor)) {
+            const m = readManifest(dataDir, name, vendor, seq);
+            if (!m) continue;
+            count += 1;
+            if (!m.completed) hasIncomplete = true;
+          }
+        }
+      } catch { /* 디렉토리 접근 실패 무시 */ }
+      if (count > 0) byDate[name] = { count, hasIncomplete };
+    }
+    return { success: true, byDate };
+  });
+
+  /** jobs:loadManifest */
+  ipcMain.handle('jobs:loadManifest', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const m = readManifest(dataDir, date, vendor, sequence);
+    if (!m) return { success: false, error: 'not found' };
+    return { success: true, manifest: m };
+  });
+
+  /** jobs:create — 새 작업. 차수 가드 적용 (직전 차수가 completed=true 여야 함) */
+  ipcMain.handle('jobs:create', async (_e, date, vendor) => {
+    if (!isValidDate(date) || !isValidVendor(vendor)) {
+      return { success: false, error: 'invalid date or vendor' };
+    }
+    const seqs = listVendorSequences(dataDir, date, vendor);
+    if (seqs.length > 0) {
+      const lastSeq = seqs[seqs.length - 1];
+      const last = readManifest(dataDir, date, vendor, lastSeq);
+      if (last && !last.completed) {
+        return {
+          success: false,
+          error: `이전 차수(${lastSeq}차)가 아직 완료되지 않았습니다. 먼저 완료 처리하거나 진행을 마무리하세요.`,
+          blockingSequence: lastSeq,
+        };
+      }
+    }
+    const newSeq = (seqs[seqs.length - 1] || 0) + 1;
+    if (newSeq > 99) return { success: false, error: 'sequence overflow (>99)' };
+
+    const now = new Date().toISOString();
+    const manifest = {
+      schemaVersion: 1,
+      vendor,
+      date,
+      sequence: newSeq,
+      phase: 'po_downloaded',
+      completed: false,
+      createdAt: now,
+      updatedAt: now,
+      stats: {},
+    };
+    writeManifest(dataDir, manifest);
+    return { success: true, manifest };
+  });
+
+  /** jobs:updateManifest — patch 머지 후 저장 */
+  ipcMain.handle('jobs:updateManifest', async (_e, date, vendor, sequence, patch) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const cur = readManifest(dataDir, date, vendor, sequence);
+    if (!cur) return { success: false, error: 'not found' };
+    const next = { ...cur, ...(patch || {}) };
+    // 무결성 보호: 핵심 필드는 patch 로 못 바꿈
+    next.vendor = cur.vendor;
+    next.date = cur.date;
+    next.sequence = cur.sequence;
+    next.schemaVersion = cur.schemaVersion;
+    writeManifest(dataDir, next);
+    return { success: true, manifest: next };
+  });
+
+  /** jobs:complete — 작업 완료 처리 (사용자 명시 또는 phase=uploaded 자동) */
+  ipcMain.handle('jobs:complete', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const cur = readManifest(dataDir, date, vendor, sequence);
+    if (!cur) return { success: false, error: 'not found' };
+    cur.completed = true;
+    writeManifest(dataDir, cur);
+    return { success: true, manifest: cur };
+  });
+
+  /**
+   * jobs:delete — 작업 폴더 삭제 + 상위 폴더(벤더/날짜) 가 비었으면 같이 정리
+   * dataDir 내부에 있는지 한 번 더 검증해서 디렉토리 탈출 방지.
+   */
+  ipcMain.handle('jobs:delete', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const target = jobDir(dataDir, date, vendor, sequence);
+    const resolvedTarget = path.resolve(target);
+    const resolvedData = path.resolve(dataDir);
+    if (!resolvedTarget.startsWith(resolvedData + path.sep)) {
+      return { success: false, error: 'path escape' };
+    }
+    try {
+      if (!fs.existsSync(target)) {
+        return { success: true, removedDay: false };
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+
+      // 벤더 폴더가 비었으면 삭제
+      const vendorDir = path.join(dataDir, date, vendor);
+      if (fs.existsSync(vendorDir) && fs.readdirSync(vendorDir).length === 0) {
+        fs.rmdirSync(vendorDir);
+      }
+      // 날짜 폴더가 비었으면 삭제
+      const dayDir = path.join(dataDir, date);
+      let removedDay = false;
+      if (fs.existsSync(dayDir) && fs.readdirSync(dayDir).length === 0) {
+        fs.rmdirSync(dayDir);
+        removedDay = true;
+      }
+      return { success: true, removedDay };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -394,6 +607,7 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
       }
 
       activeProcess = child;
+      activeScriptName = baseName;
 
       sendToRenderer('python:log', {
         line: `[system] Python process started (pid=${child.pid}, script=${baseName})`,
@@ -473,6 +687,7 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
         // 이 프로세스가 여전히 active인 경우만 정리
         if (activeProcessId === runId) {
           activeProcess = null;
+          activeScriptName = null;
         }
 
         const wasKilled = signal === 'SIGTERM' || signal === 'SIGKILL';
@@ -494,6 +709,7 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
         spawnErrorFired = true;
         if (activeProcessId === runId) {
           activeProcess = null;
+          activeScriptName = null;
         }
         sendToRenderer('python:error', {
           line: `[system] Process error: ${err.message}`,
@@ -563,6 +779,7 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
     return {
       running: true,
       pid: activeProcess.pid,
+      scriptName: activeScriptName,
     };
   });
 

@@ -10,6 +10,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadVendors: () => ipcRenderer.invoke('vendors:load'),
   saveVendors: (data) => ipcRenderer.invoke('vendors:save', data),
 
+  // ── 작업(Job) 관리 ──
+  jobs: {
+    list: (date) => ipcRenderer.invoke('jobs:list', date),
+    listMonth: (year, month) => ipcRenderer.invoke('jobs:listMonth', year, month),
+    loadManifest: (date, vendor, sequence) => ipcRenderer.invoke('jobs:loadManifest', date, vendor, sequence),
+    create: (date, vendor) => ipcRenderer.invoke('jobs:create', date, vendor),
+    updateManifest: (date, vendor, sequence, patch) => ipcRenderer.invoke('jobs:updateManifest', date, vendor, sequence, patch),
+    complete: (date, vendor, sequence) => ipcRenderer.invoke('jobs:complete', date, vendor, sequence),
+    delete: (date, vendor, sequence) => ipcRenderer.invoke('jobs:delete', date, vendor, sequence),
+  },
+
   // ── 파일 I/O ──
   getDataDir: () => ipcRenderer.invoke('file:getDataDir'),
   fileExists: (filePath) => ipcRenderer.invoke('file:exists', filePath),

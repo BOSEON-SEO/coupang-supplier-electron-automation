@@ -1,29 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import WebView from './components/WebView';
-import WorkView from './components/WorkView';
+import React, { useState, useEffect, useCallback } from 'react';
+import Sidebar from './components/Sidebar';
+import CalendarView from './components/CalendarView';
+import WorkDetailView from './components/WorkDetailView';
 import VendorSelector from './components/VendorSelector';
-import LoginButton from './components/LoginButton';
 
 const PANEL_OPEN_KEY = 'coupang-supplier:workPanelOpen';
-const PANEL_HEIGHT = '70vh'; // 작업 패널 고정 높이 (열렸을 때)
+const PANEL_HEIGHT = '70vh';
 
 export default function App() {
+  // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
   const [vendor, setVendor] = useState('');
 
-  const [workOpen, setWorkOpen] = useState(() => {
-    try {
-      return window.localStorage?.getItem(PANEL_OPEN_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // 메인 view: 'calendar' | 'work' | 'settings'
+  const [view, setView] = useState('calendar');
 
-  // localStorage 동기화
+  // 활성 작업 (vendor + date + sequence + manifest)
+  const [activeJob, setActiveJob] = useState(null);
+
+  // 작업 패널 토글 (작업 view 전용)
+  const [workOpen, setWorkOpen] = useState(() => {
+    try { return window.localStorage?.getItem(PANEL_OPEN_KEY) === 'true'; }
+    catch { return false; }
+  });
   useEffect(() => {
-    try { window.localStorage?.setItem(PANEL_OPEN_KEY, String(workOpen)); } catch { /* 무시 */ }
+    try { window.localStorage?.setItem(PANEL_OPEN_KEY, String(workOpen)); }
+    catch { /* 무시 */ }
   }, [workOpen]);
 
-  // 패널 트랜지션 동안 매 프레임 WebView bounds 갱신
+  // 패널/뷰 전환 시 매 프레임 WCV bounds 갱신
   useEffect(() => {
     const start = performance.now();
     let rafId = 0;
@@ -34,43 +38,80 @@ export default function App() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [workOpen]);
+  }, [workOpen, view]);
+
+  // 벤더 목록 (자식 컴포넌트가 사용)
+  const [vendors, setVendors] = useState([]);
+  const reloadVendors = useCallback(async () => {
+    const data = await window.electronAPI?.loadVendors();
+    setVendors(data?.vendors ?? []);
+  }, []);
+  useEffect(() => { reloadVendors(); }, [reloadVendors]);
+
+  const handleOpenJob = (job, opts) => {
+    setActiveJob(job);
+    // 작업의 벤더로 헤더 벤더 동기화 (WCV partition + 자동 로그인)
+    if (job?.vendor && job.vendor !== vendor) setVendor(job.vendor);
+    // 새로 만든 작업이면 작업 패널은 접은 채로 시작 (PO 다운로드 지켜보게)
+    if (opts?.isNew) setWorkOpen(false);
+    setView('work');
+  };
 
   return (
     <div className="app-container">
       <header className="app-header">
         <h1 className="app-title">쿠팡 서플라이어 자동화</h1>
         <VendorSelector value={vendor} onChange={setVendor} />
-        <LoginButton vendor={vendor} />
       </header>
 
-      <main className="app-main app-main--stack">
-        <section className="app-pane app-pane--web">
-          <WebView vendor={vendor} isActive={true} />
-        </section>
+      <div className="app-body">
+        <Sidebar
+          activeView={view}
+          onChange={setView}
+          workActive={!!activeJob}
+        />
 
-        {/* 토글 바 — 패널 바로 위에 붙어있어 패널과 함께 위/아래 슬라이드 */}
-        <button
-          type="button"
-          className={`work-bar${workOpen ? ' work-bar--open' : ''}`}
-          onClick={() => setWorkOpen((o) => !o)}
-          aria-expanded={workOpen}
-          aria-controls="work-panel"
-        >
-          <span className="work-bar__label">📋 작업 패널</span>
-          <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
-        </button>
+        <main className="app-main">
+          {/* 달력 view */}
+          <div style={{ display: view === 'calendar' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
+            <CalendarView
+              vendors={vendors}
+              activeVendor={vendor}
+              onOpenJob={handleOpenJob}
+            />
+          </div>
 
-        {/* 패널 — 항상 렌더, flex-basis 트랜지션으로 슬라이드 */}
-        <section
-          id="work-panel"
-          className={`work-panel${workOpen ? '' : ' work-panel--closed'}`}
-          style={{ flexBasis: workOpen ? PANEL_HEIGHT : '0px' }}
-          aria-hidden={!workOpen}
-        >
-          <WorkView vendor={vendor} />
-        </section>
-      </main>
+          {/* 작업 view (WCV 항상 마운트 유지) */}
+          <div
+            style={{
+              display: view === 'work' ? 'flex' : 'none',
+              flex: 1, minHeight: 0,
+              flexDirection: 'column',
+            }}
+            className="app-main--stack"
+          >
+            <WorkDetailView
+              job={activeJob}
+              vendor={vendor}
+              workOpen={workOpen}
+              onToggleWork={() => setWorkOpen((o) => !o)}
+              panelHeight={PANEL_HEIGHT}
+              onJobUpdated={(updated) => setActiveJob(updated)}
+              onBackToCalendar={() => setView('calendar')}
+            />
+          </div>
+
+          {/* 설정 view */}
+          {view === 'settings' && (
+            <div className="settings-view">
+              <h2>설정</h2>
+              <p className="placeholder-sub">
+                벤더 / 자격증명은 상단 헤더의 [⚙ 관리] 에서 처리됩니다.
+              </p>
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,38 @@ export default function WebView({ vendor, isActive }) {
   const [currentUrl, setCurrentUrl] = useState('');
   const [draftUrl, setDraftUrl] = useState('');
   const [editingUrl, setEditingUrl] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [downloadingPO, setDownloadingPO] = useState(false);
+
+  // Python 이벤트 감지: login 버튼 busy, PO 다운로드 overlay
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+
+    // 마운트 시점에 이미 실행 중일 수 있음 → 현재 상태 조회
+    api.pythonStatus?.().then((s) => {
+      if (s?.running && s.scriptName?.includes('po_download.py')) {
+        setDownloadingPO(true);
+      }
+    });
+
+    const unsubLog = api.onPythonLog?.((data) => {
+      const name = data?.scriptName || '';
+      if (name.includes('po_download.py')) setDownloadingPO(true);
+    });
+    const unsubDone = api.onPythonDone?.((data) => {
+      const name = data?.scriptName || '';
+      if (name.includes('login.py')) setLoginBusy(false);
+      if (name.includes('po_download.py')) setDownloadingPO(false);
+    });
+    return () => {
+      if (typeof unsubLog === 'function') unsubLog();
+      if (typeof unsubDone === 'function') unsubDone();
+    };
+  }, []);
+
+  // 벤더 바뀌면 busy 리셋
+  useEffect(() => { setLoginBusy(false); }, [vendor]);
 
   // 컨테이너 bounds 추적 → main
   useEffect(() => {
@@ -45,12 +77,12 @@ export default function WebView({ vendor, isActive }) {
     };
   }, []);
 
-  // 가시성
+  // 가시성 — PO 다운로드 중엔 숨겨서 overlay 가 또렷하게 보이도록
   useEffect(() => {
     const api = window.electronAPI?.webview;
     if (!api) return;
-    api.setVisible(!!isActive && !!vendor);
-  }, [isActive, vendor]);
+    api.setVisible(!!isActive && !!vendor && !downloadingPO);
+  }, [isActive, vendor, downloadingPO]);
 
   // 벤더 변경 → main 에서 partition 별 WCV 재생성
   useEffect(() => {
@@ -73,6 +105,28 @@ export default function WebView({ vendor, isActive }) {
   const handleGoHome = () =>
     window.electronAPI?.webview?.navigate('https://supplier.coupang.com');
   const handleReload = () => window.electronAPI?.webview?.reload();
+  const handleLogin = async () => {
+    if (!vendor) {
+      alert('먼저 벤더를 선택하세요.');
+      return;
+    }
+    const api = window.electronAPI;
+    const cred = await api.checkCredentials(vendor);
+    if (!cred?.hasId || !cred?.hasPassword) {
+      alert('자격증명이 설정되지 않았습니다.\n[⚙ 관리] 에서 ID/PW 를 먼저 저장하세요.');
+      return;
+    }
+    setLoginBusy(true);
+    const res = await api.runPython('scripts/login.py', ['--vendor', vendor]);
+    if (!res?.success) {
+      if (res?.error?.includes('already running')) {
+        alert('이미 다른 작업이 진행 중입니다.');
+      } else {
+        alert(`로그인 실행 실패: ${res?.error ?? 'unknown'}`);
+      }
+      setLoginBusy(false);
+    }
+  };
   const handleNavigate = () => {
     if (!draftUrl.trim()) return;
     window.electronAPI?.webview?.navigate(draftUrl.trim());
@@ -101,6 +155,16 @@ export default function WebView({ vendor, isActive }) {
             aria-label="홈"
           >
             🏠
+          </button>
+          <button
+            type="button"
+            className="webview-icon-btn"
+            onClick={handleLogin}
+            disabled={loginBusy || !vendor}
+            title={loginBusy ? '로그인 중...' : '저장된 자격증명으로 로그인'}
+            aria-label="로그인"
+          >
+            {loginBusy ? '◌' : '🔑'}
           </button>
           <button
             type="button"
@@ -140,6 +204,13 @@ export default function WebView({ vendor, isActive }) {
           <div className="webview-placeholder">
             <p className="placeholder-text">🌐 웹 뷰</p>
             <p className="placeholder-sub">먼저 상단에서 벤더를 선택하거나 추가하세요.</p>
+          </div>
+        )}
+        {downloadingPO && (
+          <div className="webview-overlay">
+            <div className="webview-overlay__spinner" />
+            <p className="webview-overlay__title">PO 다운로드 중입니다</p>
+            <p className="webview-overlay__sub">잠시만 기다려 주세요 — 보통 5~10초 소요됩니다.</p>
           </div>
         )}
       </div>

@@ -427,26 +427,38 @@ def _poll_download_complete(download, timeout_sec: int = DOWNLOAD_TIMEOUT_SEC) -
         return None
 
 
-def _save_download(tmp_path: str, data_dir: str, vendor_id: str) -> Optional[str]:
+def _save_download(
+    tmp_path: str,
+    data_dir: str,
+    vendor_id: str,
+    date_str: Optional[str] = None,
+    sequence: Optional[int] = None,
+) -> Optional[str]:
     """
-    다운로드된 임시 파일을 {vendor}-{YYYYMMDD}-{seq}.csv 로 저장한다.
+    다운로드된 임시 파일을 저장한다.
 
-    Args:
-        tmp_path: 다운로드된 임시 파일 경로
-        data_dir: 저장 디렉토리 (COUPANG_DATA_DIR)
-        vendor_id: 벤더 식별자
+    저장 규칙:
+      - sequence + date 가 주어지면:
+          {data_dir}/{date}/{vendor}/{seq:02d}/po.csv      (신규 작업 구조)
+      - 주어지지 않으면:
+          {data_dir}/{vendor}-{YYYYMMDD}-{seq}.csv         (구버전 평면 — 폴백)
 
     Returns:
         저장된 파일의 절대 경로 또는 None
     """
-    ymd = _today_str()
-    seq = _next_sequence(data_dir, vendor_id, ymd)
-    filename = _build_filename(vendor_id, ymd, seq)
-    dest_path = os.path.join(data_dir, filename)
-
-    send_log(f"파일 저장: {filename} (차수: {seq})")
-
     try:
+        if sequence is not None and date_str:
+            target_dir = os.path.join(data_dir, date_str, vendor_id, f"{sequence:02d}")
+            os.makedirs(target_dir, exist_ok=True)
+            dest_path = os.path.join(target_dir, "po.csv")
+            send_log(f"파일 저장: {date_str}/{vendor_id}/{sequence:02d}/po.csv")
+        else:
+            ymd = _today_str()
+            seq = _next_sequence(data_dir, vendor_id, ymd)
+            filename = _build_filename(vendor_id, ymd, seq)
+            dest_path = os.path.join(data_dir, filename)
+            send_log(f"파일 저장 (폴백 평면): {filename}")
+
         shutil.copy2(tmp_path, dest_path)
         send_log(f"파일 저장 완료: {dest_path}")
         return dest_path
@@ -462,6 +474,8 @@ def parse_args():
     parser.add_argument("--vendor", required=True, help="벤더 식별자 (예: basic)")
     parser.add_argument("--date-from", default=None, help="조회 시작일 (YYYY-MM-DD, 기본: 오늘)")
     parser.add_argument("--date-to", default=None, help="조회 종료일 (YYYY-MM-DD, 기본: 오늘)")
+    parser.add_argument("--sequence", type=int, default=None,
+                        help="작업 차수 (지정 시 {data_dir}/{date}/{vendor}/{NN}/po.csv 로 저장)")
     parser.add_argument("--status", default=None, help="PO 상태 필터 (선택)")
     parser.add_argument("--base-url", default="https://supplier.coupang.com",
                         help="기본 URL (오프라인 테스트: http://localhost:PORT)")
@@ -592,7 +606,7 @@ def main():
             tmp_path = _poll_download_complete(download)
             if tmp_path:
                 send_progress(90, "파일 저장 중")
-                saved_path = _save_download(tmp_path, data_dir, vendor_id)
+                saved_path = _save_download(tmp_path, data_dir, vendor_id, date_from, args.sequence)
                 if saved_path:
                     _step_log("DOWNLOAD", "OK", f"저장: {saved_path}")
                     _step_log("SAVE", "OK", saved_path)
