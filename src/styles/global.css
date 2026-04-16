@@ -1445,7 +1445,8 @@ button.session-badge:disabled {
   flex-direction: column;
   gap: 12px;
   padding: 12px 16px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .workview-toolbar {
@@ -1477,8 +1478,8 @@ button.session-badge:disabled {
 }
 
 .workview-table-section {
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  height: 55vh;
   overflow: hidden;
   position: relative;
 }
