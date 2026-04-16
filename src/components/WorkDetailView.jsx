@@ -1,22 +1,22 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
 import WebView from './WebView';
 import WorkView from './WorkView';
 import PhaseStepper from './PhaseStepper';
 
 /**
- * 작업 상세 view — bottom-sheet accordion 패턴
+ * 작업 상세 view
  *
- * 구조:
+ * 구조 (형제 요소, app-main--stack 안에 나열):
  *   work-detail-header
- *   work-content (position: relative — accordion 의 위치 기준)
- *     ├ work-content__web    (웹뷰, 항상 전체 차지)
- *     └ work-accordion       (하단 고정, height로 슬라이드)
- *         ├ work-accordion__bar   (토글 버튼, 36px)
- *         └ work-accordion__body  (내용)
+ *   app-pane--web  (flex: 1, 웹뷰 담기)
+ *   work-bar       (토글 버튼, 36px)
+ *   work-panel     (flex-basis 0 ↔ availableHeight px transition)
  *
- * 닫힘: accordion height = 36px (바만 보임)
- * 열림: accordion height = 100% (content 전체 덮음)
- * height transition 으로 양방향 슬라이드 애니메이션.
+ * 닫힘: work-panel flex-basis = 0
+ * 열림: work-panel flex-basis = (app-main--stack height - header - work-bar)
+ *       → 웹뷰가 밀려나고 패널이 콘텐츠 섹션 전체 차지
+ *
+ * pixel 값 transition 이라 양방향 모두 부드럽게.
  */
 export default function WorkDetailView({
   job, vendor, workOpen, onToggleWork,
@@ -24,6 +24,28 @@ export default function WorkDetailView({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [availableHeight, setAvailableHeight] = useState(0);
+
+  const stackRef = useRef(null);
+  const headerRef = useRef(null);
+  const barRef = useRef(null);
+
+  // 콘텐츠 섹션 전체 높이 - 헤더 - 토글바 = 패널이 차지할 수 있는 최대 높이
+  useLayoutEffect(() => {
+    const stack = stackRef.current;
+    if (!stack) return;
+    const update = () => {
+      const total = stack.clientHeight;
+      const header = headerRef.current?.clientHeight || 0;
+      const bar = barRef.current?.clientHeight || 36;
+      setAvailableHeight(Math.max(0, total - header - bar));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(stack);
+    if (headerRef.current) ro.observe(headerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -65,8 +87,8 @@ export default function WorkDetailView({
   }
 
   return (
-    <>
-      <div className="work-detail-header">
+    <div className="work-stack" ref={stackRef}>
+      <div className="work-detail-header" ref={headerRef}>
         <button
           type="button"
           className="btn btn--secondary work-detail-header__back"
@@ -98,26 +120,29 @@ export default function WorkDetailView({
       </div>
       {error && <div className="modal__error" style={{ margin: '0 16px 8px' }}>{error}</div>}
 
-      <div className="work-content">
-        <div className="work-content__web">
-          <WebView vendor={vendor} isActive={!workOpen} />
-        </div>
+      <section className="app-pane app-pane--web">
+        <WebView vendor={vendor} isActive={!workOpen} />
+      </section>
 
-        <div className={`work-accordion${workOpen ? ' work-accordion--open' : ''}`}>
-          <button
-            type="button"
-            className="work-accordion__bar"
-            onClick={onToggleWork}
-            aria-expanded={workOpen}
-          >
-            <span className="work-accordion__label">📋 작업 패널</span>
-            <span className="work-accordion__chev">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
-          </button>
-          <div className="work-accordion__body">
-            <WorkView vendor={vendor} job={job} />
-          </div>
+      <button
+        type="button"
+        className={`work-bar${workOpen ? ' work-bar--open' : ''}`}
+        onClick={onToggleWork}
+        aria-expanded={workOpen}
+        ref={barRef}
+      >
+        <span className="work-bar__label">📋 작업 패널</span>
+        <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
+      </button>
+
+      <section
+        className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
+        style={{ height: workOpen ? `${availableHeight}px` : '0px' }}
+      >
+        <div className="work-panel__inner">
+          <WorkView vendor={vendor} job={job} />
         </div>
-      </div>
-    </>
+      </section>
+    </div>
   );
 }

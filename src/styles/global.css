@@ -139,47 +139,30 @@ body {
   overflow: hidden;
 }
 
-/* ── 작업 콘텐츠 + 하단 아코디언 (bottom-sheet 패턴) ───────── */
-.work-content {
+/* ── 작업 상세 (wrapper + 웹뷰 + 토글바 + 슬라이드 패널) ─── */
+.work-stack {
   flex: 1;
   min-height: 0;
-  position: relative;           /* accordion 의 absolute 기준 */
-  overflow: hidden;
-}
-
-.work-content__web {
-  position: absolute;
-  inset: 0;
-  background: #eceef1;
-  padding: 10px;
-}
-
-/* 하단 아코디언 — 닫힘: 36px, 열림: 100% */
-.work-accordion {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 36px;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg);
   overflow: hidden;
-  z-index: 3;
-  transition: height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.work-accordion--open {
-  height: 100%;
+.app-pane--web {
+  flex: 1;
+  min-height: 0;
+  background: #eceef1;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
 }
 
-.work-accordion__bar {
+/* 토글 바 — 항상 36px */
+.work-bar {
   flex-shrink: 0;
-  width: 100%;
   height: 36px;
   border: none;
-  border-bottom: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
@@ -191,25 +174,35 @@ body {
   font-weight: 500;
 }
 
-.work-accordion__bar:hover {
+.work-bar:hover {
   background: var(--color-bg);
 }
 
-.work-accordion__label {
-  letter-spacing: 0.02em;
+.work-bar--open {
+  background: var(--color-bg);
+  border-top-color: var(--color-primary);
 }
 
-.work-accordion__chev {
+.work-bar__label { letter-spacing: 0.02em; }
+.work-bar__chevron {
   font-size: 11px;
   color: var(--color-text-muted);
   font-weight: 400;
 }
 
-.work-accordion__body {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
+/* 슬라이드 패널 — height 0 ↔ availableHeight px transition */
+.work-panel {
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+  transition: height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.work-panel__inner {
+  height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px 16px 20px;
 }
 
