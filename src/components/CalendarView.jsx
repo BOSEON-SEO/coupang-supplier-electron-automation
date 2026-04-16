@@ -110,11 +110,22 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     onOpenJob(job, { isNew: true });
   };
 
-  const newJobDisabled = creating || !vendors?.length || !activeVendor;
+  // 해당 날짜의 activeVendor 마지막 차수가 미완료면 새 작업 생성 불가 (ipc 가드와 동일 규칙)
+  const lastSeqJob = activeVendor
+    ? jobsForDay
+        .filter((j) => j.vendor === activeVendor)
+        .reduce((a, b) => (a && a.sequence > b.sequence ? a : b), null)
+    : null;
+  const blockedBySequence = !!lastSeqJob && !lastSeqJob.completed;
+
+  const newJobDisabled =
+    creating || !vendors?.length || !activeVendor || blockedBySequence;
   const newJobTitle = !vendors?.length
     ? '먼저 벤더를 추가하세요'
     : !activeVendor
     ? '헤더에서 벤더를 선택하세요'
+    : blockedBySequence
+    ? `이전 차수(${lastSeqJob.sequence}차)가 완료되지 않았습니다. 먼저 완료 처리하세요.`
     : `${selectedDate} · ${activeVendor} 새 작업 생성`;
 
   return (

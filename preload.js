@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeFile: (filePath, buffer) => ipcRenderer.invoke('file:write', filePath, buffer),
   listVendorFiles: (vendorId) => ipcRenderer.invoke('file:listVendorFiles', vendorId),
   resolveVendorPath: (fileName) => ipcRenderer.invoke('file:resolveVendorPath', fileName),
+  resolveJobPath: (date, vendor, sequence, fileName) =>
+    ipcRenderer.invoke('file:resolveJobPath', date, vendor, sequence, fileName),
 
   // ── Python subprocess ──
   runPython: (scriptName, args) => ipcRenderer.invoke('python:run', scriptName, args),
