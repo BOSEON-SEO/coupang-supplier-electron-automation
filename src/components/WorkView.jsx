@@ -17,7 +17,6 @@ import {
  */
 
 const MAX_LOG_ENTRIES = 500;
-const AUTOSAVE_DELAY_MS = 3000;
 
 const SESSION_STATUS = {
   UNKNOWN: 'unknown',
@@ -45,7 +44,6 @@ export default function WorkView({ vendor, job }) {
   // ── Refs ──
   const cleanupRef = useRef([]);
   const autoLoginTriggeredRef = useRef(false);
-  const autosaveTimerRef = useRef(null);
   const vendorRef = useRef(vendor);
   const loadedPathRef = useRef(loadedPath);
   const jobRef = useRef(job);
@@ -107,34 +105,40 @@ export default function WorkView({ vendor, job }) {
   }, [appendLog]);
 
   // ── FortuneSheet onChange → autosave ──
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // FortuneSheet onChange — 편집 내용만 메모리에 보관 (자동 저장 X)
   const handleSheetChange = useCallback((sheets) => {
     latestSheetsRef.current = sheets;
-
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(async () => {
-      autosaveTimerRef.current = null;
-      const target = loadedPathRef.current;
-      const data = latestSheetsRef.current;
-      if (!target || !data) return;
-      try {
-        const buf = sheetsToXlsx(data);
-        const api = window.electronAPI;
-        const w = await api?.writeFile(target, buf);
-        if (w?.success) {
-          setXlsxBuffer(buf);
-          appendLog('info', '[자동 저장] 완료');
-        }
-      } catch (err) {
-        appendLog('error', `자동 저장 실패: ${err.message}`);
-      }
-    }, AUTOSAVE_DELAY_MS);
-  }, [appendLog]);
-
-  useEffect(() => {
-    return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    };
+    setDirty(true);
   }, []);
+
+  // 수동 저장
+  const handleSaveNow = useCallback(async () => {
+    const target = loadedPathRef.current;
+    const data = latestSheetsRef.current;
+    if (!target || !data) {
+      appendLog('warn', '저장할 데이터가 없습니다.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const buf = sheetsToXlsx(data);
+      const api = window.electronAPI;
+      const w = await api?.writeFile(target, buf);
+      if (w?.success) {
+        setDirty(false);
+        appendLog('info', '[저장] 완료');
+      } else {
+        appendLog('error', `저장 실패: ${w?.error ?? 'unknown'}`);
+      }
+    } catch (err) {
+      appendLog('error', `저장 실패: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [appendLog]);
 
   // ── Python 이벤트 리스너 ──
   useEffect(() => {
@@ -427,7 +431,18 @@ export default function WorkView({ vendor, job }) {
         <div className="workview-toolbar__spacer" />
       </div>
 
-      <div className="workview-section-header">데이터 뷰</div>
+      <div className="workview-section-header">
+        <span>데이터 뷰{dirty && <span className="workview-section-header__dirty"> · 변경됨</span>}</span>
+        <button
+          type="button"
+          className="btn btn--primary btn--sm"
+          onClick={handleSaveNow}
+          disabled={!dirty || saving || !xlsxBuffer}
+          title="현재 내용을 po.xlsx 에 덮어쓰기"
+        >
+          💾 {saving ? '저장 중...' : '저장'}
+        </button>
+      </div>
       <div className="workview-table-section">
         <SpreadsheetView
           xlsxBuffer={xlsxBuffer}

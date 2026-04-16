@@ -1453,6 +1453,17 @@ button.session-badge:disabled {
   letter-spacing: 0.05em;
   padding: 0 2px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workview-section-header__dirty {
+  color: var(--color-warning);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
 }
 
 .workview-table-section {
