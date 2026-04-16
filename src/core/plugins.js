@@ -1,30 +1,29 @@
 /**
  * 플러그인 시스템 — 회사별 커스텀 로직을 코어에서 분리
  *
- * 플러그인 인터페이스:
+ * 플러그인 인터페이스 (모든 필드 선택):
  *   {
- *     id: string,                          // 'tbnws' 등 식별자
- *     name: string,                        // UI 표시명
- *     sheetLabels: { data, matching, logistics, ... },
- *
- *     // phase 전환 훅 — po 시트 기반으로 다음 단계 시트 생성
- *     buildMatchingSheet(poSheet) => Sheet,
- *     buildLogisticsSheet(matchingSheet) => Sheet,
- *
- *     // 최종 제출 양식 export (선택)
+ *     id: string,                 // 레지스트리 식별자
+ *     name: string,                // UI 표시명
+ *     sheetLabels?: {              // phase → 시트 이름 매핑 (기본값 제공)
+ *       po, confirmed, assigned
+ *     },
+ *     // 각 phase 진행 시 새 시트 생성 (선택)
+ *     buildSheet?(phase, workbook) => Sheet | null,
+ *     // 쿠팡 제출용 양식 export (선택)
  *     exportCoupangFormat?(workbook) => xlsx buffer,
- *
- *     // 검증 (선택)
- *     validate?(workbook) => string[] // 에러 메시지 배열
+ *     // 단계 진입 전 검증 (선택)
+ *     validate?(phase, workbook) => string[],
  *   }
  *
- * 플러그인 없이도 코어는 동작 (SpreadsheetView 기본 편집만).
+ * 플러그인 없어도 코어는 동작:
+ *   - phase 진행 시 시트 자동 생성 없음 (사용자가 FortuneSheet 에서 직접 편집)
+ *   - export / validate 생략
  */
 
-import tbnws from '../plugins/tbnws';
-
+// TODO: 회사별 플러그인은 별도 브랜치/포크에서 여기 등록
 const REGISTRY = {
-  tbnws,
+  // 'tbnws': require('../plugins/tbnws').default,
 };
 
 export function getPlugin(id) {

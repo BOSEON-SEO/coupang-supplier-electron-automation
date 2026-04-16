@@ -5,6 +5,7 @@ import CountdownModal from './CountdownModal';
 import { sheetsToXlsx } from '../lib/excelFormats';
 import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
+import { nextPhase } from './PhaseStepper';
 
 /**
  * 작업 뷰 — FortuneSheet 기반 스프레드시트 편집
@@ -386,70 +387,59 @@ export default function WorkView({ vendor, job }) {
     }
   }, [job, appendLog]);
 
-  // ── Phase 진행 (플러그인 기반 시트 추가 + manifest.phase 업데이트) ──
+  // ── Phase 진행 — 범용 ──
+  // 1) 플러그인이 있으면 plugin.buildSheet(nextPhase, sheets) 호출해 시트 추가
+  // 2) 없으면 phase 만 업데이트 (사용자가 FortuneSheet 에서 직접 시트 추가)
   const handleAdvancePhase = useCallback(async () => {
     if (!job) return;
-    const plugin = getPlugin(job.plugin);
-    if (!plugin) {
-      appendLog('warn', `이 작업에 연결된 플러그인이 없습니다 (job.plugin=${job.plugin ?? 'null'}).`);
-      return;
-    }
-
-    // 현재 편집 중인 sheets 우선, 없으면 원본 버퍼에서 파싱된 값 필요
+    const target = loadedPathRef.current;
     const sheets = latestSheetsRef.current;
-    if (!sheets?.length) {
-      appendLog('warn', '시트 데이터가 없습니다. 편집 후 저장한 뒤 다시 시도하세요.');
+    if (!target || !sheets?.length) {
+      appendLog('warn', '시트 데이터가 없습니다. PO 파일을 먼저 로드하세요.');
       return;
     }
 
-    let nextPhase = null;
-    let newSheet = null;
+    const next = nextPhase(job.phase);
+    if (!next) {
+      appendLog('info', '이미 마지막 phase 입니다.');
+      return;
+    }
 
-    if (job.phase === 'po_downloaded') {
-      const poSheet = sheets[0];
-      newSheet = plugin.buildMatchingSheet(poSheet);
-      nextPhase = 'matched';
-    } else if (job.phase === 'matched') {
-      const matchingSheet = sheets.find((s) => s.name === plugin.sheetLabels?.matching)
-        || sheets.find((s) => s.name === '재고매칭');
-      if (!matchingSheet) {
-        appendLog('error', '재고매칭 시트를 찾을 수 없습니다.');
+    const plugin = getPlugin(job.plugin);
+    let finalSheets = sheets;
+
+    if (plugin?.buildSheet) {
+      try {
+        const newSheet = plugin.buildSheet(next, sheets);
+        if (newSheet) {
+          const filtered = sheets.filter((s) => s.name !== newSheet.name);
+          finalSheets = [...filtered, { ...newSheet, order: filtered.length }];
+        }
+      } catch (err) {
+        appendLog('error', `플러그인 시트 생성 실패: ${err.message}`);
         return;
       }
-      newSheet = plugin.buildLogisticsSheet(matchingSheet);
-      nextPhase = 'assigned';
-    } else {
-      appendLog('info', '현재 phase 에서는 추가 진행 동작이 없습니다.');
-      return;
     }
-
-    if (!newSheet) {
-      appendLog('error', '플러그인이 시트를 생성하지 못했습니다.');
-      return;
-    }
-
-    // 기존 시트에서 동일 이름 제거 → 교체
-    const filtered = sheets.filter((s) => s.name !== newSheet.name);
-    const nextSheets = [...filtered, { ...newSheet, order: filtered.length }];
 
     try {
-      const buf = sheetsToXlsx(nextSheets);
       const api = window.electronAPI;
-      const target = loadedPathRef.current;
-      const w = await api?.writeFile(target, buf);
-      if (!w?.success) {
-        appendLog('error', `시트 저장 실패: ${w?.error ?? 'unknown'}`);
-        return;
+      if (finalSheets !== sheets) {
+        const buf = sheetsToXlsx(finalSheets);
+        const w = await api?.writeFile(target, buf);
+        if (!w?.success) {
+          appendLog('error', `시트 저장 실패: ${w?.error ?? 'unknown'}`);
+          return;
+        }
+        setXlsxBuffer(buf);
       }
       const patchRes = await api.jobs.updateManifest(
-        job.date, job.vendor, job.sequence, { phase: nextPhase },
+        job.date, job.vendor, job.sequence, { phase: next },
       );
       if (!patchRes?.success) {
         appendLog('error', `phase 업데이트 실패: ${patchRes?.error ?? 'unknown'}`);
         return;
       }
-      setXlsxBuffer(buf);
-      appendLog('info', `[${nextPhase}] '${newSheet.name}' 시트 생성 완료`);
+      appendLog('info', `[${next}] phase 진행 완료`);
     } catch (err) {
       appendLog('error', `phase 진행 실패: ${err.message}`);
     }
@@ -495,28 +485,27 @@ export default function WorkView({ vendor, job }) {
           🔄 PO 갱신
         </button>
 
-        {job?.plugin && job.phase === 'po_downloaded' && (
-          <button
-            className="btn btn--primary btn--sm"
-            type="button"
-            onClick={handleAdvancePhase}
-            disabled={!xlsxBuffer || job.completed}
-            title="재고매칭 시트 생성 후 다음 phase 로 이동"
-          >
-            📋 재고 매칭 시작
-          </button>
-        )}
-        {job?.plugin && job.phase === 'matched' && (
-          <button
-            className="btn btn--primary btn--sm"
-            type="button"
-            onClick={handleAdvancePhase}
-            disabled={!xlsxBuffer || job.completed}
-            title="물류작업 시트 생성 후 다음 phase 로 이동"
-          >
-            🚚 물류 작업 시작
-          </button>
-        )}
+        {job && (() => {
+          const next = nextPhase(job.phase);
+          if (!next || job.completed) return null;
+          const LABEL = {
+            confirmed: '📋 발주확정서 작성',
+            uploaded: '⬆ 쿠팡 업로드 표시',
+            assigned: '🚚 운송 분배',
+            completed: '✓ 완료 표시',
+          };
+          return (
+            <button
+              className="btn btn--primary btn--sm"
+              type="button"
+              onClick={handleAdvancePhase}
+              disabled={!xlsxBuffer}
+              title={`다음 phase (${next}) 로 진행`}
+            >
+              {LABEL[next] || `→ ${next}`}
+            </button>
+          );
+        })()}
 
         {pythonRunning && (
           <>
