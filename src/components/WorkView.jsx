@@ -554,28 +554,6 @@ export default function WorkView({ vendor, job, onCloseWork }) {
           🔄 PO 갱신
         </button>
 
-        {job && (() => {
-          const next = nextPhase(job.phase);
-          if (!next || job.completed) return null;
-          const LABEL = {
-            confirmed: '📋 발주확정서 작성',
-            uploaded: '⬆ 쿠팡 업로드 표시',
-            assigned: '🚚 운송 분배',
-            completed: '✓ 완료 표시',
-          };
-          return (
-            <button
-              className="btn btn--primary btn--sm"
-              type="button"
-              onClick={handleAdvancePhase}
-              disabled={!xlsxBuffer}
-              title={`다음 phase (${next}) 로 진행`}
-            >
-              {LABEL[next] || `→ ${next}`}
-            </button>
-          );
-        })()}
-
         {pythonRunning && (
           <>
             <button className="btn btn--danger btn--sm" onClick={handleCancelPython} type="button">
