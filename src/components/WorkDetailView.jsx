@@ -96,7 +96,7 @@ export default function WorkDetailView({
 
       <div className="work-area">
         <section className="app-pane app-pane--web">
-          <WebView vendor={vendor} isActive={true} />
+          <WebView vendor={vendor} isActive={!workOpen} />
         </section>
 
         <section className={`work-panel${workOpen ? ' work-panel--open' : ''}`}>
@@ -109,11 +109,9 @@ export default function WorkDetailView({
             <span className="work-bar__label">📋 작업 패널</span>
             <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
           </button>
-          {workOpen && (
-            <div className="work-panel__body">
-              <WorkView vendor={vendor} job={job} />
-            </div>
-          )}
+          <div className="work-panel__body">
+            <WorkView vendor={vendor} job={job} />
+          </div>
         </section>
       </div>
     </>
