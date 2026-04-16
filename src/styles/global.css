@@ -161,6 +161,7 @@ body {
 /* 작업 패널 — height 직접 제어 (inline style), CSS는 transition만 담당 */
 .work-panel {
   flex-shrink: 0;
+  height: 36px;
   overflow: hidden;
   display: flex;
   flex-direction: column;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
 import WebView from './WebView';
 import WorkView from './WorkView';
 import PhaseStepper from './PhaseStepper';
@@ -24,7 +24,8 @@ export default function WorkDetailView({
   const areaRef = useRef(null);
 
   // work-area 크기 추적 — work-panel 높이 계산에 사용
-  useEffect(() => {
+  // useLayoutEffect: 첫 paint 전에 동기적으로 areaHeight 측정해서 깜빡임 방지
+  useLayoutEffect(() => {
     const el = areaRef.current;
     if (!el) return;
     const update = () => setAreaHeight(el.clientHeight);
@@ -114,7 +115,7 @@ export default function WorkDetailView({
 
         <section
           className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
-          style={{ height: workOpen && areaHeight ? `${areaHeight}px` : '36px' }}
+          style={{ height: workOpen ? `${areaHeight || 0}px` : '36px' }}
         >
           <button
             type="button"

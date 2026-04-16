@@ -5,8 +5,6 @@ import WorkDetailView from './components/WorkDetailView';
 import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
 
-const PANEL_OPEN_KEY = 'coupang-supplier:workPanelOpen';
-
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
   const [vendor, setVendor] = useState('');
@@ -17,15 +15,8 @@ export default function App() {
   // 활성 작업 (vendor + date + sequence + manifest)
   const [activeJob, setActiveJob] = useState(null);
 
-  // 작업 패널 토글 (작업 view 전용)
-  const [workOpen, setWorkOpen] = useState(() => {
-    try { return window.localStorage?.getItem(PANEL_OPEN_KEY) === 'true'; }
-    catch { return false; }
-  });
-  useEffect(() => {
-    try { window.localStorage?.setItem(PANEL_OPEN_KEY, String(workOpen)); }
-    catch { /* 무시 */ }
-  }, [workOpen]);
+  // 작업 패널 토글 — 항상 닫힌 채로 시작
+  const [workOpen, setWorkOpen] = useState(false);
 
   // 패널/뷰 전환 시 매 프레임 WCV bounds 갱신
   useEffect(() => {
