@@ -167,6 +167,11 @@ body {
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
+/* 첫 프레임 이후에만 transition 활성 — 초기 점프 방지 */
+.work-panel--animated {
+  transition: height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* 토글 바 — 패널 안에서 36px 고정, 항상 보임 */
 .work-bar {
   flex-shrink: 0;

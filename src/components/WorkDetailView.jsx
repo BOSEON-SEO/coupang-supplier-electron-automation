@@ -25,12 +25,14 @@ export default function WorkDetailView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [availableHeight, setAvailableHeight] = useState(0);
+  const [animated, setAnimated] = useState(false);
 
   const stackRef = useRef(null);
   const headerRef = useRef(null);
   const barRef = useRef(null);
 
   // work-bar 는 work-panel 안이므로 header만 빼면 됨
+  // 첫 프레임에 availableHeight 확정 → 다음 프레임부터 transition 활성화
   useLayoutEffect(() => {
     const stack = stackRef.current;
     if (!stack) return;
@@ -40,10 +42,17 @@ export default function WorkDetailView({
       setAvailableHeight(Math.max(36, total - header));
     };
     update();
+
+    // 다음 프레임에 mount 플래그 on → 초기 점프 없이 이후 변화만 애니메이션
+    const raf = requestAnimationFrame(() => setAnimated(true));
+
     const ro = new ResizeObserver(update);
     ro.observe(stack);
     if (headerRef.current) ro.observe(headerRef.current);
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [job]);
 
 
@@ -125,7 +134,7 @@ export default function WorkDetailView({
       </section>
 
       <section
-        className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
+        className={`work-panel${workOpen ? ' work-panel--open' : ''}${animated ? ' work-panel--animated' : ''}`}
         style={{ height: workOpen ? `${availableHeight}px` : '36px' }}
       >
         <button
