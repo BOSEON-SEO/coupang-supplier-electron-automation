@@ -148,31 +148,20 @@ body {
   flex-direction: column;
 }
 
-/* 작업 뷰 슬라이드 패널 */
+/* 작업 뷰 패널 */
 .work-panel {
-  flex: 20 1 0;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--color-bg);
-  border-top: none;
   padding: 12px 16px 20px;
-  transition:
-    flex 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-    padding 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.2s;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .work-panel--closed {
-  flex: 0 0 0px;
-  padding-top: 0;
-  padding-bottom: 0;
-  overflow: hidden;
-  box-shadow: none;
-  opacity: 0;
+  display: none;
 }
 
 .work-panel-splitter {
@@ -210,10 +199,6 @@ body {
   padding: 0 16px;
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.15s;
-  position: sticky;
-  top: 0;
-  z-index: 5;
 }
 
 .work-bar:hover {
