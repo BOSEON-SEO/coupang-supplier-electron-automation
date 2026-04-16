@@ -166,6 +166,10 @@ body {
   background: var(--color-bg);
 }
 
+.work-panel:not(.work-panel--open) .work-panel__body {
+  display: none;
+}
+
 .work-panel--open {
   flex: 1;
   min-height: 0;

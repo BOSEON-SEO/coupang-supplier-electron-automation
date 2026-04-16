@@ -40,10 +40,7 @@ export default function WorkView({ vendor, job }) {
   const [pythonRunning, setPythonRunning] = useState(false);
   const [loginStatus, setLoginStatus] = useState(SESSION_STATUS.UNKNOWN);
   const [loginScriptRunning, setLoginScriptRunning] = useState(false);
-  const [logOpen, setLogOpen] = useState(() => {
-    try { return window.localStorage?.getItem('coupang-supplier:logOpen') === 'true'; }
-    catch { return false; }
-  });
+  const [logOpen, setLogOpen] = useState(false);
 
   // ── Refs ──
   const cleanupRef = useRef([]);
@@ -444,11 +441,7 @@ export default function WorkView({ vendor, job }) {
           type="button"
           className="workview-log-bar"
           onClick={() => {
-            setLogOpen((o) => {
-              const next = !o;
-              try { window.localStorage?.setItem('coupang-supplier:logOpen', String(next)); } catch { /* 무시 */ }
-              return next;
-            });
+            setLogOpen((o) => !o);
           }}
           aria-expanded={logOpen}
         >
