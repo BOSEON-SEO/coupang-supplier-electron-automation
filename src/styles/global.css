@@ -86,6 +86,8 @@ body {
   flex-direction: column;
   padding: 8px 0;
   gap: 4px;
+  position: relative;
+  z-index: 10;
 }
 
 .app-sidebar__item {
