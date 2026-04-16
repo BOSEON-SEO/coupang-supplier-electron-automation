@@ -134,7 +134,6 @@ function createWindow() {
     checkDevServer().then((isRunning) => {
       if (isRunning) {
         mainWindow.loadURL(devUrl);
-        mainWindow.webContents.openDevTools({ mode: 'bottom' });
       } else {
         mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
       }
