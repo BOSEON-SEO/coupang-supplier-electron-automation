@@ -150,7 +150,7 @@ body {
 
 /* 작업 뷰 슬라이드 패널 */
 .work-panel {
-  flex: 5 1 0;
+  flex: 20 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
