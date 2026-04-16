@@ -35,9 +35,8 @@ const FIELDS = [
   { section: '날짜 규칙',  key: 'productionYearRule',     label: '생산연도',           type: 'select', options: DATE_RULE_OPTIONS },
 ];
 
-export default function SettingsView() {
+export default function SettingsView({ activeVendor }) {
   const [vendors, setVendors] = useState([]);
-  const [selectedVendorId, setSelectedVendorId] = useState('');
   const [defaults, setDefaults] = useState({});
   const [vendorOverrides, setVendorOverrides] = useState({});
   const [saving, setSaving] = useState(false);
@@ -50,21 +49,19 @@ export default function SettingsView() {
       api.loadVendors(),
       api.loadSettings(),
     ]);
-    const vs = vRes?.vendors || [];
-    setVendors(vs);
+    setVendors(vRes?.vendors || []);
     setDefaults(sRes?.settings || {});
-    if (!selectedVendorId && vs.length) {
-      setSelectedVendorId(vs[0].id);
-    }
-  }, [selectedVendorId]);
+  }, []);
 
-  useEffect(() => { reloadAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { reloadAll(); }, [reloadAll]);
 
-  // 선택 벤더 변경 시 overrides 동기화
+  // 활성 벤더 변경 시 overrides 동기화
   useEffect(() => {
-    const v = vendors.find((x) => x.id === selectedVendorId);
+    const v = vendors.find((x) => x.id === activeVendor);
     setVendorOverrides(v?.settings || {});
-  }, [selectedVendorId, vendors]);
+  }, [activeVendor, vendors]);
+
+  const activeVendorMeta = vendors.find((v) => v.id === activeVendor);
 
   const handleDefaultChange = (key, value) => {
     setDefaults((prev) => ({ ...prev, [key]: value }));
@@ -83,12 +80,12 @@ export default function SettingsView() {
       const saveDef = await api.saveSettings({ schemaVersion: 1, settings: defaults });
       if (!saveDef?.success) throw new Error(saveDef?.error || 'settings save 실패');
 
-      // 선택 벤더의 settings 업데이트
-      if (selectedVendorId) {
+      // 활성 벤더의 settings 업데이트
+      if (activeVendor) {
         const cur = await api.loadVendors();
         const list = cur?.vendors || [];
         const next = list.map((v) =>
-          v.id === selectedVendorId ? { ...v, settings: vendorOverrides } : v,
+          v.id === activeVendor ? { ...v, settings: vendorOverrides } : v,
         );
         const saveV = await api.saveVendors({ ...cur, vendors: next });
         if (!saveV?.success) throw new Error(saveV?.error || 'vendors save 실패');
@@ -140,24 +137,13 @@ export default function SettingsView() {
     <div className="settings-view">
       <div className="settings-view__header">
         <h2>설정</h2>
-        <div className="settings-view__vendor-select">
-          <label>벤더</label>
-          <select
-            value={selectedVendorId}
-            onChange={(e) => setSelectedVendorId(e.target.value)}
-            disabled={!vendors.length}
-          >
-            {vendors.length === 0 && <option value="">(벤더 없음)</option>}
-            {vendors.map((v) => (
-              <option key={v.id} value={v.id}>{v.name || v.id}</option>
-            ))}
-          </select>
-        </div>
+        <div className="settings-view__spacer" />
         <button
           type="button"
           className="btn btn--primary btn--sm"
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !activeVendor}
+          title={!activeVendor ? '헤더에서 벤더를 먼저 선택하세요' : ''}
         >
           💾 {saving ? '저장 중...' : '저장'}
         </button>
@@ -169,7 +155,9 @@ export default function SettingsView() {
           <div className="settings-table__label"></div>
           <div className="settings-table__col">기본값</div>
           <div className="settings-table__col">
-            {selectedVendorId ? (vendors.find((v) => v.id === selectedVendorId)?.name || selectedVendorId) : '(벤더 선택)'}
+            {activeVendor
+              ? `현재 벤더 (${activeVendorMeta?.name || activeVendor})`
+              : '현재 벤더 (미선택)'}
           </div>
         </div>
 

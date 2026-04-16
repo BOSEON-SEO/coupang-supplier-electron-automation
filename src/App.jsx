@@ -128,7 +128,7 @@ export default function App() {
           </div>
 
           {/* 설정 view */}
-          {view === 'settings' && <SettingsView />}
+          {view === 'settings' && <SettingsView activeVendor={vendor} />}
         </main>
       </div>
 
