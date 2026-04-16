@@ -159,7 +159,6 @@ body {
 
 /* 슬라이드 패널 */
 .work-panel {
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
