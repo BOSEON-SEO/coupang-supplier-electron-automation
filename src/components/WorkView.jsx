@@ -6,6 +6,8 @@ import { sheetsToXlsx } from '../lib/excelFormats';
 import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
 import { nextPhase } from './PhaseStepper';
+import { buildConfirmationArrayBuffer } from '../core/confirmationBuilder';
+import { parsePoSheets } from '../core/poParser';
 
 /**
  * 작업 뷰 — FortuneSheet 기반 스프레드시트 편집
@@ -388,23 +390,74 @@ export default function WorkView({ vendor, job }) {
   }, [job, appendLog]);
 
   // ── Phase 진행 — 범용 ──
-  // 1) 플러그인이 있으면 plugin.buildSheet(nextPhase, sheets) 호출해 시트 추가
-  // 2) 없으면 phase 만 업데이트 (사용자가 FortuneSheet 에서 직접 시트 추가)
+  //   po_downloaded → confirmed: 쿠팡 발주확정서 xlsx 생성 → job 폴더에 저장 → 뷰 교체
+  //   그 외        : 플러그인이 있으면 plugin.buildSheet 로 시트 추가
+  //                 없으면 manifest.phase 만 업데이트
   const handleAdvancePhase = useCallback(async () => {
     if (!job) return;
-    const target = loadedPathRef.current;
     const sheets = latestSheetsRef.current;
-    if (!target || !sheets?.length) {
+    const target = loadedPathRef.current;
+    if (!sheets?.length) {
       appendLog('warn', '시트 데이터가 없습니다. PO 파일을 먼저 로드하세요.');
       return;
     }
-
     const next = nextPhase(job.phase);
     if (!next) {
       appendLog('info', '이미 마지막 phase 입니다.');
       return;
     }
 
+    const api = window.electronAPI;
+
+    // ── po_downloaded → confirmed: 발주확정서 별도 파일 생성 ──
+    if (job.phase === 'po_downloaded' && next === 'confirmed') {
+      try {
+        const masterData = parsePoSheets(sheets);
+        if (!masterData.length) {
+          appendLog('error', 'PO 데이터 파싱 결과가 비어있습니다. 헤더를 확인하세요.');
+          return;
+        }
+        // 벤더 설정에서 회송 정보 읽기 (없으면 빈 값)
+        const vendorList = await api.loadVendors();
+        const vendorMeta = vendorList?.vendors?.find?.((v) => v.id === job.vendor) || {};
+        const buf = await buildConfirmationArrayBuffer(masterData, {
+          returnContact: vendorMeta.returnContact || '',
+          returnPhone: vendorMeta.returnPhone || '',
+          returnAddress: vendorMeta.returnAddress || '',
+        });
+
+        const resolved = await api.resolveJobPath(
+          job.date, job.vendor, job.sequence, 'confirmation.xlsx',
+        );
+        if (!resolved?.success) {
+          appendLog('error', `확정서 경로 해석 실패: ${resolved?.error}`);
+          return;
+        }
+        const w = await api.writeFile(resolved.path, buf);
+        if (!w?.success) {
+          appendLog('error', `확정서 저장 실패: ${w?.error ?? 'unknown'}`);
+          return;
+        }
+        const patchRes = await api.jobs.updateManifest(
+          job.date, job.vendor, job.sequence, { phase: next },
+        );
+        if (!patchRes?.success) {
+          appendLog('error', `phase 업데이트 실패: ${patchRes?.error ?? 'unknown'}`);
+          return;
+        }
+
+        // 뷰 교체
+        setXlsxBuffer(buf);
+        setLoadedPath(resolved.path);
+        latestSheetsRef.current = null;
+        appendLog('info', `[confirmed] 발주확정서 생성 — ${resolved.path}`);
+      } catch (err) {
+        appendLog('error', `확정서 생성 실패: ${err.message}`);
+      }
+      return;
+    }
+
+    // ── 나머지 phase: 플러그인 있으면 시트 추가, 없으면 phase 만 업데이트 ──
     const plugin = getPlugin(job.plugin);
     let finalSheets = sheets;
 
@@ -422,8 +475,7 @@ export default function WorkView({ vendor, job }) {
     }
 
     try {
-      const api = window.electronAPI;
-      if (finalSheets !== sheets) {
+      if (finalSheets !== sheets && target) {
         const buf = sheetsToXlsx(finalSheets);
         const w = await api?.writeFile(target, buf);
         if (!w?.success) {
@@ -519,13 +571,48 @@ export default function WorkView({ vendor, job }) {
       </div>
 
       <div className="workview-section-header">
-        <span>데이터 뷰{dirty && <span className="workview-section-header__dirty"> · 변경됨</span>}</span>
+        <div className="workview-file-tabs">
+          <button
+            type="button"
+            className={`workview-file-tab${loadedPath?.endsWith('po.xlsx') ? ' is-active' : ''}`}
+            onClick={() => job && loadJobPoFile(job)}
+            disabled={!job}
+          >
+            📄 PO 원본
+          </button>
+          <button
+            type="button"
+            className={`workview-file-tab${loadedPath?.endsWith('confirmation.xlsx') ? ' is-active' : ''}`}
+            onClick={async () => {
+              if (!job) return;
+              const api = window.electronAPI;
+              const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'confirmation.xlsx');
+              if (!resolved?.success) return;
+              const exists = await api.fileExists(resolved.path);
+              if (!exists) {
+                appendLog('info', '발주확정서가 아직 생성되지 않았습니다.');
+                return;
+              }
+              const read = await api.readFile(resolved.path);
+              if (read?.success) {
+                setXlsxBuffer(read.data);
+                setLoadedPath(resolved.path);
+                latestSheetsRef.current = null;
+                appendLog('info', '발주확정서 로드');
+              }
+            }}
+            disabled={!job}
+          >
+            📋 발주확정서
+          </button>
+          {dirty && <span className="workview-section-header__dirty">· 변경됨</span>}
+        </div>
         <button
           type="button"
           className="btn btn--primary btn--sm"
           onClick={handleSaveNow}
           disabled={!dirty || saving || !xlsxBuffer}
-          title="현재 내용을 po.xlsx 에 덮어쓰기"
+          title="현재 파일에 덮어쓰기"
         >
           💾 {saving ? '저장 중...' : '저장'}
         </button>
