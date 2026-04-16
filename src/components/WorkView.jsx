@@ -108,6 +108,12 @@ export default function WorkView({ vendor, job }) {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // 파일 로드/초기화 시 dirty 리셋 (FortuneSheet 마운트 onChange 무시)
+  useEffect(() => {
+    setDirty(false);
+    latestSheetsRef.current = null;
+  }, [xlsxBuffer]);
+
   // FortuneSheet onChange — 편집 내용만 메모리에 보관 (자동 저장 X)
   const handleSheetChange = useCallback((sheets) => {
     latestSheetsRef.current = sheets;
