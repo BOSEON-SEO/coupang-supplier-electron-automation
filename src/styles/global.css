@@ -158,24 +158,21 @@ body {
   position: relative;
 }
 
-/* 작업 패널 — absolute로 work-area 전체 차지, transform으로 슬라이드 */
+/* 작업 패널 — 닫힘: work-bar만, 열림: work-area 전체 */
 .work-panel {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
-  z-index: 3;
-  transform: translateY(calc(100% - 36px));
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .work-panel--open {
-  transform: translateY(0);
+  flex: 1;
+  min-height: 0;
+}
+
+.app-pane--web.is-hidden {
+  display: none;
 }
 
 .work-panel__body {

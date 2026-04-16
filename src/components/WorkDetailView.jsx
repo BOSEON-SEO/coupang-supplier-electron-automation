@@ -95,7 +95,7 @@ export default function WorkDetailView({
       {error && <div className="modal__error" style={{ margin: '0 16px 8px' }}>{error}</div>}
 
       <div className="work-area">
-        <section className="app-pane app-pane--web">
+        <section className={`app-pane app-pane--web${workOpen ? ' is-hidden' : ''}`}>
           <WebView vendor={vendor} isActive={!workOpen} />
         </section>
 
