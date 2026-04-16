@@ -32,6 +32,11 @@ let webViewVendor = null;    // 현재 webView가 사용 중인 vendor id
 let webViewBounds = { x: 0, y: 0, width: 0, height: 0 };
 let webViewVisible = false;
 
+// 다음 다운로드를 어디에 저장할지 — ipc-handlers 의 python:run 이 args 를
+// 파싱해 setPendingDownloadTarget 으로 설정하고, will-download 훅에서 소비한다.
+let pendingDownloadTarget = null;
+function setPendingDownloadTarget(absPath) { pendingDownloadTarget = absPath; }
+
 /**
  * 벤더별 WebContentsView 생성/교체.
  * - partition: persist:vendor-{vendorId} 로 세션 격리
@@ -67,16 +72,18 @@ function ensureWebView(vendorId) {
   wcv.setBounds(webViewVisible ? webViewBounds : { x: 0, y: 0, width: 0, height: 0 });
   wcv.webContents.loadURL(COUPANG_HOME_URL);
 
-  // 다운로드 발생 시 OS 저장 대화상자 / Chromium 다운로드 바 등장을 막는다.
-  // 임시 디렉토리로 자동 저장 — Playwright 가 expect_download + download.save_as 로
-  // 최종 위치(데이터 폴더)로 옮겨 적기 때문에 여기서는 임시 경로면 충분하다.
+  // 다운로드 훅 — pendingDownloadTarget 에 지정된 경로로 자동 저장하여
+  // OS 저장 대화상자를 우회한다. Python 쪽은 expect_download 를 쓰지 않고
+  // 이 경로에 파일이 나타날 때까지 polling 한다 (경합 방지).
   wcv.webContents.session.on('will-download', (_event, item) => {
+    const target = pendingDownloadTarget;
+    if (!target) return; // 타겟 없으면 기본 동작 (OS 대화상자)
     try {
-      const filename = item.getFilename() || `download-${Date.now()}`;
-      const tmpPath = path.join(os.tmpdir(), `coupang-wcv-${Date.now()}-${filename}`);
-      item.setSavePath(tmpPath);
-    } catch {
-      // setSavePath 실패 — 무시 (Playwright 가 CDP 로 별도 처리 가능)
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      item.setSavePath(target);
+      pendingDownloadTarget = null; // 한 번만 소비
+    } catch (err) {
+      console.error('[will-download] setSavePath failed:', err.message);
     }
   });
 
@@ -147,6 +154,7 @@ app.whenReady().then(() => {
     getWindow: () => mainWindow,
     dataDir: DATA_DIR,
     cdpPort: CDP_PORT,
+    setPendingDownloadTarget,
   });
 
   // ── WebContentsView 제어 IPC ────────────────────────────

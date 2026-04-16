@@ -221,7 +221,7 @@ def _get_data_dir() -> str:
     return data_dir
 
 
-def _build_filename(vendor_id: str, ymd: str, seq: int, ext: str = "csv") -> str:
+def _build_filename(vendor_id: str, ymd: str, seq: int, ext: str = "xlsx") -> str:
     """벤더 파일명 생성: {vendor}-{YYYYMMDD}-{seq:02d}.{ext}"""
     return f"{vendor_id}-{ymd}-{seq:02d}.{ext}"
 
@@ -331,51 +331,77 @@ def _click_with_fallback(page, selectors: list, label: str) -> bool:
     return False
 
 
-def _download_csv(page) -> Optional[object]:
+def _trigger_download(page) -> bool:
     """
-    상품목록 다운로드 버튼 → 모달의 전체 다운로드 → 다운로드 이벤트 캡처.
+    상품목록 다운로드 버튼 → 모달의 전체 다운로드 클릭.
 
-    흐름 (명세):
+    Playwright expect_download 는 사용하지 않는다. Electron 쪽 will-download
+    훅이 pendingDownloadTarget 경로로 자동 저장하므로, Python 은 클릭만
+    수행하고 파일 시스템에서 결과 파일을 polling 한다.
+
+    흐름:
         1. #selectDownloadButton 클릭
         2. #down-all 모달 visible 대기 (최대 30초)
         3. #down-all 클릭 → 다운로드 시작
-        4. (Fallback) "Manual Download1" / "Manual Download" 버튼이 뜨면 클릭
+        4. (Fallback) "Manual Download1" / "Manual Download" 버튼
 
     Returns:
-        Playwright Download 객체 또는 None
+        True — 클릭 시퀀스 정상 수행
     """
     sel_btn = SEL["select_download_btn"]
     sel_modal = SEL["down_all"]
 
-    # 1) 메인 다운로드 버튼 visible 대기
     try:
         page.wait_for_selector(sel_btn, state="visible", timeout=30_000)
     except Exception as exc:
         send_error(f"{sel_btn} 버튼 미발견: {exc}")
-        return None
+        return False
 
-    # 2) expect_download 컨텍스트 안에서 두 단계 클릭
+    send_log(f"{sel_btn} 클릭")
+    page.click(sel_btn)
+
     try:
-        with page.expect_download(timeout=DOWNLOAD_TIMEOUT_SEC * 1000) as dl_info:
-            send_log(f"{sel_btn} 클릭")
-            page.click(sel_btn)
+        page.wait_for_selector(sel_modal, state="visible", timeout=30_000)
+        send_log(f"{sel_modal} 클릭 (전체 다운로드)")
+        page.click(sel_modal)
+    except Exception:
+        send_log(f"{sel_modal} 미표시 — Manual Download fallback 시도")
+        if not _click_with_fallback(page, SEL["manual_download"], "Manual Download"):
+            send_log("Manual Download 버튼도 없음")
+            return False
+    return True
 
-            # 모달 표시 대기 → #down-all 클릭
+
+def _wait_for_download_file(target_path: str, timeout_sec: int = DOWNLOAD_TIMEOUT_SEC) -> bool:
+    """
+    Electron will-download 훅이 target_path 에 파일을 저장할 때까지 기다린다.
+    파일 크기가 2번 연속 같으면 안정화된 것으로 판단.
+
+    Returns:
+        True — 파일이 정상적으로 생성되고 크기 안정화
+    """
+    send_log(f"파일 다운로드 대기: {target_path}")
+    start = time.time()
+    last_size = -1
+    stable_count = 0
+    while time.time() - start < timeout_sec:
+        if os.path.exists(target_path):
             try:
-                page.wait_for_selector(sel_modal, state="visible", timeout=30_000)
-                send_log(f"{sel_modal} 클릭 (전체 다운로드)")
-                page.click(sel_modal)
-            except Exception:
-                send_log(f"{sel_modal} 미표시 — Manual Download fallback 시도")
-                if not _click_with_fallback(page, SEL["manual_download"], "Manual Download"):
-                    send_log("Manual Download 버튼도 없음 — 단일 클릭으로 진행")
-
-        download = dl_info.value
-        send_log(f"다운로드 시작됨: {download.suggested_filename}")
-        return download
-    except Exception as exc:
-        send_error(f"다운로드 캡처 실패: {exc}")
-        return None
+                size = os.path.getsize(target_path)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            if size > 0 and size == last_size:
+                stable_count += 1
+                if stable_count >= 2:
+                    send_log(f"다운로드 완료: {size} bytes ({time.time()-start:.1f}s)")
+                    return True
+            else:
+                stable_count = 0
+                last_size = size
+        time.sleep(0.5)
+    send_error(f"다운로드 타임아웃: {timeout_sec}초 내에 파일이 완성되지 않음")
+    return False
 
 
 def _poll_download_complete(download, timeout_sec: int = DOWNLOAD_TIMEOUT_SEC) -> Optional[str]:
@@ -427,43 +453,60 @@ def _poll_download_complete(download, timeout_sec: int = DOWNLOAD_TIMEOUT_SEC) -
         return None
 
 
-def _save_download(
-    tmp_path: str,
-    data_dir: str,
-    vendor_id: str,
-    date_str: Optional[str] = None,
-    sequence: Optional[int] = None,
-) -> Optional[str]:
+def _csv_to_xlsx(csv_path: str, xlsx_path: str) -> int:
     """
-    다운로드된 임시 파일을 저장한다.
+    CSV 파일을 읽어 xlsx 로 변환 저장한다.
 
-    저장 규칙:
-      - sequence + date 가 주어지면:
-          {data_dir}/{date}/{vendor}/{seq:02d}/po.csv      (신규 작업 구조)
-      - 주어지지 않으면:
-          {data_dir}/{vendor}-{YYYYMMDD}-{seq}.csv         (구버전 평면 — 폴백)
+    - 인코딩: utf-8-sig 우선 (쿠팡은 BOM 포함 UTF-8). 실패 시 cp949 폴백.
+    - 빈 파일(0 bytes) 도 스키마 유지용으로 빈 xlsx 생성.
 
     Returns:
-        저장된 파일의 절대 경로 또는 None
+        저장된 행 수
+    """
+    import csv
+    import openpyxl
+
+    # 인코딩 탐지
+    rows = []
+    last_error = None
+    for enc in ("utf-8-sig", "cp949", "utf-8"):
+        try:
+            with open(csv_path, "r", encoding=enc, newline="") as f:
+                rows = list(csv.reader(f))
+            break
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+    else:
+        raise RuntimeError(f"CSV 인코딩 판별 실패: {last_error}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "data"
+    for row in rows:
+        ws.append(row)
+    wb.save(xlsx_path)
+    return len(rows)
+
+
+def _convert_to_xlsx(csv_path: str) -> Optional[str]:
+    """
+    Electron 이 저장한 csv 를 같은 폴더의 po.xlsx 로 변환한 뒤 원본 csv 는 삭제.
+
+    Returns:
+        저장된 xlsx 파일 경로 또는 None
     """
     try:
-        if sequence is not None and date_str:
-            target_dir = os.path.join(data_dir, date_str, vendor_id, f"{sequence:02d}")
-            os.makedirs(target_dir, exist_ok=True)
-            dest_path = os.path.join(target_dir, "po.csv")
-            send_log(f"파일 저장: {date_str}/{vendor_id}/{sequence:02d}/po.csv")
-        else:
-            ymd = _today_str()
-            seq = _next_sequence(data_dir, vendor_id, ymd)
-            filename = _build_filename(vendor_id, ymd, seq)
-            dest_path = os.path.join(data_dir, filename)
-            send_log(f"파일 저장 (폴백 평면): {filename}")
-
-        shutil.copy2(tmp_path, dest_path)
-        send_log(f"파일 저장 완료: {dest_path}")
-        return dest_path
+        xlsx_path = os.path.splitext(csv_path)[0] + ".xlsx"
+        row_count = _csv_to_xlsx(csv_path, xlsx_path)
+        try:
+            os.remove(csv_path)
+        except OSError:
+            pass
+        send_log(f"xlsx 변환 완료: {xlsx_path} ({row_count}행)")
+        return xlsx_path
     except Exception as exc:
-        send_error(f"파일 저장 실패: {exc}")
+        send_error(f"xlsx 변환 실패: {exc}")
         return None
 
 
@@ -594,28 +637,36 @@ def main():
             send_log("=" * 60)
             return  # finally 블록에서 CDP 정리
 
-        # ── 6. 다운로드: #selectDownloadButton → #down-all → CSV 캡처 ──
+        # ── 6. 다운로드: click → Electron 이 저장 → 파일 polling → xlsx 변환 ──
         _step_log("DOWNLOAD", "START")
         send_progress(55, "다운로드 시도 중")
 
         saved_path = None
-        download = _download_csv(page)
+        # Electron will-download 훅이 저장할 경로 (ipc-handlers 와 일치)
+        if args.sequence is not None:
+            expected_csv = os.path.join(
+                data_dir, date_from, vendor_id, f"{args.sequence:02d}", "po.csv"
+            )
+        else:
+            # 폴백: 평면 파일명
+            ymd = _today_str()
+            seq = _next_sequence(data_dir, vendor_id, ymd)
+            expected_csv = os.path.join(data_dir, _build_filename(vendor_id, ymd, seq, ext="csv"))
 
-        if download:
+        if not _trigger_download(page):
+            _step_log("DOWNLOAD", "FAIL", "다운로드 트리거 실패")
+        else:
             send_progress(75, "파일 다운로드 대기 중")
-            tmp_path = _poll_download_complete(download)
-            if tmp_path:
-                send_progress(90, "파일 저장 중")
-                saved_path = _save_download(tmp_path, data_dir, vendor_id, date_from, args.sequence)
+            if _wait_for_download_file(expected_csv):
+                send_progress(90, "xlsx 변환 중")
+                saved_path = _convert_to_xlsx(expected_csv)
                 if saved_path:
                     _step_log("DOWNLOAD", "OK", f"저장: {saved_path}")
                     _step_log("SAVE", "OK", saved_path)
                 else:
-                    _step_log("DOWNLOAD", "FAIL", "파일 저장 실패")
+                    _step_log("DOWNLOAD", "FAIL", "xlsx 변환 실패")
             else:
                 _step_log("DOWNLOAD", "FAIL", "다운로드 완료 대기 실패")
-        else:
-            _step_log("DOWNLOAD", "FAIL", "다운로드 트리거 실패")
 
         # ── 9. 결과 출력 ──
         _step_log("RESULT", "START")
