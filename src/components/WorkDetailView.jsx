@@ -119,7 +119,7 @@ export default function WorkDetailView({
       <section
         id="work-panel"
         className={`work-panel${workOpen ? '' : ' work-panel--closed'}`}
-        style={{ flexBasis: workOpen ? panelHeight : '0px' }}
+        style={{ flexBasis: workOpen ? panelHeight : '0px', maxHeight: workOpen ? panelHeight : '0px' }}
         aria-hidden={!workOpen}
       >
         <WorkView vendor={vendor} job={job} />
