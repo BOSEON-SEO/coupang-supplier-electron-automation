@@ -155,9 +155,10 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
-/* 작업 패널 — 닫힘: work-bar만, 열림: 나머지 공간 전부 */
+/* 작업 패널 — 기본(닫힘): work-bar만 하단에 */
 .work-panel {
   flex-shrink: 0;
   display: flex;
@@ -165,10 +166,11 @@ body {
   background: var(--color-bg);
 }
 
+/* 열림: work-area 전체를 absolute로 덮음 */
 .work-panel--open {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
 }
 
 .work-panel__body {
