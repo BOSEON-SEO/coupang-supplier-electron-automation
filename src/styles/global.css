@@ -1450,8 +1450,9 @@ button.session-badge:disabled {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 100%;            /* 부모(.work-panel)가 고정 높이를 가짐 */
+  height: 100%;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .workview-toolbar {
@@ -1462,8 +1463,8 @@ button.session-badge:disabled {
 }
 
 .workview-table-section {
-  flex: 1 1 0;
-  min-height: 0;
+  flex: none;
+  height: 55vh;
   overflow: hidden;
   position: relative;
 }
