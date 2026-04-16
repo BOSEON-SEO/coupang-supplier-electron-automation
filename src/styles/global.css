@@ -200,7 +200,7 @@ body {
   flex-shrink: 0;
   height: 36px;
   border: none;
-  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
@@ -222,7 +222,7 @@ body {
 
 .work-bar--open {
   background: var(--color-bg);
-  border-top-color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
 }
 
 .work-bar__label {
