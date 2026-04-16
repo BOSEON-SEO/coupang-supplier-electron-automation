@@ -19,7 +19,7 @@ import PhaseStepper from './PhaseStepper';
  * pixel 값 transition 이라 양방향 모두 부드럽게.
  */
 export default function WorkDetailView({
-  job, vendor, workOpen, onToggleWork,
+  job, vendor, workOpen, onToggleWork, onCloseWork,
   onJobUpdated, onBackToCalendar,
 }) {
   const [busy, setBusy] = useState(false);
@@ -148,7 +148,7 @@ export default function WorkDetailView({
         <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
       </button>
         <div className="work-panel__inner">
-          <WorkView vendor={vendor} job={job} />
+          <WorkView vendor={vendor} job={job} onCloseWork={onCloseWork} />
         </div>
       </section>
     </div>

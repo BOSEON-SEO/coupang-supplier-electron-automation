@@ -122,6 +122,7 @@ export default function App() {
               vendor={vendor}
               workOpen={workOpen}
               onToggleWork={() => setWorkOpen((o) => !o)}
+              onCloseWork={() => setWorkOpen(false)}
               onJobUpdated={(updated) => setActiveJob(updated)}
               onBackToCalendar={() => setView('calendar')}
             />

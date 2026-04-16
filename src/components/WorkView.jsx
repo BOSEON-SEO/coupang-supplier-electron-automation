@@ -29,7 +29,7 @@ const SESSION_STATUS = {
   ERROR: 'error',
 };
 
-export default function WorkView({ vendor, job }) {
+export default function WorkView({ vendor, job, onCloseWork }) {
   // ── 스프레드시트 데이터 ──
   const [xlsxBuffer, setXlsxBuffer] = useState(null);
   const [loadedPath, setLoadedPath] = useState(null);
@@ -384,10 +384,12 @@ export default function WorkView({ vendor, job }) {
     ]);
     if (res.success) {
       setPythonRunning(true);
+      // 실제 동작 관찰을 위해 작업 패널 닫고 웹뷰 노출
+      onCloseWork?.();
     } else {
       appendLog('error', `PO 갱신 실행 실패: ${res.error}`);
     }
-  }, [job, appendLog]);
+  }, [job, appendLog, onCloseWork]);
 
   // ── Phase 진행 — 범용 ──
   //   po_downloaded → confirmed: 쿠팡 발주확정서 xlsx 생성 → job 폴더에 저장 → 뷰 교체
