@@ -150,9 +150,8 @@ body {
 
 /* 작업 뷰 슬라이드 패널 */
 .work-panel {
-  flex-grow: 0;
-  flex-shrink: 0;
-  flex-basis: 0px;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
@@ -160,21 +159,20 @@ body {
   background: var(--color-bg);
   border-top: none;
   padding: 12px 16px;
-  /* flex-basis(높이), padding 모두 부드럽게 트랜지션 */
   transition:
-    flex-basis 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-    padding-top 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-    padding-bottom 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-    border-top-width 0.2s ease-out;
-  /* z-index 일부러 안 줌 — stacking context 만들면 내부 모달이 외부 형제(work-bar) 위로 못 올라옴 */
+    flex 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    padding 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.2s;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .work-panel--closed {
+  flex: 0 0 0px;
   padding-top: 0;
   padding-bottom: 0;
-  border-top-width: 0;
+  overflow: hidden;
   box-shadow: none;
+  opacity: 0;
 }
 
 .work-panel-splitter {

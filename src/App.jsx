@@ -6,7 +6,6 @@ import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
 
 const PANEL_OPEN_KEY = 'coupang-supplier:workPanelOpen';
-const PANEL_HEIGHT = '95vh';
 
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
@@ -130,7 +129,6 @@ export default function App() {
               vendor={vendor}
               workOpen={workOpen}
               onToggleWork={() => setWorkOpen((o) => !o)}
-              panelHeight={PANEL_HEIGHT}
               onJobUpdated={(updated) => setActiveJob(updated)}
               onBackToCalendar={() => setView('calendar')}
             />

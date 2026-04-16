@@ -18,7 +18,7 @@ import PhaseStepper from './PhaseStepper';
  *   - onBackToCalendar: () => void
  */
 export default function WorkDetailView({
-  job, vendor, workOpen, onToggleWork, panelHeight,
+  job, vendor, workOpen, onToggleWork,
   onJobUpdated, onBackToCalendar,
 }) {
   const [busy, setBusy] = useState(false);
@@ -119,7 +119,6 @@ export default function WorkDetailView({
       <section
         id="work-panel"
         className={`work-panel${workOpen ? '' : ' work-panel--closed'}`}
-        style={{ flexBasis: workOpen ? panelHeight : '0px', maxHeight: workOpen ? panelHeight : '0px' }}
         aria-hidden={!workOpen}
       >
         <WorkView vendor={vendor} job={job} />
