@@ -343,7 +343,7 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
   });
 
   /** jobs:create — 새 작업. 차수 가드 적용 (직전 차수가 completed=true 여야 함) */
-  ipcMain.handle('jobs:create', async (_e, date, vendor) => {
+  ipcMain.handle('jobs:create', async (_e, date, vendor, opts) => {
     if (!isValidDate(date) || !isValidVendor(vendor)) {
       return { success: false, error: 'invalid date or vendor' };
     }
@@ -363,6 +363,8 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
     if (newSeq > 99) return { success: false, error: 'sequence overflow (>99)' };
 
     const now = new Date().toISOString();
+    const plugin = typeof opts?.plugin === 'string' && /^[a-z0-9_-]{1,30}$/i.test(opts.plugin)
+      ? opts.plugin : null;
     const manifest = {
       schemaVersion: 1,
       vendor,
@@ -370,6 +372,7 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
       sequence: newSeq,
       phase: 'po_downloaded',
       completed: false,
+      plugin,
       createdAt: now,
       updatedAt: now,
       stats: {},

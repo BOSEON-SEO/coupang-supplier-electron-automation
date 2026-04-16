@@ -85,7 +85,10 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     }
     setCreating(true);
     const api = window.electronAPI;
-    const res = await api.jobs.create(selectedDate, activeVendor);
+    const vendorMeta = vendors?.find((v) => v.id === activeVendor);
+    const res = await api.jobs.create(selectedDate, activeVendor, {
+      plugin: vendorMeta?.plugin ?? null,
+    });
     if (!res?.success) {
       alert(res?.error || '작업 생성 실패');
       setCreating(false);

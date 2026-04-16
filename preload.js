@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (date) => ipcRenderer.invoke('jobs:list', date),
     listMonth: (year, month) => ipcRenderer.invoke('jobs:listMonth', year, month),
     loadManifest: (date, vendor, sequence) => ipcRenderer.invoke('jobs:loadManifest', date, vendor, sequence),
-    create: (date, vendor) => ipcRenderer.invoke('jobs:create', date, vendor),
+    create: (date, vendor, opts) => ipcRenderer.invoke('jobs:create', date, vendor, opts),
     updateManifest: (date, vendor, sequence, patch) => ipcRenderer.invoke('jobs:updateManifest', date, vendor, sequence, patch),
     complete: (date, vendor, sequence) => ipcRenderer.invoke('jobs:complete', date, vendor, sequence),
     delete: (date, vendor, sequence) => ipcRenderer.invoke('jobs:delete', date, vendor, sequence),
