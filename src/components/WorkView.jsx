@@ -417,13 +417,25 @@ export default function WorkView({ vendor, job }) {
           appendLog('error', 'PO 데이터 파싱 결과가 비어있습니다. 헤더를 확인하세요.');
           return;
         }
-        // 벤더 설정에서 회송 정보 읽기 (없으면 빈 값)
-        const vendorList = await api.loadVendors();
+        // 전역 기본값 + 벤더 override 병합
+        const [vendorList, settingsRes] = await Promise.all([
+          api.loadVendors(),
+          api.loadSettings(),
+        ]);
+        const defaults = settingsRes?.settings || {};
         const vendorMeta = vendorList?.vendors?.find?.((v) => v.id === job.vendor) || {};
+        const override = vendorMeta.settings || {};
+        const pick = (k) =>
+          (override[k] !== undefined && override[k] !== '') ? override[k] : (defaults[k] ?? '');
         const buf = await buildConfirmationArrayBuffer(masterData, {
-          returnContact: vendorMeta.returnContact || '',
-          returnPhone: vendorMeta.returnPhone || '',
-          returnAddress: vendorMeta.returnAddress || '',
+          returnContact: pick('returnContact'),
+          returnPhone: pick('returnPhone'),
+          returnAddress: pick('returnAddress'),
+          defaultTransport: pick('defaultTransport') || '쉽먼트',
+          defaultShortageReason: pick('defaultShortageReason') || undefined,
+          manufactureDateRule: pick('manufactureDateRule'),
+          expirationDateRule: pick('expirationDateRule'),
+          productionYearRule: pick('productionYearRule'),
         });
 
         const resolved = await api.resolveJobPath(

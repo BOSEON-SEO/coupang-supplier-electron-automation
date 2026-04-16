@@ -178,6 +178,7 @@ let activeScriptName = null; // 현재 실행 중인 script 표시 이름 (pytho
 function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget }) {
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
   const CREDENTIALS_PATH = path.join(dataDir, 'credentials.enc');
+  const SETTINGS_PATH = path.join(dataDir, 'settings.json');
   const SCRIPTS_DIR = path.join(__dirname, 'python');
   // CDP 포트: main.js에서 주입, 없으면 환경변수/기본값 사용
   const _cdpPort = cdpPort || parseInt(process.env.CDP_PORT, 10) || 9222;
@@ -273,6 +274,28 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
   ipcMain.handle('vendors:save', async (_e, data) => {
     try {
       fs.writeFileSync(VENDORS_PATH, JSON.stringify(data, null, 2), 'utf-8');
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── 전역 설정 (settings.json) ──
+  ipcMain.handle('settings:load', async () => {
+    try {
+      if (!fs.existsSync(SETTINGS_PATH)) {
+        return { schemaVersion: 1, settings: {} };
+      }
+      const raw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
+      return JSON.parse(raw);
+    } catch (err) {
+      return { schemaVersion: 1, settings: {}, error: err.message };
+    }
+  });
+
+  ipcMain.handle('settings:save', async (_e, data) => {
+    try {
+      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf-8');
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };

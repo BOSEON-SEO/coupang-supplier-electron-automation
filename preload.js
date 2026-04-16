@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 벤더 관리 ──
   loadVendors: () => ipcRenderer.invoke('vendors:load'),
   saveVendors: (data) => ipcRenderer.invoke('vendors:save', data),
+  loadSettings: () => ipcRenderer.invoke('settings:load'),
+  saveSettings: (data) => ipcRenderer.invoke('settings:save', data),
 
   // ── 작업(Job) 관리 ──
   jobs: {

@@ -75,6 +75,37 @@ function toYYYYMMDD(v) {
   return digits.slice(0, 8);
 }
 
+/**
+ * 날짜 규칙 → YYYYMMDD 문자열
+ * rule: '', 'today', '-1y', '-1m', '-6m', '+6m', '-Ny', '-Nm', '+Nm' 등
+ */
+export function applyDateRule(rule) {
+  if (!rule) return '';
+  const now = new Date();
+  if (rule === 'today') {
+    return toYYYYMMDD(now.toISOString().slice(0, 10));
+  }
+  const m = /^([+-])(\d+)([ymd])$/.exec(rule);
+  if (!m) return '';
+  const sign = m[1] === '-' ? -1 : 1;
+  const n = parseInt(m[2], 10) * sign;
+  const unit = m[3];
+  const d = new Date(now);
+  if (unit === 'y') d.setFullYear(d.getFullYear() + n);
+  else if (unit === 'm') d.setMonth(d.getMonth() + n);
+  else if (unit === 'd') d.setDate(d.getDate() + n);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}`;
+}
+
+/** 생산연도 규칙 — 날짜 규칙의 YYYY 부분만 */
+export function applyYearRule(rule) {
+  const ymd = applyDateRule(rule);
+  return ymd ? ymd.slice(0, 4) : '';
+}
+
 function fmtDateTime(v) {
   if (!v) return '';
   // 그대로 문자열로 반환 (파싱은 PO 원본에 맡김)
@@ -98,7 +129,15 @@ export async function buildConfirmationArrayBuffer(masterData, options = {}) {
     returnAddress = '',
     warehouseTransport = {},
     defaultTransport = '쉽먼트',
+    defaultShortageReason = SHORTAGE_REASONS[0],
+    manufactureDateRule = '',
+    expirationDateRule = '',
+    productionYearRule = '',
   } = options;
+
+  const manufactureDate = applyDateRule(manufactureDateRule);
+  const expirationDate = applyDateRule(expirationDateRule);
+  const productionYear = applyYearRule(productionYearRule);
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('상품목록');
@@ -120,7 +159,7 @@ export async function buildConfirmationArrayBuffer(masterData, options = {}) {
     const confirmedNum = Number(confirmedQty) || 0;
     const orderQtyNum = Number(row.order_quantity) || 0;
     const shortageReason = (confirmedNum < orderQtyNum)
-      ? SHORTAGE_REASONS[0]
+      ? defaultShortageReason
       : '';
 
     const dr = ws.addRow([
@@ -133,9 +172,9 @@ export async function buildConfirmationArrayBuffer(masterData, options = {}) {
       row.sku_name,                        // G 상품이름
       String(row.order_quantity ?? ''),    // H 발주수량
       confirmedQty,                        // I 확정수량
-      '',                                  // J 유통(소비)기한
-      '',                                  // K 제조일자
-      '',                                  // L 생산년도
+      expirationDate,                      // J 유통(소비)기한
+      manufactureDate,                     // K 제조일자
+      productionYear,                      // L 생산년도
       shortageReason,                      // M 납품부족사유
       returnContact,                       // N 회송담당자
       returnPhone,                         // O 회송담당자 연락처

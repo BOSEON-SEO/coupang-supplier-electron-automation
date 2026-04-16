@@ -4,6 +4,7 @@ import CalendarView from './components/CalendarView';
 import WorkDetailView from './components/WorkDetailView';
 import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
+import SettingsView from './components/SettingsView';
 
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
@@ -127,14 +128,7 @@ export default function App() {
           </div>
 
           {/* 설정 view */}
-          {view === 'settings' && (
-            <div className="settings-view">
-              <h2>설정</h2>
-              <p className="placeholder-sub">
-                벤더 / 자격증명은 상단 헤더의 [⚙ 관리] 에서 처리됩니다.
-              </p>
-            </div>
-          )}
+          {view === 'settings' && <SettingsView />}
         </main>
       </div>
 
