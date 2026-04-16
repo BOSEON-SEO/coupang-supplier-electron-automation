@@ -112,6 +112,7 @@ export default function App() {
               display: view === 'work' ? 'flex' : 'none',
               flex: 1, minHeight: 0,
               flexDirection: 'column',
+              overflow: 'hidden',
             }}
             className="app-main--stack"
           >
