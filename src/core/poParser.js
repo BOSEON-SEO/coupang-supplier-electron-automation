@@ -55,14 +55,32 @@ function readCellText(cell) {
   return cell;
 }
 
+// FortuneSheet sheet 를 2D 배열로 정규화 (celldata / data 둘 다 지원)
+function normalizeSheetToGrid(sheet) {
+  if (!sheet) return [];
+  if (Array.isArray(sheet.data) && sheet.data.length) {
+    return sheet.data;
+  }
+  if (Array.isArray(sheet.celldata) && sheet.celldata.length) {
+    const grid = [];
+    for (const cd of sheet.celldata) {
+      if (cd.r == null || cd.c == null) continue;
+      if (!grid[cd.r]) grid[cd.r] = [];
+      grid[cd.r][cd.c] = cd.v;
+    }
+    return grid;
+  }
+  return [];
+}
+
 export function parsePoSheets(sheets) {
   if (!sheets?.length) return [];
   const sheet = sheets[0]; // 첫 시트가 PO 원본
-  const data = sheet.data;
-  if (!Array.isArray(data) || !data.length) return [];
+  const grid = normalizeSheetToGrid(sheet);
+  if (!grid.length) return [];
 
   // 첫 행 = 헤더
-  const headerRow = data[0] || [];
+  const headerRow = grid[0] || [];
   const keyByCol = {};
   for (let c = 0; c < headerRow.length; c += 1) {
     const label = String(readCellText(headerRow[c])).trim();
@@ -71,8 +89,8 @@ export function parsePoSheets(sheets) {
   }
 
   const rows = [];
-  for (let r = 1; r < data.length; r += 1) {
-    const rowCells = data[r];
+  for (let r = 1; r < grid.length; r += 1) {
+    const rowCells = grid[r];
     if (!rowCells) continue;
     const obj = {};
     for (let c = 0; c < rowCells.length; c += 1) {

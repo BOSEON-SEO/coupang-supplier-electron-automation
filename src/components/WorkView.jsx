@@ -415,7 +415,8 @@ export default function WorkView({ vendor, job }) {
         appendLog('info', '[확정서] PO 시트 파싱 시작...');
         const masterData = parsePoSheets(sheets);
         if (!masterData.length) {
-          appendLog('error', `PO 데이터 파싱 결과가 비어있습니다. 헤더를 확인하세요. (sheets=${sheets.length}, rows=${sheets[0]?.data?.length ?? 0})`);
+          const first = sheets[0] || {};
+          appendLog('error', `PO 데이터 파싱 결과가 비어있습니다. 헤더를 확인하세요. (sheets=${sheets.length}, data=${first.data?.length ?? 0}, celldata=${first.celldata?.length ?? 0})`);
           return;
         }
         appendLog('info', `[확정서] ${masterData.length}행 변환`);
