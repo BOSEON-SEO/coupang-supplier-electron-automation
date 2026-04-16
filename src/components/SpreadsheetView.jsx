@@ -16,7 +16,7 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
   const [sheets, setSheets] = useState(null);
   const [error, setError] = useState(null);
   const [key, setKey] = useState(0);
-  const firstChangeRef = useRef(true);
+  const ignoreUntilRef = useRef(0);
 
   useEffect(() => {
     if (!xlsxBuffer) {
@@ -25,7 +25,6 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
     }
 
     setError(null);
-    firstChangeRef.current = true;
     try {
       const file = new File([xlsxBuffer], fileName || 'data.xlsx', {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -54,6 +53,8 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
           });
           setSheets(prepared);
           setKey((k) => k + 1);
+          // 마운트 직후 1초간 FortuneSheet 가 쏘는 onChange 무시
+          ignoreUntilRef.current = Date.now() + 1000;
         } else {
           setError('시트 데이터를 추출할 수 없습니다.');
         }
@@ -65,11 +66,7 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
 
   const handleChange = useCallback(
     (data) => {
-      // FortuneSheet 가 마운트 직후 트리거하는 onChange 는 무시
-      if (firstChangeRef.current) {
-        firstChangeRef.current = false;
-        return;
-      }
+      if (Date.now() < ignoreUntilRef.current) return;
       onChange?.(data);
     },
     [onChange],
