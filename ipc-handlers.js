@@ -175,7 +175,7 @@ let activeProcess = null;
 let activeProcessId = 0; // 고유 실행 ID
 let activeScriptName = null; // 현재 실행 중인 script 표시 이름 (python:status 노출용)
 
-function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
+function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget }) {
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
   const CREDENTIALS_PATH = path.join(dataDir, 'credentials.enc');
   const SCRIPTS_DIR = path.join(__dirname, 'python');
@@ -577,6 +577,29 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort }) {
       if (idVal) vendorEnv[idKey] = idVal;
       if (pwVal) vendorEnv[pwKey] = pwVal;
       vendorEnv.COUPANG_VENDOR_ID = vendorIdRaw;
+    }
+
+    // ── PO 다운로드 경로 지정 (Electron will-download 훅이 소비) ──
+    // po_download.py 호출 시 --vendor / --date-from / --sequence 로부터
+    // 저장 경로를 계산해 main 의 setPendingDownloadTarget 에 넘긴다.
+    if (baseName.includes('po_download') && typeof setPendingDownloadTarget === 'function') {
+      const vIdx = safeArgs.indexOf('--vendor');
+      const dIdx = safeArgs.indexOf('--date-from');
+      const sIdx = safeArgs.indexOf('--sequence');
+      if (vIdx !== -1 && dIdx !== -1 && sIdx !== -1) {
+        const v = safeArgs[vIdx + 1];
+        const d = safeArgs[dIdx + 1];
+        const s = parseInt(safeArgs[sIdx + 1], 10);
+        if (isValidVendor(v) && isValidDate(d) && isValidSeq(s)) {
+          const target = path.join(dataDir, d, v, String(s).padStart(2, '0'), 'po.csv');
+          try {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            setPendingDownloadTarget(target);
+          } catch (err) {
+            sendToRenderer('python:error', { line: `[system] target dir 생성 실패: ${err.message}` });
+          }
+        }
+      }
     }
 
     // ── subprocess 실행 ──

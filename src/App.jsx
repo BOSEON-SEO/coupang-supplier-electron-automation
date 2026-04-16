@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import CalendarView from './components/CalendarView';
 import WorkDetailView from './components/WorkDetailView';
 import VendorSelector from './components/VendorSelector';
+import ToastContainer from './components/Toast';
 
 const PANEL_OPEN_KEY = 'coupang-supplier:workPanelOpen';
 const PANEL_HEIGHT = '70vh';
@@ -47,6 +48,40 @@ export default function App() {
     setVendors(data?.vendors ?? []);
   }, []);
   useEffect(() => { reloadVendors(); }, [reloadVendors]);
+
+  // ── Toast 알림 ─────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
+  const showToast = useCallback((toast) => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((prev) => [...prev, { ...toast, id }]);
+  }, []);
+  const removeToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // ── PO 다운로드 완료 감지: 작업 패널 자동 열기 + 토스트 ──
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onPythonDone) return;
+    const unsub = api.onPythonDone((data) => {
+      const name = data?.scriptName || '';
+      if (!name.includes('po_download.py')) return;
+
+      if (data.killed) {
+        showToast({ type: 'warn', text: 'PO 다운로드가 취소되었습니다.' });
+      } else if (data.exitCode === 0) {
+        setWorkOpen(true);
+        showToast({ type: 'success', text: 'PO 다운로드가 완료되었습니다.' });
+      } else {
+        showToast({
+          type: 'error',
+          text: `PO 다운로드 실패 (exitCode=${data.exitCode ?? '?'})`,
+          duration: 6000,
+        });
+      }
+    });
+    return () => { if (typeof unsub === 'function') unsub(); };
+  }, [showToast]);
 
   const handleOpenJob = (job, opts) => {
     setActiveJob(job);
@@ -112,6 +147,8 @@ export default function App() {
           )}
         </main>
       </div>
+
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }

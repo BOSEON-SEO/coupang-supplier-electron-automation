@@ -77,12 +77,12 @@ export default function WebView({ vendor, isActive }) {
     };
   }, []);
 
-  // 가시성 — PO 다운로드 중엔 숨겨서 overlay 가 또렷하게 보이도록
+  // 가시성 — WCV 는 항상 살려두어 쿠팡 페이지 동작을 실시간으로 보여준다.
   useEffect(() => {
     const api = window.electronAPI?.webview;
     if (!api) return;
-    api.setVisible(!!isActive && !!vendor && !downloadingPO);
-  }, [isActive, vendor, downloadingPO]);
+    api.setVisible(!!isActive && !!vendor);
+  }, [isActive, vendor]);
 
   // 벤더 변경 → main 에서 partition 별 WCV 재생성
   useEffect(() => {
@@ -197,6 +197,15 @@ export default function WebView({ vendor, isActive }) {
               ↵
             </button>
           </div>
+          {downloadingPO && (
+            <span
+              className="webview-progress-badge"
+              title="PO 다운로드 진행 중 — 보통 5~10초 소요됩니다"
+            >
+              <span className="webview-progress-badge__spinner" />
+              PO 다운로드 중
+            </span>
+          )}
         </div>
       )}
       <div className="webview-host" ref={containerRef}>
@@ -204,13 +213,6 @@ export default function WebView({ vendor, isActive }) {
           <div className="webview-placeholder">
             <p className="placeholder-text">🌐 웹 뷰</p>
             <p className="placeholder-sub">먼저 상단에서 벤더를 선택하거나 추가하세요.</p>
-          </div>
-        )}
-        {downloadingPO && (
-          <div className="webview-overlay">
-            <div className="webview-overlay__spinner" />
-            <p className="webview-overlay__title">PO 다운로드 중입니다</p>
-            <p className="webview-overlay__sub">잠시만 기다려 주세요 — 보통 5~10초 소요됩니다.</p>
           </div>
         )}
       </div>
