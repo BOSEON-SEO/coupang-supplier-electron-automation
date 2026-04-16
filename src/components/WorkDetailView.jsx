@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import WebView from './WebView';
 import WorkView from './WorkView';
 import PhaseStepper from './PhaseStepper';
@@ -20,6 +20,19 @@ export default function WorkDetailView({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [areaHeight, setAreaHeight] = useState(0);
+  const areaRef = useRef(null);
+
+  // work-area 크기 추적 — work-panel 높이 계산에 사용
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const update = () => setAreaHeight(el.clientHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -94,12 +107,15 @@ export default function WorkDetailView({
       </div>
       {error && <div className="modal__error" style={{ margin: '0 16px 8px' }}>{error}</div>}
 
-      <div className="work-area">
+      <div className="work-area" ref={areaRef}>
         <section className={`app-pane app-pane--web${workOpen ? ' is-hidden' : ''}`}>
           <WebView vendor={vendor} isActive={!workOpen} />
         </section>
 
-        <section className={`work-panel${workOpen ? ' work-panel--open' : ''}`}>
+        <section
+          className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
+          style={{ height: workOpen && areaHeight ? `${areaHeight}px` : '36px' }}
+        >
           <button
             type="button"
             className="work-bar"

@@ -158,21 +158,14 @@ body {
   position: relative;
 }
 
-/* 작업 패널 — flex-basis 36px 고정 + flex-grow만 토글로 애니메이션 */
+/* 작업 패널 — height 직접 제어 (inline style), CSS는 transition만 담당 */
 .work-panel {
-  flex-grow: 0;
   flex-shrink: 0;
-  flex-basis: 36px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
-  transition: flex-grow 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.work-panel--open {
-  flex-grow: 1;
-  min-height: 0;
+  transition: height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .work-panel__body {
