@@ -10,7 +10,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
-const { safeStorage } = require('electron');
+const { safeStorage, dialog } = require('electron');
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -492,6 +492,31 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
     try {
       fs.writeFileSync(p, Buffer.from(buffer));
       return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── 사용자 지정 경로로 복사 (다운로드 다이얼로그) ──
+  ipcMain.handle('file:saveAs', async (_e, srcPath, defaultName) => {
+    try {
+      if (!srcPath || !fs.existsSync(srcPath)) {
+        return { success: false, error: '원본 파일이 존재하지 않습니다.' };
+      }
+      const win = getWindow?.();
+      const result = await dialog.showSaveDialog(win || undefined, {
+        title: '다른 이름으로 저장',
+        defaultPath: defaultName || path.basename(srcPath),
+        filters: [
+          { name: 'Excel Workbook', extensions: ['xlsx'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, canceled: true };
+      }
+      fs.copyFileSync(srcPath, result.filePath);
+      return { success: true, path: result.filePath };
     } catch (err) {
       return { success: false, error: err.message };
     }

@@ -1595,6 +1595,12 @@ button.session-badge:disabled {
   margin-left: 8px;
 }
 
+.workview-section-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* 파일 전환 탭 (PO 원본 ↔ 발주확정서 등) */
 .workview-file-tabs {
   display: flex;

@@ -20,6 +20,21 @@ import { parsePoSheets, parsePoBuffer } from '../core/poParser';
 
 const MAX_LOG_ENTRIES = 500;
 
+// Playwright/Chromium/React 개발자 도구 관련 잡음 필터
+const NOISE_PATTERNS = [
+  /Download the React DevTools/i,
+  /DevTools listening on ws:\/\//i,
+  /chrome-error:\/\//i,
+  /Autofill\.(enable|setAddresses) wasn't found/i,
+  /Failed to connect to the bus/i,
+  /Gtk-WARNING/i,
+  /\[.*(INFO|WARNING)\]:.*libGL|libva/i,
+];
+function isNoisyLogLine(line) {
+  if (!line || !line.trim()) return true;
+  return NOISE_PATTERNS.some((re) => re.test(line));
+}
+
 const SESSION_STATUS = {
   UNKNOWN: 'unknown',
   CHECKING: 'checking',
@@ -155,6 +170,7 @@ export default function WorkView({ vendor, job, onCloseWork }) {
 
     const unsubLog = api.onPythonLog?.((data) => {
       const line = data.line || JSON.stringify(data);
+      if (isNoisyLogLine(line)) return;
       appendLog('info', line);
 
       if (data.parsed && data.parsed.type === 'result') {
@@ -181,7 +197,9 @@ export default function WorkView({ vendor, job, onCloseWork }) {
     });
 
     const unsubError = api.onPythonError?.((data) => {
-      appendLog('error', data.line || JSON.stringify(data));
+      const line = data.line || JSON.stringify(data);
+      if (isNoisyLogLine(line)) return;
+      appendLog('error', line);
       if (data.scriptName === 'scripts/login.py' || data.scriptName === 'login.py') {
         const line = data.line || '';
         if (line.includes('로그인 실패') || line.includes('Login failed')) {
@@ -614,6 +632,52 @@ export default function WorkView({ vendor, job, onCloseWork }) {
     }
   }, [job, dirty, appendLog]);
 
+  // ── 현재 탭 파일을 사용자 지정 위치로 다운로드 ──
+  const handleDownload = useCallback(async (kind) => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+
+    // 편집 중이면 먼저 저장 (PO 변경사항 손실 방지)
+    if (dirty && latestSheetsRef.current && loadedPathRef.current?.endsWith(`${kind}.xlsx`)) {
+      try {
+        const buf = sheetsToXlsx(latestSheetsRef.current);
+        const w = await api.writeFile(loadedPathRef.current, buf);
+        if (!w?.success) {
+          appendLog('error', `저장 실패: ${w?.error ?? 'unknown'}`);
+          return;
+        }
+        setDirty(false);
+        appendLog('info', '[다운로드] 편집 내용 먼저 저장');
+      } catch (err) {
+        appendLog('error', `저장 실패: ${err.message}`);
+        return;
+      }
+    }
+
+    const fileName = kind === 'po' ? 'po.xlsx' : 'confirmation.xlsx';
+    const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, fileName);
+    if (!resolved?.success) {
+      appendLog('error', `경로 해석 실패: ${resolved?.error}`);
+      return;
+    }
+    const exists = await api.fileExists(resolved.path);
+    if (!exists) {
+      appendLog('warn', `${fileName} 이 아직 없습니다.`);
+      return;
+    }
+    const dateCompact = String(job.date).replace(/-/g, '');
+    const seq = String(job.sequence).padStart(2, '0');
+    const defaultName = `${job.vendor}-${dateCompact}-${seq}-${kind === 'po' ? 'PO' : '발주확정서'}.xlsx`;
+    const res = await api.saveFileAs(resolved.path, defaultName);
+    if (res?.canceled) return;
+    if (!res?.success) {
+      appendLog('error', `다운로드 실패: ${res?.error ?? 'unknown'}`);
+      return;
+    }
+    appendLog('info', `[다운로드] ${res.path}`);
+  }, [job, dirty, appendLog]);
+
   // ── Python 취소 ──
   const handleCancelPython = useCallback(async () => {
     const api = window.electronAPI;
@@ -654,16 +718,6 @@ export default function WorkView({ vendor, job, onCloseWork }) {
           🔄 PO 갱신
         </button>
 
-        <button
-          className="btn btn--primary btn--sm"
-          onClick={handleBuildConfirmation}
-          type="button"
-          disabled={!job || pythonRunning}
-          title="PO 의 확정수량을 반영해 발주확정서 (재)생성"
-        >
-          📋 발주확정서 제작
-        </button>
-
         {pythonRunning && (
           <>
             <button className="btn btn--danger btn--sm" onClick={handleCancelPython} type="button">
@@ -695,7 +749,7 @@ export default function WorkView({ vendor, job, onCloseWork }) {
               if (!resolved?.success) return;
               const exists = await api.fileExists(resolved.path);
               if (!exists) {
-                appendLog('info', '발주확정서가 아직 생성되지 않았습니다.');
+                appendLog('info', '발주확정서가 아직 생성되지 않았습니다. 📋 재생성 버튼을 누르세요.');
                 return;
               }
               const read = await api.readFile(resolved.path);
@@ -712,15 +766,63 @@ export default function WorkView({ vendor, job, onCloseWork }) {
           </button>
           {dirty && <span className="workview-section-header__dirty">· 변경됨</span>}
         </div>
-        <button
-          type="button"
-          className="btn btn--primary btn--sm"
-          onClick={handleSaveNow}
-          disabled={!dirty || saving || !xlsxBuffer}
-          title="현재 파일에 덮어쓰기"
-        >
-          💾 {saving ? '저장 중...' : '저장'}
-        </button>
+
+        {/* 활성 탭별 컨텍스트 액션 */}
+        <div className="workview-section-header__actions">
+          {loadedPath?.endsWith('confirmation.xlsx') && (
+            <>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={handleBuildConfirmation}
+                disabled={!job || pythonRunning}
+                title="PO 의 확정수량을 반영해 발주확정서 재생성"
+              >
+                🔄 재생성
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => handleDownload('confirmation')}
+                disabled={!job}
+                title="발주확정서를 xlsx 로 다운로드"
+              >
+                ⬇ 다운로드
+              </button>
+            </>
+          )}
+          {loadedPath?.endsWith('po.xlsx') && !loadedPath?.endsWith('confirmation.xlsx') && (
+            <>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={handleBuildConfirmation}
+                disabled={!job || pythonRunning}
+                title="PO 의 확정수량을 반영해 발주확정서 생성"
+              >
+                📋 확정서 생성
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => handleDownload('po')}
+                disabled={!job}
+                title="PO 원본을 xlsx 로 다운로드"
+              >
+                ⬇ 다운로드
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={handleSaveNow}
+            disabled={!dirty || saving || !xlsxBuffer}
+            title="현재 파일에 덮어쓰기"
+          >
+            💾 {saving ? '저장 중...' : '저장'}
+          </button>
+        </div>
       </div>
       <div className="workview-table-section">
         <SpreadsheetView
