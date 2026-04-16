@@ -398,7 +398,7 @@ export default function WorkView({ vendor, job }) {
     const sheets = latestSheetsRef.current;
     const target = loadedPathRef.current;
     if (!sheets?.length) {
-      appendLog('warn', '시트 데이터가 없습니다. PO 파일을 먼저 로드하세요.');
+      appendLog('warn', `시트 데이터가 없습니다. (sheets=${sheets?.length ?? 'null'}, target=${target ? 'OK' : 'null'}) — FortuneSheet 마운트 대기 중일 수 있음`);
       return;
     }
     const next = nextPhase(job.phase);
@@ -412,11 +412,13 @@ export default function WorkView({ vendor, job }) {
     // ── po_downloaded → confirmed: 발주확정서 별도 파일 생성 ──
     if (job.phase === 'po_downloaded' && next === 'confirmed') {
       try {
+        appendLog('info', '[확정서] PO 시트 파싱 시작...');
         const masterData = parsePoSheets(sheets);
         if (!masterData.length) {
-          appendLog('error', 'PO 데이터 파싱 결과가 비어있습니다. 헤더를 확인하세요.');
+          appendLog('error', `PO 데이터 파싱 결과가 비어있습니다. 헤더를 확인하세요. (sheets=${sheets.length}, rows=${sheets[0]?.data?.length ?? 0})`);
           return;
         }
+        appendLog('info', `[확정서] ${masterData.length}행 변환`);
         // 전역 기본값 + 벤더 override 병합
         const [vendorList, settingsRes] = await Promise.all([
           api.loadVendors(),
@@ -634,6 +636,7 @@ export default function WorkView({ vendor, job }) {
           xlsxBuffer={xlsxBuffer}
           fileName="po.xlsx"
           onChange={handleSheetChange}
+          onReady={(sheets) => { latestSheetsRef.current = sheets; }}
         />
       </div>
 
