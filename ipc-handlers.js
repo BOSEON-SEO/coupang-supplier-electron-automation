@@ -496,6 +496,24 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
     return { success: true, path: path.join(dataDir, fileName) };
   });
 
+  ipcMain.handle('file:resolveJobPath', async (_e, date, vendor, sequence, fileName) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (
+      typeof fileName !== 'string' ||
+      fileName.includes('..') ||
+      fileName.includes(path.sep) ||
+      fileName.includes('/')
+    ) {
+      return { success: false, error: 'invalid filename' };
+    }
+    return {
+      success: true,
+      path: path.join(jobDir(dataDir, date, vendor, sequence), fileName),
+    };
+  });
+
   // ── Python subprocess ─────────────────────────────────────────
   /**
    * python:run — Python 스크립트를 subprocess로 실행

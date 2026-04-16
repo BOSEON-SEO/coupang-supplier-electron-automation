@@ -101,3 +101,96 @@ export function xlsxToRows(buffer) {
 
   return { rows, meta, format: meta.format };
 }
+
+/**
+ * FortuneSheet sheets → ArrayBuffer(xlsx)
+ *
+ * FortuneSheet 의 sheet.data (2D 배열) 또는 sheet.celldata (sparse) 를
+ * SheetJS 워크북으로 변환한다. 값·병합·열 너비를 보존한다.
+ * (스타일은 SheetJS 커뮤니티 버전 한계로 유실됨)
+ */
+export function sheetsToXlsx(sheets) {
+  if (!sheets?.length) throw new Error('no sheets');
+  const wb = XLSX.utils.book_new();
+
+  for (const sheet of sheets) {
+    const ws = {};
+    let maxR = 0;
+    let maxC = 0;
+
+    // data 2D 배열 우선, 없으면 celldata sparse
+    if (sheet.data && Array.isArray(sheet.data)) {
+      for (let r = 0; r < sheet.data.length; r++) {
+        const row = sheet.data[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          const cell = row[c];
+          if (!cell) continue;
+          const val = cell.v ?? cell.m ?? '';
+          if (val === '' && !cell.f) continue;
+          const addr = XLSX.utils.encode_cell({ r, c });
+          const wc = { v: val };
+          if (typeof val === 'number') wc.t = 'n';
+          else if (typeof val === 'boolean') wc.t = 'b';
+          else wc.t = 's';
+          if (cell.f) wc.f = cell.f;
+          ws[addr] = wc;
+          maxR = Math.max(maxR, r);
+          maxC = Math.max(maxC, c);
+        }
+      }
+    } else if (sheet.celldata && Array.isArray(sheet.celldata)) {
+      for (const cd of sheet.celldata) {
+        if (cd.r == null || cd.c == null) continue;
+        const cell = cd.v;
+        if (!cell) continue;
+        const val = cell.v ?? cell.m ?? '';
+        if (val === '' && !cell.f) continue;
+        const addr = XLSX.utils.encode_cell({ r: cd.r, c: cd.c });
+        const wc = { v: val };
+        if (typeof val === 'number') wc.t = 'n';
+        else if (typeof val === 'boolean') wc.t = 'b';
+        else wc.t = 's';
+        if (cell.f) wc.f = cell.f;
+        ws[addr] = wc;
+        maxR = Math.max(maxR, cd.r);
+        maxC = Math.max(maxC, cd.c);
+      }
+    }
+
+    ws['!ref'] = XLSX.utils.encode_range(
+      { s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } },
+    );
+
+    // 병합
+    if (sheet.config?.merge) {
+      ws['!merges'] = Object.values(sheet.config.merge).map((m) => ({
+        s: { r: m.r, c: m.c },
+        e: { r: m.r + m.rs - 1, c: m.c + m.cs - 1 },
+      }));
+    }
+
+    // 열 너비
+    if (sheet.config?.columnlen) {
+      const cols = [];
+      for (const [c, w] of Object.entries(sheet.config.columnlen)) {
+        cols[parseInt(c, 10)] = { wpx: w };
+      }
+      ws['!cols'] = cols;
+    }
+
+    // 행 높이
+    if (sheet.config?.rowlen) {
+      const rows = [];
+      for (const [r, h] of Object.entries(sheet.config.rowlen)) {
+        rows[parseInt(r, 10)] = { hpx: h };
+      }
+      ws['!rows'] = rows;
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, sheet.name || `Sheet${sheets.indexOf(sheet) + 1}`);
+  }
+
+  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  return out instanceof ArrayBuffer ? out : out.buffer;
+}
