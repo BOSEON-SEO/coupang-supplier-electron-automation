@@ -31,7 +31,6 @@ export default function WorkDetailView({
   const barRef = useRef(null);
 
   // work-bar 는 work-panel 안이므로 header만 빼면 됨
-  // 닫힘: work-panel height = 36px, 열림: work-panel height = total - header
   useLayoutEffect(() => {
     const stack = stackRef.current;
     if (!stack) return;
@@ -45,7 +44,8 @@ export default function WorkDetailView({
     ro.observe(stack);
     if (headerRef.current) ro.observe(headerRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [job]);
+
 
   useEffect(() => {
     const api = window.electronAPI;
