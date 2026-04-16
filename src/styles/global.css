@@ -303,6 +303,11 @@ body {
   background: #b5281f;
 }
 
+.btn--sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1486,14 +1491,6 @@ button.session-badge:disabled {
   color: var(--color-danger);
 }
 
-.workview-dirty-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  background: var(--color-warning);
-  color: #fff;
-  border-radius: 10px;
-  margin-left: 8px;
-}
 
 /* 작업 로그 아코디언 — 토글바와 패널을 하나의 블록으로 묶음 */
 .workview-log-accordion {

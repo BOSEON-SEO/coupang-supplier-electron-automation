@@ -32,7 +32,6 @@ export default function WorkView({ vendor, job }) {
   // ── 스프레드시트 데이터 ──
   const [xlsxBuffer, setXlsxBuffer] = useState(null);
   const [loadedPath, setLoadedPath] = useState(null);
-  const [dirty, setDirty] = useState(false);
 
   const [logs, setLogs] = useState([
     { time: new Date().toISOString(), level: 'info', message: '작업 뷰가 초기화되었습니다.' },
@@ -87,7 +86,6 @@ export default function WorkView({ vendor, job }) {
     }
     setXlsxBuffer(read.data);
     setLoadedPath(resolved.path);
-    setDirty(false);
     latestSheetsRef.current = null;
     appendLog('info', `PO 파일 로드: ${j.vendor} ${j.sequence}차`);
     return true;
@@ -106,7 +104,6 @@ export default function WorkView({ vendor, job }) {
     }
     setXlsxBuffer(read.data);
     setLoadedPath(resolved.path);
-    setDirty(false);
     latestSheetsRef.current = null;
     appendLog('info', `파일 로드: ${fileName}`);
     return true;
@@ -115,7 +112,6 @@ export default function WorkView({ vendor, job }) {
   // ── FortuneSheet onChange → autosave ──
   const handleSheetChange = useCallback((sheets) => {
     latestSheetsRef.current = sheets;
-    setDirty(true);
 
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(async () => {
@@ -128,7 +124,6 @@ export default function WorkView({ vendor, job }) {
         const api = window.electronAPI;
         const w = await api?.writeFile(target, buf);
         if (w?.success) {
-          setDirty(false);
           setXlsxBuffer(buf);
           appendLog('info', '[자동 저장] 완료');
         }
@@ -280,7 +275,6 @@ export default function WorkView({ vendor, job }) {
   useEffect(() => {
     setLoginStatus(SESSION_STATUS.UNKNOWN);
     setCredentialStatus(null);
-    setDirty(false);
 
     if (!vendor) {
       setXlsxBuffer(null);
@@ -416,7 +410,7 @@ export default function WorkView({ vendor, job }) {
     <div className="workview-container">
       <div className="workview-toolbar">
         <button
-          className="btn btn--primary"
+          className="btn btn--secondary btn--sm"
           onClick={() => requestDangerous('PO 갱신', handlePoRefresh)}
           type="button"
           disabled={!job || pythonRunning}
@@ -427,14 +421,12 @@ export default function WorkView({ vendor, job }) {
 
         {pythonRunning && (
           <>
-            <button className="btn btn--danger btn--cancel-python" onClick={handleCancelPython} type="button">
-              ⏹ 실행 취소
+            <button className="btn btn--danger btn--sm" onClick={handleCancelPython} type="button">
+              ⏹ 취소
             </button>
             <span className="python-status python-status--running">● 실행 중</span>
           </>
         )}
-
-        {dirty && <span className="workview-dirty-badge">미저장</span>}
         <div className="workview-toolbar__spacer" />
       </div>
 
