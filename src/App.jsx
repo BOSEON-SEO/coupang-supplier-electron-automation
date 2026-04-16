@@ -6,7 +6,7 @@ import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
 
 const PANEL_OPEN_KEY = 'coupang-supplier:workPanelOpen';
-const PANEL_HEIGHT = '70vh';
+const PANEL_HEIGHT = '85vh';
 
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)

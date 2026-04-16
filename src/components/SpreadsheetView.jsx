@@ -31,10 +31,25 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
 
       LuckyExcel.transformExcelToLucky(file, (exportJson) => {
         if (exportJson?.sheets?.length) {
-          const prepared = exportJson.sheets.map((s, i) => ({
-            ...s,
-            order: i,
-          }));
+          const prepared = exportJson.sheets.map((s, i) => {
+            const sheet = { ...s, order: i, frozen: { type: 'row' } };
+
+            // 첫 행(헤더) 스타일 주입: 배경색 + 볼드 + 글자색
+            if (sheet.data && Array.isArray(sheet.data) && sheet.data[0]) {
+              sheet.data[0] = sheet.data[0].map((cell) => {
+                if (!cell) return { bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
+                return { ...cell, bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
+              });
+            } else if (sheet.celldata && Array.isArray(sheet.celldata)) {
+              for (const cd of sheet.celldata) {
+                if (cd.r === 0 && cd.v) {
+                  cd.v = { ...cd.v, bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
+                }
+              }
+            }
+
+            return sheet;
+          });
           setSheets(prepared);
           setKey((k) => k + 1);
         } else {
@@ -69,8 +84,9 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
         onChange={handleChange}
         showToolbar={false}
         showFormulaBar={false}
-        showSheetTabs={sheets.length > 1}
+        showSheetTabs
         allowEdit={!readOnly}
+        defaultRowHeight={28}
         lang="ko"
       />
     </div>
