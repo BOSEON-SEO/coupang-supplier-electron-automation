@@ -220,6 +220,7 @@ body {
 .work-bar--open {
   background: var(--color-bg);
   border-top-color: var(--color-primary);
+  margin-bottom: -1px;
 }
 
 .work-bar__label {
@@ -1462,6 +1463,16 @@ button.session-badge:disabled {
   flex-wrap: wrap;
 }
 
+.workview-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
 .workview-table-section {
   flex: none;
   height: 55vh;
@@ -1496,7 +1507,6 @@ button.session-badge:disabled {
 /* 작업 로그 아코디언 — 토글바와 패널을 하나의 블록으로 묶음 */
 .workview-log-accordion {
   flex-shrink: 0;
-  margin-top: auto;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-surface);

@@ -430,6 +430,7 @@ export default function WorkView({ vendor, job }) {
         <div className="workview-toolbar__spacer" />
       </div>
 
+      <div className="workview-section-header">데이터 뷰</div>
       <div className="workview-table-section">
         <SpreadsheetView
           xlsxBuffer={xlsxBuffer}
