@@ -7,7 +7,7 @@ import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
 import { nextPhase } from './PhaseStepper';
 import { buildConfirmationArrayBuffer } from '../core/confirmationBuilder';
-import { parsePoSheets } from '../core/poParser';
+import { parsePoSheets, parsePoBuffer } from '../core/poParser';
 
 /**
  * 작업 뷰 — FortuneSheet 기반 스프레드시트 편집
@@ -514,6 +514,106 @@ export default function WorkView({ vendor, job, onCloseWork }) {
     }
   }, [job, appendLog]);
 
+  // ── 발주확정서 제작/재생성 (항상 디스크의 po.xlsx 기준) ──
+  // PO 편집 중이었다면 먼저 저장한 뒤, 그 내용으로 재빌드.
+  const handleBuildConfirmation = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+
+    // 현재 보고 있는 게 PO 이고 변경사항 있으면 먼저 저장
+    if (dirty && loadedPathRef.current?.endsWith('po.xlsx') && latestSheetsRef.current) {
+      try {
+        const buf = sheetsToXlsx(latestSheetsRef.current);
+        const w = await api.writeFile(loadedPathRef.current, buf);
+        if (!w?.success) {
+          appendLog('error', `PO 저장 실패: ${w?.error ?? 'unknown'}`);
+          return;
+        }
+        setDirty(false);
+        appendLog('info', '[확정서] 편집된 PO 먼저 저장');
+      } catch (err) {
+        appendLog('error', `PO 저장 실패: ${err.message}`);
+        return;
+      }
+    }
+
+    try {
+      const poPath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx');
+      if (!poPath?.success) {
+        appendLog('error', `po.xlsx 경로 해석 실패: ${poPath?.error}`);
+        return;
+      }
+      const exists = await api.fileExists(poPath.path);
+      if (!exists) {
+        appendLog('warn', 'po.xlsx 가 없습니다. 먼저 PO 를 다운로드하세요.');
+        return;
+      }
+      const poRead = await api.readFile(poPath.path);
+      if (!poRead?.success) {
+        appendLog('error', `po.xlsx 읽기 실패: ${poRead?.error}`);
+        return;
+      }
+
+      appendLog('info', '[확정서] PO 파일 파싱 중...');
+      const masterData = parsePoBuffer(poRead.data);
+      if (!masterData.length) {
+        appendLog('error', 'PO 데이터 파싱 결과가 비어있습니다.');
+        return;
+      }
+      appendLog('info', `[확정서] ${masterData.length}행 변환`);
+
+      // 벤더 설정 + 전역 기본값 병합
+      const [vendorList, settingsRes] = await Promise.all([
+        api.loadVendors(),
+        api.loadSettings(),
+      ]);
+      const defaults = settingsRes?.settings || {};
+      const vendorMeta = vendorList?.vendors?.find?.((v) => v.id === job.vendor) || {};
+      const override = vendorMeta.settings || {};
+      const pick = (k) =>
+        (override[k] !== undefined && override[k] !== '') ? override[k] : (defaults[k] ?? '');
+
+      const buf = await buildConfirmationArrayBuffer(masterData, {
+        returnContact: pick('returnContact'),
+        returnPhone: pick('returnPhone'),
+        returnAddress: pick('returnAddress'),
+        defaultTransport: pick('defaultTransport') || '쉽먼트',
+        defaultShortageReason: pick('defaultShortageReason') || undefined,
+        manufactureDateRule: pick('manufactureDateRule'),
+        expirationDateRule: pick('expirationDateRule'),
+        productionYearRule: pick('productionYearRule'),
+      });
+
+      const confirmPath = await api.resolveJobPath(
+        job.date, job.vendor, job.sequence, 'confirmation.xlsx',
+      );
+      if (!confirmPath?.success) {
+        appendLog('error', `확정서 경로 해석 실패: ${confirmPath?.error}`);
+        return;
+      }
+      const w = await api.writeFile(confirmPath.path, buf);
+      if (!w?.success) {
+        appendLog('error', `확정서 저장 실패: ${w?.error ?? 'unknown'}`);
+        return;
+      }
+
+      // phase 가 po_downloaded 였다면 confirmed 로 전환
+      if (job.phase === 'po_downloaded') {
+        await api.jobs.updateManifest(
+          job.date, job.vendor, job.sequence, { phase: 'confirmed' },
+        );
+      }
+
+      setXlsxBuffer(buf);
+      setLoadedPath(confirmPath.path);
+      latestSheetsRef.current = null;
+      appendLog('info', `[확정서] 생성 완료 — ${confirmPath.path}`);
+    } catch (err) {
+      appendLog('error', `확정서 생성 실패: ${err.message}`);
+    }
+  }, [job, dirty, appendLog]);
+
   // ── Python 취소 ──
   const handleCancelPython = useCallback(async () => {
     const api = window.electronAPI;
@@ -552,6 +652,16 @@ export default function WorkView({ vendor, job, onCloseWork }) {
           title={!job ? '활성 작업 없음' : `${job.date} · ${job.vendor} · ${job.sequence}차 PO 재다운로드`}
         >
           🔄 PO 갱신
+        </button>
+
+        <button
+          className="btn btn--primary btn--sm"
+          onClick={handleBuildConfirmation}
+          type="button"
+          disabled={!job || pythonRunning}
+          title="PO 의 확정수량을 반영해 발주확정서 (재)생성"
+        >
+          📋 발주확정서 제작
         </button>
 
         {pythonRunning && (

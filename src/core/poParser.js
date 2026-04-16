@@ -49,10 +49,46 @@ const HEADER_MAP = {
   '납품여부': 'export_yn',
 };
 
+import * as XLSX from 'xlsx';
+
 function readCellText(cell) {
   if (cell == null) return '';
   if (typeof cell === 'object') return cell.v ?? cell.m ?? '';
   return cell;
+}
+
+/**
+ * PO xlsx ArrayBuffer → MasterRow[] (디스크 기반, 현재 뷰 무관)
+ */
+export function parsePoBuffer(buffer) {
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return [];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  if (!aoa.length) return [];
+
+  const header = aoa[0] || [];
+  const keyByCol = {};
+  for (let c = 0; c < header.length; c += 1) {
+    const label = String(header[c] ?? '').trim();
+    const key = HEADER_MAP[label];
+    if (key) keyByCol[c] = key;
+  }
+
+  const rows = [];
+  for (let r = 1; r < aoa.length; r += 1) {
+    const row = aoa[r] || [];
+    const obj = {};
+    for (let c = 0; c < row.length; c += 1) {
+      const key = keyByCol[c];
+      if (!key) continue;
+      obj[key] = row[c];
+    }
+    if (obj.coupang_order_seq || obj.sku_id || obj.sku_barcode) {
+      rows.push(obj);
+    }
+  }
+  return rows;
 }
 
 // FortuneSheet sheet 를 2D 배열로 정규화 (celldata / data 둘 다 지원)
