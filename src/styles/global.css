@@ -210,9 +210,9 @@ body {
 .work-panel__inner {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 12px 16px 20px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── 탭 네비게이션 ────────────────────────────────────────── */
@@ -1432,10 +1432,20 @@ button.session-badge:disabled {
 .workview-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   height: 100%;
   min-height: 0;
+}
+
+/* 실제 콘텐츠 영역 (패딩 부모) — 로그는 이 밖으로 */
+.workview-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .workview-toolbar {
@@ -1497,67 +1507,67 @@ button.session-badge:disabled {
 }
 
 
-/* 작업 로그 아코디언 — 토글바와 패널을 하나의 블록으로 묶음 */
-.workview-log-accordion {
+/* 작업 로그 독 — 패널 최하단 얇은 토글 바 + 열림 시 height transition */
+.workview-log-dock {
   flex-shrink: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface);
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  height: 28px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.workview-log-accordion--open {
-  border-color: var(--color-primary);
+.workview-log-dock--open {
+  height: 228px;
 }
 
-.workview-log-bar {
+.workview-log-dock__bar {
   flex-shrink: 0;
-  height: 32px;
+  width: 100%;
+  height: 28px;
   border: none;
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  transition: background 0.1s;
 }
 
-.workview-log-bar:hover {
+.workview-log-dock__bar:hover {
   background: var(--color-bg);
+  color: var(--color-text);
 }
 
-.workview-log-accordion--open .workview-log-bar {
-  background: var(--color-bg);
+.workview-log-dock--open .workview-log-dock__bar {
   border-bottom: 1px solid var(--color-border);
 }
 
-.workview-log-bar__count {
+.workview-log-dock__count {
   color: var(--color-text-muted);
   font-weight: 400;
   margin-left: 4px;
 }
 
-.workview-log-bar__chev {
+.workview-log-dock__chev {
   font-size: 10px;
-  color: var(--color-text-muted);
 }
 
-.workview-log-section {
-  flex-shrink: 0;
-  height: 200px;
+.workview-log-dock__body {
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
-/* 아코디언 안의 LogPanel 은 자체 border 제거 (wrapper 가 이미 가짐) */
-.workview-log-accordion .log-panel {
+.workview-log-dock__body .log-panel {
   border: none;
   border-radius: 0;
+  height: 100%;
 }
 
 /* ── Editable Table ───────────────────────────────────────── */

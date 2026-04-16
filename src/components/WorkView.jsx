@@ -415,6 +415,7 @@ export default function WorkView({ vendor, job }) {
 
   return (
     <div className="workview-container">
+      <div className="workview-main">
       <div className="workview-toolbar">
         <button
           className="btn btn--secondary btn--sm"
@@ -457,23 +458,21 @@ export default function WorkView({ vendor, job }) {
         />
       </div>
 
-      <div className={`workview-log-accordion${logOpen ? ' workview-log-accordion--open' : ''}`}>
+      </div>
+
+      <div className={`workview-log-dock${logOpen ? ' workview-log-dock--open' : ''}`}>
         <button
           type="button"
-          className="workview-log-bar"
-          onClick={() => {
-            setLogOpen((o) => !o);
-          }}
+          className="workview-log-dock__bar"
+          onClick={() => setLogOpen((o) => !o)}
           aria-expanded={logOpen}
         >
-          <span>📋 작업 로그 <span className="workview-log-bar__count">({logs.length})</span></span>
-          <span className="workview-log-bar__chev">{logOpen ? '▼' : '▲'}</span>
+          <span>📋 작업 로그 <span className="workview-log-dock__count">({logs.length})</span></span>
+          <span className="workview-log-dock__chev">{logOpen ? '▼' : '▲'}</span>
         </button>
-        {logOpen && (
-          <div className="workview-log-section">
-            <LogPanel logs={logs} hideHeader />
-          </div>
-        )}
+        <div className="workview-log-dock__body">
+          <LogPanel logs={logs} hideHeader />
+        </div>
       </div>
 
       {pendingAction && (
