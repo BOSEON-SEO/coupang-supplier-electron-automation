@@ -30,15 +30,15 @@ export default function WorkDetailView({
   const headerRef = useRef(null);
   const barRef = useRef(null);
 
-  // 콘텐츠 섹션 전체 높이 - 헤더 - 토글바 = 패널이 차지할 수 있는 최대 높이
+  // work-bar 는 work-panel 안이므로 header만 빼면 됨
+  // 닫힘: work-panel height = 36px, 열림: work-panel height = total - header
   useLayoutEffect(() => {
     const stack = stackRef.current;
     if (!stack) return;
     const update = () => {
       const total = stack.clientHeight;
       const header = headerRef.current?.clientHeight || 0;
-      const bar = barRef.current?.clientHeight || 36;
-      setAvailableHeight(Math.max(0, total - header - bar));
+      setAvailableHeight(Math.max(36, total - header));
     };
     update();
     const ro = new ResizeObserver(update);
@@ -124,21 +124,20 @@ export default function WorkDetailView({
         <WebView vendor={vendor} isActive={!workOpen} />
       </section>
 
-      <button
-        type="button"
-        className={`work-bar${workOpen ? ' work-bar--open' : ''}`}
-        onClick={onToggleWork}
-        aria-expanded={workOpen}
-        ref={barRef}
+      <section
+        className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
+        style={{ height: workOpen ? `${availableHeight}px` : '36px' }}
       >
+        <button
+          type="button"
+          className={`work-bar${workOpen ? ' work-bar--open' : ''}`}
+          onClick={onToggleWork}
+          aria-expanded={workOpen}
+          ref={barRef}
+        >
         <span className="work-bar__label">📋 작업 패널</span>
         <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
       </button>
-
-      <section
-        className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
-        style={{ height: workOpen ? `${availableHeight}px` : '0px' }}
-      >
         <div className="work-panel__inner">
           <WorkView vendor={vendor} job={job} />
         </div>
