@@ -213,7 +213,9 @@ body {
   font-size: 13px;
   font-weight: 500;
   transition: background 0.15s;
-  /* z-index 안 줌 — stacking context 만들면 모달이 위로 못 옴 */
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .work-bar:hover {
