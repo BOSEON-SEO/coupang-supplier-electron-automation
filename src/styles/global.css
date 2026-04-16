@@ -139,59 +139,42 @@ body {
   overflow: hidden;
 }
 
-.app-pane--web {
-  flex: 1;                                 /* 패널 외 나머지 공간 다 차지 */
-  min-height: 0;
-  background: #eceef1;                     /* frame 바깥 회색 */
-  padding: 10px;                           /* 액자 여백 */
-  display: flex;
-  flex-direction: column;
-}
-
-/* 웹뷰 + 패널을 묶는 부모 */
-.work-area {
+/* ── 작업 콘텐츠 + 하단 아코디언 (bottom-sheet 패턴) ───────── */
+.work-content {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  position: relative;           /* accordion 의 absolute 기준 */
   overflow: hidden;
-  position: relative;
 }
 
-/* 작업 패널 — height 직접 제어 (inline style), CSS는 transition만 담당 */
-.work-panel {
-  flex-shrink: 0;
+.work-content__web {
+  position: absolute;
+  inset: 0;
+  background: #eceef1;
+  padding: 10px;
+}
+
+/* 하단 아코디언 — 닫힘: 36px, 열림: 100% */
+.work-accordion {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   height: 36px;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
+  overflow: hidden;
+  z-index: 3;
   transition: height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.work-panel__body {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 12px 16px 20px;
+.work-accordion--open {
+  height: 100%;
 }
 
-.app-pane--web.is-hidden {
-  display: none;
-}
-
-.work-panel__body {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 12px 16px 20px;
-}
-
-
-/* 화면 하단의 항상 보이는 아코디언 토글 바 */
-.work-bar {
+.work-accordion__bar {
   flex-shrink: 0;
   width: 100%;
   height: 36px;
@@ -208,18 +191,26 @@ body {
   font-weight: 500;
 }
 
-.work-bar:hover {
+.work-accordion__bar:hover {
   background: var(--color-bg);
 }
 
-.work-bar__label {
+.work-accordion__label {
   letter-spacing: 0.02em;
 }
 
-.work-bar__chevron {
+.work-accordion__chev {
   font-size: 11px;
   color: var(--color-text-muted);
   font-weight: 400;
+}
+
+.work-accordion__body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 12px 16px 20px;
 }
 
 /* ── 탭 네비게이션 ────────────────────────────────────────── */

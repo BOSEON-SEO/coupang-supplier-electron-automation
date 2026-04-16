@@ -1,18 +1,22 @@
-import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import WebView from './WebView';
 import WorkView from './WorkView';
 import PhaseStepper from './PhaseStepper';
 
 /**
- * 작업 상세 view
+ * 작업 상세 view — bottom-sheet accordion 패턴
  *
  * 구조:
  *   work-detail-header
- *   work-area (부모)
- *     ├ app-pane--web  (웹뷰)
- *     └ work-panel     (토글 패널)
- *         ├ work-bar   (토글 버튼 — 항상 보임)
- *         └ work-panel__body (열릴 때만 보임)
+ *   work-content (position: relative — accordion 의 위치 기준)
+ *     ├ work-content__web    (웹뷰, 항상 전체 차지)
+ *     └ work-accordion       (하단 고정, height로 슬라이드)
+ *         ├ work-accordion__bar   (토글 버튼, 36px)
+ *         └ work-accordion__body  (내용)
+ *
+ * 닫힘: accordion height = 36px (바만 보임)
+ * 열림: accordion height = 100% (content 전체 덮음)
+ * height transition 으로 양방향 슬라이드 애니메이션.
  */
 export default function WorkDetailView({
   job, vendor, workOpen, onToggleWork,
@@ -20,20 +24,6 @@ export default function WorkDetailView({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [areaHeight, setAreaHeight] = useState(0);
-  const areaRef = useRef(null);
-
-  // work-area 크기 추적 — work-panel 높이 계산에 사용
-  // useLayoutEffect: 첫 paint 전에 동기적으로 areaHeight 측정해서 깜빡임 방지
-  useLayoutEffect(() => {
-    const el = areaRef.current;
-    if (!el) return;
-    const update = () => setAreaHeight(el.clientHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -108,28 +98,25 @@ export default function WorkDetailView({
       </div>
       {error && <div className="modal__error" style={{ margin: '0 16px 8px' }}>{error}</div>}
 
-      <div className="work-area" ref={areaRef}>
-        <section className={`app-pane app-pane--web${workOpen ? ' is-hidden' : ''}`}>
+      <div className="work-content">
+        <div className="work-content__web">
           <WebView vendor={vendor} isActive={!workOpen} />
-        </section>
+        </div>
 
-        <section
-          className={`work-panel${workOpen ? ' work-panel--open' : ''}`}
-          style={{ height: workOpen ? `${areaHeight || 0}px` : '36px' }}
-        >
+        <div className={`work-accordion${workOpen ? ' work-accordion--open' : ''}`}>
           <button
             type="button"
-            className="work-bar"
+            className="work-accordion__bar"
             onClick={onToggleWork}
             aria-expanded={workOpen}
           >
-            <span className="work-bar__label">📋 작업 패널</span>
-            <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
+            <span className="work-accordion__label">📋 작업 패널</span>
+            <span className="work-accordion__chev">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
           </button>
-          <div className="work-panel__body">
+          <div className="work-accordion__body">
             <WorkView vendor={vendor} job={job} />
           </div>
-        </section>
+        </div>
       </div>
     </>
   );
