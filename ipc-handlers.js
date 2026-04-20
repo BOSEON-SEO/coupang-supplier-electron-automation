@@ -11,6 +11,7 @@ const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { safeStorage, dialog } = require('electron');
+const XLSX = require('xlsx');
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -175,7 +176,62 @@ let activeProcess = null;
 let activeProcessId = 0; // 고유 실행 ID
 let activeScriptName = null; // 현재 실행 중인 script 표시 이름 (python:status 노출용)
 
-function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget }) {
+// ── 재고조정: po.xlsx 헤더 매칭 ─────────────────────────────
+// poParser.js 와 동일 의미지만 main process 는 CJS 라서 별도 상수.
+const PO_HEADER_TO_KEY = {
+  '발주번호': 'coupang_order_seq',
+  '주문번호': 'coupang_order_seq',
+  'SKU ID': 'sku_id',
+  '상품번호': 'sku_id',
+  'SKU 이름': 'sku_name',
+  '상품이름': 'sku_name',
+  '상품명': 'sku_name',
+  'SKU Barcode': 'sku_barcode',
+  'SKU Barcode ': 'sku_barcode',
+  '상품바코드': 'sku_barcode',
+  '물류센터': 'departure_warehouse',
+  '입고예정일': 'expected_arrival_date',
+  '발주수량': 'order_quantity',
+  '확정수량': 'confirmed_qty',
+};
+
+/** aoa 기준으로 헤더 매핑 + 행별 원본 인덱스를 보존한 parse */
+function parsePoAoa(aoa) {
+  if (!aoa.length) return { keyByCol: {}, headerRow: [], rows: [] };
+  const header = aoa[0] || [];
+  const keyByCol = {};
+  for (let c = 0; c < header.length; c += 1) {
+    const label = String(header[c] ?? '').trim();
+    const key = PO_HEADER_TO_KEY[label];
+    if (key) keyByCol[c] = key;
+  }
+  const rows = [];
+  for (let r = 1; r < aoa.length; r += 1) {
+    const row = aoa[r] || [];
+    const obj = { rowIndex: r }; // 0-based 데이터 배열 인덱스 (헤더 제외 x, 헤더 포함 기준)
+    for (let c = 0; c < row.length; c += 1) {
+      const key = keyByCol[c];
+      if (!key) continue;
+      obj[key] = row[c];
+    }
+    if (obj.coupang_order_seq || obj.sku_id || obj.sku_barcode) rows.push(obj);
+  }
+  return { keyByCol, headerRow: header, rows };
+}
+
+function findConfirmedQtyColIndex(headerRow) {
+  for (let c = 0; c < headerRow.length; c += 1) {
+    const label = String(headerRow[c] ?? '').trim();
+    if (label === '확정수량') return c;
+  }
+  return -1;
+}
+
+function registerIpcHandlers({
+  ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget,
+  openStockAdjustWindow, openTransportWindow,
+  isJobLocked, getLockedJobKeys, closeStockAdjustWindow,
+}) {
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
   const CREDENTIALS_PATH = path.join(dataDir, 'credentials.enc');
   const SETTINGS_PATH = path.join(dataDir, 'settings.json');
@@ -1050,6 +1106,339 @@ function registerIpcHandlers({ ipcMain, getWindow, dataDir, cdpPort, setPendingD
     const win = getWindow?.();
     win?.webContents.send('action:countdown', { actionName });
     return { acknowledged: true };
+  });
+
+  // ── 재고조정 서브 창 제어 ──────────────────────────────────
+  ipcMain.handle('stockAdjust:open', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (typeof openStockAdjustWindow !== 'function') {
+      return { success: false, error: 'openStockAdjustWindow not wired' };
+    }
+    openStockAdjustWindow({ date, vendor, sequence });
+    return { success: true };
+  });
+
+  ipcMain.handle('stockAdjust:close', async (e) => {
+    try {
+      const win = require('electron').BrowserWindow.fromWebContents(e.sender);
+      if (win && !win.isDestroyed()) win.close();
+    } catch { /* 무시 */ }
+    return { success: true };
+  });
+
+  ipcMain.handle('stockAdjust:getLocks', async () => {
+    return { lockedJobKeys: typeof getLockedJobKeys === 'function' ? getLockedJobKeys() : [] };
+  });
+
+  /**
+   * stockAdjust:load — po.xlsx 를 읽어 SKU 바코드별로 그룹핑한 결과를 반환.
+   * 각 행에는 원본 xlsx 의 rowIndex (헤더 포함 0-based) 가 포함되어 save 에서 활용.
+   */
+  ipcMain.handle('stockAdjust:load', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const poPath = path.join(jobDir(dataDir, date, vendor, sequence), 'po.xlsx');
+    if (!fs.existsSync(poPath)) {
+      return { success: false, error: `po.xlsx 가 없습니다: ${poPath}` };
+    }
+    try {
+      const wb = XLSX.readFile(poPath, { cellDates: false, cellStyles: false });
+      const wsName = wb.SheetNames[0];
+      const ws = wb.Sheets[wsName];
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const { rows } = parsePoAoa(aoa);
+
+      // sku_barcode 기준 그룹 — 없으면 sku_id 로 fallback
+      const byKey = new Map();
+      for (const r of rows) {
+        const k = String(r.sku_barcode || r.sku_id || '');
+        if (!byKey.has(k)) {
+          byKey.set(k, {
+            sku_barcode: r.sku_barcode || '',
+            sku_id: r.sku_id || '',
+            sku_name: r.sku_name || '',
+            total_order_qty: 0,
+            rows: [],
+          });
+        }
+        const g = byKey.get(k);
+        const orderQty = Number(r.order_quantity) || 0;
+        g.total_order_qty += orderQty;
+        g.rows.push({
+          rowIndex: r.rowIndex,
+          coupang_order_seq: String(r.coupang_order_seq ?? ''),
+          departure_warehouse: String(r.departure_warehouse ?? ''),
+          order_quantity: orderQty,
+          confirmed_qty: r.confirmed_qty === '' || r.confirmed_qty == null
+            ? orderQty
+            : Number(r.confirmed_qty) || 0,
+        });
+      }
+      // 바코드(혹은 SKU) 정렬
+      const groups = Array.from(byKey.values()).sort((a, b) =>
+        String(a.sku_barcode || a.sku_id).localeCompare(String(b.sku_barcode || b.sku_id))
+      );
+      return { success: true, groups };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * stockAdjust:save — patches 배열을 받아 po.xlsx 의 확정수량 셀을 덮어쓴다.
+   * patches: [{ rowIndex, confirmed_qty }]
+   * rowIndex 는 sheet_to_json({header:1}) 기준 (헤더 포함 0-based).
+   */
+  ipcMain.handle('stockAdjust:save', async (_e, date, vendor, sequence, patches) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!Array.isArray(patches)) {
+      return { success: false, error: 'patches must be array' };
+    }
+    const poPath = path.join(jobDir(dataDir, date, vendor, sequence), 'po.xlsx');
+    if (!fs.existsSync(poPath)) {
+      return { success: false, error: `po.xlsx 가 없습니다: ${poPath}` };
+    }
+    try {
+      const wb = XLSX.readFile(poPath, { cellDates: false, cellStyles: true });
+      const wsName = wb.SheetNames[0];
+      const ws = wb.Sheets[wsName];
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (!aoa.length) return { success: false, error: '빈 시트' };
+
+      const headerRow = aoa[0] || [];
+      const colIdx = findConfirmedQtyColIndex(headerRow);
+      if (colIdx < 0) {
+        return { success: false, error: "'확정수량' 열을 찾지 못했습니다." };
+      }
+
+      let applied = 0;
+      for (const p of patches) {
+        if (!p || !Number.isInteger(p.rowIndex) || p.rowIndex < 1) continue;
+        const qty = Number(p.confirmed_qty);
+        if (!Number.isFinite(qty) || qty < 0) continue;
+        const addr = XLSX.utils.encode_cell({ r: p.rowIndex, c: colIdx });
+        ws[addr] = { t: 'n', v: qty, w: String(qty) };
+        applied += 1;
+      }
+
+      // ref 재계산 — row 가 늘어나진 않지만 열이 추가됐을 때 안전
+      if (ws['!ref']) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        if (range.e.c < colIdx) {
+          range.e.c = colIdx;
+          ws['!ref'] = XLSX.utils.encode_range(range);
+        }
+      }
+
+      XLSX.writeFile(wb, poPath, { bookType: 'xlsx' });
+      return { success: true, applied };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── 운송 분배 서브 창 ──────────────────────────────────────
+  ipcMain.handle('transport:open', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (typeof openTransportWindow !== 'function') {
+      return { success: false, error: 'openTransportWindow not wired' };
+    }
+    openTransportWindow({ date, vendor, sequence });
+    return { success: true };
+  });
+
+  ipcMain.handle('transport:close', async (e) => {
+    try {
+      const win = require('electron').BrowserWindow.fromWebContents(e.sender);
+      if (win && !win.isDestroyed()) win.close();
+    } catch { /* 무시 */ }
+    return { success: true };
+  });
+
+  /**
+   * transport:load — confirmation.xlsx 를 읽어 "밀크런" 행만 물류센터별로 그룹핑.
+   * 각 그룹에 벤더설정 기본값 + 이미 저장된 transport.json 을 병합한 초기값을 얹어 반환.
+   */
+  ipcMain.handle('transport:load', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const confPath = path.join(dir, 'confirmation.xlsx');
+    if (!fs.existsSync(confPath)) {
+      return { success: false, error: '발주확정서(confirmation.xlsx) 가 아직 없습니다. 먼저 생성하세요.' };
+    }
+    try {
+      const wb = XLSX.readFile(confPath, { cellDates: false, cellStyles: false });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (!aoa.length) return { success: false, error: '빈 시트' };
+
+      const header = aoa[0] || [];
+      const col = {};
+      header.forEach((h, i) => {
+        const label = String(h ?? '').trim();
+        col[label] = i;
+      });
+      const iOrder = col['발주번호'];
+      const iWh = col['물류센터'];
+      const iType = col['입고유형'];
+      const iSkuId = col['상품번호'];
+      const iBarcode = col['상품바코드'];
+      const iName = col['상품이름'];
+      const iQty = col['확정수량'];
+      if (iWh == null || iType == null) {
+        return { success: false, error: '필수 열(물류센터/입고유형) 을 찾지 못했습니다.' };
+      }
+
+      // 물류센터별 그룹 — 전체 행 (쉽먼트/밀크런 결정은 이제 transport 창에서)
+      const byWh = new Map();
+      for (let r = 1; r < aoa.length; r += 1) {
+        const row = aoa[r] || [];
+        const wh = String(row[iWh] ?? '').trim();
+        if (!wh) continue;
+        const type = String(row[iType] ?? '').trim();
+        const confirmedQty = Number(row[iQty]) || 0;
+        if (!byWh.has(wh)) {
+          byWh.set(wh, {
+            warehouse: wh,
+            total_confirmed: 0,
+            defaultType: type,          // 첫 행의 입고유형을 default 로
+            skus: [],
+          });
+        }
+        const g = byWh.get(wh);
+        g.total_confirmed += confirmedQty;
+        g.skus.push({
+          rowIndex: r,
+          rowKey: `${String(row[iOrder] ?? '')}|${String(row[iBarcode] ?? '')}|${r}`,
+          coupang_order_seq: String(row[iOrder] ?? ''),
+          sku_id: String(row[iSkuId] ?? ''),
+          sku_barcode: String(row[iBarcode] ?? ''),
+          sku_name: String(row[iName] ?? ''),
+          confirmed_qty: confirmedQty,
+        });
+      }
+
+      // 기본값 병합 — 전역 settings + 벤더 override
+      let defaults = {};
+      try {
+        if (fs.existsSync(path.join(dataDir, 'settings.json'))) {
+          const s = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf-8'));
+          defaults = s.settings || {};
+        }
+      } catch { /* 무시 */ }
+      let vendorOverrides = {};
+      try {
+        if (fs.existsSync(path.join(dataDir, 'vendors.json'))) {
+          const v = JSON.parse(fs.readFileSync(path.join(dataDir, 'vendors.json'), 'utf-8'));
+          const entry = (v.vendors || []).find((x) => x.id === vendor);
+          vendorOverrides = entry?.settings || {};
+        }
+      } catch { /* 무시 */ }
+      const pick = (k) => {
+        const ov = vendorOverrides[k];
+        if (ov !== undefined && ov !== '') return ov;
+        return defaults[k] ?? '';
+      };
+      const defTransport = {
+        originId:     pick('transportOrigin'),
+        rentalId:     pick('transportRental'),
+        totalBoxes:   pick('transportBoxes'),
+        palletCount:  pick('transportPallets'),
+        palletWidth:  pick('transportPalletWidth'),
+        palletHeight: pick('transportPalletHeight'),
+        palletDepth:  pick('transportPalletDepth'),
+      };
+
+      const originList = Array.isArray(defaults.transportOriginList) ? defaults.transportOriginList : [];
+      const rentalList = Array.isArray(defaults.transportRentalList) ? defaults.transportRentalList : [];
+
+      // 기존 저장값 로드
+      let saved = {};
+      const transportPath = path.join(dir, 'transport.json');
+      try {
+        if (fs.existsSync(transportPath)) {
+          const j = JSON.parse(fs.readFileSync(transportPath, 'utf-8'));
+          saved = j.assignments || {};
+        }
+      } catch { /* 무시 */ }
+
+      const defaultTypeFallback = defaults.defaultTransport || '쉽먼트';
+
+      const defaultPallet = () => ({
+        width:    defTransport.palletWidth  ?? '',
+        height:   defTransport.palletHeight ?? '',
+        depth:    defTransport.palletDepth  ?? '',
+        count:    defTransport.palletCount  ?? '',
+        rentalId: defTransport.rentalId     ?? '',
+      });
+
+      const groups = Array.from(byWh.values())
+        .sort((a, b) => a.warehouse.localeCompare(b.warehouse))
+        .map((g) => {
+          const s = saved[g.warehouse] || {};
+          const transportType = s.transportType ?? g.defaultType ?? defaultTypeFallback;
+          return {
+            warehouse: g.warehouse,
+            total_confirmed: g.total_confirmed,
+            skus: g.skus,
+            assignment: {
+              transportType,
+
+              // 쉽먼트 전용
+              boxCount:  s.boxCount  ?? 0,
+              skuBoxes:  s.skuBoxes  || {},
+
+              // 밀크런 전용
+              originId:   s.originId   ?? defTransport.originId,
+              totalBoxes: s.totalBoxes ?? defTransport.totalBoxes,
+              pallets:    Array.isArray(s.pallets) && s.pallets.length
+                ? s.pallets
+                : [defaultPallet()],
+              skuNotes:   s.skuNotes   || {},
+            },
+          };
+        });
+
+      return { success: true, groups, defaults: defTransport, originList, rentalList };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * transport:save — 물류센터별 assignment 를 transport.json 에 저장.
+   * assignments: { [warehouse]: { origin, boxes, weight, pallets } }
+   */
+  ipcMain.handle('transport:save', async (_e, date, vendor, sequence, assignments) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!assignments || typeof assignments !== 'object') {
+      return { success: false, error: 'assignments must be object' };
+    }
+    try {
+      const dir = jobDir(dataDir, date, vendor, sequence);
+      fs.mkdirSync(dir, { recursive: true });
+      const transportPath = path.join(dir, 'transport.json');
+      const payload = {
+        schemaVersion: 3,
+        updatedAt: new Date().toISOString(),
+        assignments,
+      };
+      fs.writeFileSync(transportPath, JSON.stringify(payload, null, 2), 'utf-8');
+      return { success: true, path: transportPath };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 }
 

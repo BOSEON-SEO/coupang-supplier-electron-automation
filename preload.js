@@ -47,6 +47,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCredentials: (vendorId) => ipcRenderer.invoke('credentials:delete', vendorId),
   checkSession: () => ipcRenderer.invoke('session:check'),
 
+  // ── 재고조정 서브 창 ──
+  stockAdjust: {
+    open: (date, vendor, sequence) => ipcRenderer.invoke('stockAdjust:open', date, vendor, sequence),
+    close: () => ipcRenderer.invoke('stockAdjust:close'),
+    load: (date, vendor, sequence) => ipcRenderer.invoke('stockAdjust:load', date, vendor, sequence),
+    save: (date, vendor, sequence, patches) =>
+      ipcRenderer.invoke('stockAdjust:save', date, vendor, sequence, patches),
+    getLocks: () => ipcRenderer.invoke('stockAdjust:getLocks'),
+    onLocksChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('stock-adjust:locks-changed', handler);
+      return () => ipcRenderer.removeListener('stock-adjust:locks-changed', handler);
+    },
+  },
+
+  // ── 운송 분배 서브 창 ──
+  transport: {
+    open: (date, vendor, sequence) => ipcRenderer.invoke('transport:open', date, vendor, sequence),
+    close: () => ipcRenderer.invoke('transport:close'),
+    load: (date, vendor, sequence) => ipcRenderer.invoke('transport:load', date, vendor, sequence),
+    save: (date, vendor, sequence, assignments) =>
+      ipcRenderer.invoke('transport:save', date, vendor, sequence, assignments),
+  },
+
   // ── 웹 뷰 (WebContentsView) ──
   webview: {
     setVendor: (vendorId) => ipcRenderer.invoke('webview:setVendor', vendorId),

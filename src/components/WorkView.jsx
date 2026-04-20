@@ -8,6 +8,7 @@ import { getPlugin } from '../core/plugins';
 import { nextPhase } from './PhaseStepper';
 import { buildConfirmationArrayBuffer } from '../core/confirmationBuilder';
 import { parsePoSheets, parsePoBuffer } from '../core/poParser';
+import { applyPoStyle } from '../core/poStyler';
 
 /**
  * 작업 뷰 — FortuneSheet 기반 스프레드시트 편집
@@ -58,6 +59,14 @@ export default function WorkView({ vendor, job, onCloseWork }) {
   const [loginScriptRunning, setLoginScriptRunning] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
 
+  // ── 재고조정 창으로 인한 잠금 상태 ──
+  // 현재 job 의 재고조정 창이 열려있으면 PO/발주확정서 편집·저장·재생성 금지.
+  const [lockedJobKeys, setLockedJobKeys] = useState([]);
+  const currentJobKey = job
+    ? `${job.date}/${job.vendor}/${String(job.sequence).padStart(2, '0')}`
+    : null;
+  const jobLocked = !!currentJobKey && lockedJobKeys.includes(currentJobKey);
+
   // ── Refs ──
   const cleanupRef = useRef([]);
   const autoLoginTriggeredRef = useRef(false);
@@ -69,6 +78,37 @@ export default function WorkView({ vendor, job, onCloseWork }) {
   useEffect(() => { vendorRef.current = vendor; }, [vendor]);
   useEffect(() => { loadedPathRef.current = loadedPath; }, [loadedPath]);
   useEffect(() => { jobRef.current = job; }, [job]);
+
+  // ── 재고조정 lock 구독 ──
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.stockAdjust) return undefined;
+    let alive = true;
+    api.stockAdjust.getLocks().then((res) => {
+      if (alive && Array.isArray(res?.lockedJobKeys)) setLockedJobKeys(res.lockedJobKeys);
+    });
+    const unsub = api.stockAdjust.onLocksChanged((data) => {
+      setLockedJobKeys(Array.isArray(data?.lockedJobKeys) ? data.lockedJobKeys : []);
+    });
+    return () => {
+      alive = false;
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
+
+  // 재고조정 창이 닫히며 lock 이 풀리는 순간, PO 탭을 보고 있으면 디스크에서 다시 읽어
+  // 사용자가 저장한 확정수량 변경을 곧바로 보이게 한다.
+  const prevLockedRef = useRef(false);
+  useEffect(() => {
+    const wasLocked = prevLockedRef.current;
+    prevLockedRef.current = jobLocked;
+    if (!wasLocked || jobLocked) return;
+    const j = jobRef.current;
+    const p = loadedPathRef.current || '';
+    if (j && p.endsWith('po.xlsx')) {
+      loadJobPoFile(j);
+    }
+  }, [jobLocked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const appendLog = useCallback((level, message) => {
     setLogs((prev) => {
@@ -96,7 +136,9 @@ export default function WorkView({ vendor, job, onCloseWork }) {
       appendLog('error', `PO 파일 읽기 실패: ${read?.error}`);
       return false;
     }
-    setXlsxBuffer(read.data);
+    // 표시용으로만 스타일 입힘 (디스크 파일은 그대로)
+    const styled = await applyPoStyle(read.data);
+    setXlsxBuffer(styled);
     setLoadedPath(resolved.path);
     latestSheetsRef.current = null;
     appendLog('info', `PO 파일 로드: ${j.vendor} ${j.sequence}차`);
@@ -678,6 +720,56 @@ export default function WorkView({ vendor, job, onCloseWork }) {
     appendLog('info', `[다운로드] ${res.path}`);
   }, [job, dirty, appendLog]);
 
+  // ── 발주확정 업로드 준비 (업로드 직전 정지) ──
+  const handleUploadPrepare = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+
+    // 현재 탭이 확정서면 dirty 내용 먼저 디스크에 저장
+    if (dirty && latestSheetsRef.current && loadedPathRef.current?.endsWith('confirmation.xlsx')) {
+      try {
+        const buf = sheetsToXlsx(latestSheetsRef.current);
+        const w = await api.writeFile(loadedPathRef.current, buf);
+        if (!w?.success) {
+          appendLog('error', `저장 실패: ${w?.error ?? 'unknown'}`);
+          return;
+        }
+        setDirty(false);
+        appendLog('info', '[업로드 준비] 편집 내용 먼저 저장');
+      } catch (err) {
+        appendLog('error', `저장 실패: ${err.message}`);
+        return;
+      }
+    }
+
+    // 파일 존재 확인
+    const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'confirmation.xlsx');
+    if (!resolved?.success) {
+      appendLog('error', `경로 해석 실패: ${resolved?.error}`);
+      return;
+    }
+    const exists = await api.fileExists(resolved.path);
+    if (!exists) {
+      appendLog('warn', '확정서(confirmation.xlsx) 가 아직 생성되지 않았습니다.');
+      return;
+    }
+
+    appendLog('info', `업로드 준비 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
+    const res = await api.runPython('scripts/po_upload.py', [
+      '--vendor', job.vendor,
+      '--date', job.date,
+      '--sequence', String(job.sequence),
+    ]);
+    if (res.success) {
+      setPythonRunning(true);
+      // 웹뷰에 쿠팡 업로드 폼을 보여주기 위해 작업 패널 닫음
+      onCloseWork?.();
+    } else {
+      appendLog('error', `업로드 준비 실행 실패: ${res.error}`);
+    }
+  }, [job, dirty, appendLog, onCloseWork]);
+
   // ── Python 취소 ──
   const handleCancelPython = useCallback(async () => {
     const api = window.electronAPI;
@@ -769,16 +861,42 @@ export default function WorkView({ vendor, job, onCloseWork }) {
 
         {/* 활성 탭별 컨텍스트 액션 */}
         <div className="workview-section-header__actions">
+          {jobLocked && (
+            <span
+              className="workview-lock-badge"
+              title="재고조정 창이 열려있는 동안 원본 PO / 발주확정서는 편집 잠금"
+            >
+              🔒 재고조정 중
+            </span>
+          )}
           {loadedPath?.endsWith('confirmation.xlsx') && (
             <>
               <button
                 type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => job && window.electronAPI?.transport?.open(job.date, job.vendor, job.sequence)}
+                disabled={!job || jobLocked}
+                title={jobLocked ? '이미 플러그인 창이 열려있습니다' : '밀크런 물류센터별 출고지/박스/중량/팔레트 지정'}
+              >
+                🚚 운송 분배
+              </button>
+              <button
+                type="button"
                 className="btn btn--primary btn--sm"
                 onClick={handleBuildConfirmation}
-                disabled={!job || pythonRunning}
-                title="PO 의 확정수량을 반영해 발주확정서 재생성"
+                disabled={!job || pythonRunning || jobLocked}
+                title={jobLocked ? '플러그인 창이 열려있습니다' : 'PO 의 확정수량을 반영해 발주확정서 재생성'}
               >
                 🔄 재생성
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => requestDangerous('발주확정 업로드 준비', handleUploadPrepare)}
+                disabled={!job || pythonRunning || jobLocked}
+                title={jobLocked ? '플러그인 창이 열려있습니다' : '업로드 폼·약관 동의·파일 주입까지 자동 — 업로드 실행 버튼은 수동'}
+              >
+                ⬆ 업로드 준비
               </button>
               <button
                 type="button"
@@ -795,10 +913,19 @@ export default function WorkView({ vendor, job, onCloseWork }) {
             <>
               <button
                 type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => job && window.electronAPI?.stockAdjust?.open(job.date, job.vendor, job.sequence)}
+                disabled={!job || jobLocked}
+                title={jobLocked ? '이미 재고조정 창이 열려있습니다' : 'SKU 별로 그룹핑해서 각 발주별 출고수량을 지정'}
+              >
+                📦 재고조정
+              </button>
+              <button
+                type="button"
                 className="btn btn--primary btn--sm"
                 onClick={handleBuildConfirmation}
-                disabled={!job || pythonRunning}
-                title="PO 의 확정수량을 반영해 발주확정서 생성"
+                disabled={!job || pythonRunning || jobLocked}
+                title={jobLocked ? '재고조정 창이 열려있습니다' : 'PO 의 확정수량을 반영해 발주확정서 생성'}
               >
                 📋 확정서 생성
               </button>
@@ -817,8 +944,8 @@ export default function WorkView({ vendor, job, onCloseWork }) {
             type="button"
             className="btn btn--secondary btn--sm"
             onClick={handleSaveNow}
-            disabled={!dirty || saving || !xlsxBuffer}
-            title="현재 파일에 덮어쓰기"
+            disabled={!dirty || saving || !xlsxBuffer || jobLocked}
+            title={jobLocked ? '재고조정 창이 열려있습니다' : '현재 파일에 덮어쓰기'}
           >
             💾 {saving ? '저장 중...' : '저장'}
           </button>

@@ -103,7 +103,7 @@ export default function WebView({ vendor, isActive }) {
   }, [editingUrl]);
 
   const handleGoHome = () =>
-    window.electronAPI?.webview?.navigate('https://supplier.coupang.com');
+    window.electronAPI?.webview?.navigate('https://supplier.coupang.com/dashboard/KR');
   const handleReload = () => window.electronAPI?.webview?.reload();
   const handleLogin = async () => {
     if (!vendor) {

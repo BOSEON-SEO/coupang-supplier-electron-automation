@@ -5,7 +5,7 @@ const os = require('os');
 const { registerIpcHandlers } = require('./ipc-handlers');
 
 // 쿠팡 서플라이어 사이트 진입 URL
-const COUPANG_HOME_URL = 'https://supplier.coupang.com';
+const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
 
 // ── CDP 원격 디버깅 포트 ────────────────────────────────────
 // Playwright가 connect_over_cdp()로 attach하기 위한 엔드포인트.
@@ -32,6 +32,33 @@ let webViewVendor = null;    // 현재 webView가 사용 중인 vendor id
 let webViewBounds = { x: 0, y: 0, width: 0, height: 0 };
 let webViewVisible = false;
 
+// ── 플러그인 서브 창 관리 (재고조정 / 운송분배 공용) ─────────
+// jobKey = `${date}/${vendor}/${seq:02d}` 단위로 각 종류별 최대 1개 창.
+// 어느 종류든 창이 살아있으면 그 job 은 메인창에서 편집 잠금.
+const stockAdjustWindows = new Map(); // jobKey → BrowserWindow
+const transportWindows = new Map();   // jobKey → BrowserWindow
+
+function jobKeyOf(date, vendor, sequence) {
+  const seq = String(sequence).padStart(2, '0');
+  return `${date}/${vendor}/${seq}`;
+}
+
+function getLockedJobKeys() {
+  const s = new Set();
+  for (const k of stockAdjustWindows.keys()) s.add(k);
+  for (const k of transportWindows.keys()) s.add(k);
+  return Array.from(s);
+}
+
+function broadcastLocks() {
+  const keys = getLockedJobKeys();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('stock-adjust:locks-changed', { lockedJobKeys: keys });
+  }
+}
+// 하위 호환 — 기존 호출부 유지
+const broadcastStockAdjustLocks = broadcastLocks;
+
 // 다음 다운로드를 어디에 저장할지 — ipc-handlers 의 python:run 이 args 를
 // 파싱해 setPendingDownloadTarget 으로 설정하고, will-download 훅에서 소비한다.
 let pendingDownloadTarget = null;
@@ -41,7 +68,7 @@ function setPendingDownloadTarget(absPath) { pendingDownloadTarget = absPath; }
  * 벤더별 WebContentsView 생성/교체.
  * - partition: persist:vendor-{vendorId} 로 세션 격리
  * - 기존 webView 가 있으면 destroy 후 재생성
- * - 초기 URL: https://supplier.coupang.com (Keycloak으로 자동 redirect)
+ * - 초기 URL: https://supplier.coupang.com/dashboard/KR (Keycloak으로 자동 redirect)
  */
 function ensureWebView(vendorId) {
   if (!mainWindow || mainWindow.isDestroyed()) return null;
@@ -147,6 +174,64 @@ function createWindow() {
   });
 }
 
+/**
+ * 플러그인 BrowserWindow 생성 (같은 번들을 hash 라우팅으로 재사용).
+ * kind: 'stock-adjust' | 'transport'
+ * 같은 kind + 같은 jobKey 이면 기존 창을 focus.
+ */
+function openPluginWindow(kind, { date, vendor, sequence }) {
+  const map = kind === 'transport' ? transportWindows : stockAdjustWindows;
+  const titlePrefix = kind === 'transport' ? '운송 분배' : '재고조정';
+  const key = jobKeyOf(date, vendor, sequence);
+  const existing = map.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.focus();
+    return existing;
+  }
+
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    parent: mainWindow || undefined,
+    modal: false,
+    title: `${titlePrefix} · ${vendor} · ${date} · ${sequence}차`,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  const hash = `#/${kind}?date=${encodeURIComponent(date)}&vendor=${encodeURIComponent(vendor)}&sequence=${sequence}`;
+  const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
+  if (isDev) {
+    win.loadURL(`http://localhost:3000/${hash}`);
+  } else {
+    win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: hash.slice(1) });
+  }
+
+  map.set(key, win);
+  broadcastLocks();
+
+  win.on('closed', () => {
+    if (map.get(key) === win) map.delete(key);
+    broadcastLocks();
+  });
+
+  return win;
+}
+
+// 기존 호출부 호환 — 재고조정 전용 wrapper
+function openStockAdjustWindow(opts) {
+  return openPluginWindow('stock-adjust', opts);
+}
+function openTransportWindow(opts) {
+  return openPluginWindow('transport', opts);
+}
+
 app.whenReady().then(() => {
   registerIpcHandlers({
     ipcMain,
@@ -154,6 +239,18 @@ app.whenReady().then(() => {
     dataDir: DATA_DIR,
     cdpPort: CDP_PORT,
     setPendingDownloadTarget,
+    openStockAdjustWindow,
+    openTransportWindow,
+    isJobLocked: (date, vendor, seq) => {
+      const k = jobKeyOf(date, vendor, seq);
+      return stockAdjustWindows.has(k) || transportWindows.has(k);
+    },
+    getLockedJobKeys,
+    closeStockAdjustWindow: (date, vendor, seq) => {
+      const key = jobKeyOf(date, vendor, seq);
+      const w = stockAdjustWindows.get(key);
+      if (w && !w.isDestroyed()) w.close();
+    },
   });
 
   // ── WebContentsView 제어 IPC ────────────────────────────
