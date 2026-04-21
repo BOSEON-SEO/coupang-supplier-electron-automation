@@ -50,10 +50,29 @@ function getLockedJobKeys() {
   return Array.from(s);
 }
 
+/**
+ * 현재 lock 상태를 jobKey → { stockAdjust?: true, transport?: true } 형태로 반환.
+ * renderer 에서 어떤 종류의 플러그인 창이 열려있는지 라벨링에 활용.
+ */
+function getLockedJobsByType() {
+  const map = {};
+  for (const k of stockAdjustWindows.keys()) {
+    if (!map[k]) map[k] = {};
+    map[k].stockAdjust = true;
+  }
+  for (const k of transportWindows.keys()) {
+    if (!map[k]) map[k] = {};
+    map[k].transport = true;
+  }
+  return map;
+}
+
 function broadcastLocks() {
-  const keys = getLockedJobKeys();
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('stock-adjust:locks-changed', { lockedJobKeys: keys });
+    mainWindow.webContents.send('stock-adjust:locks-changed', {
+      lockedJobKeys: getLockedJobKeys(),
+      locks: getLockedJobsByType(),
+    });
   }
 }
 // 하위 호환 — 기존 호출부 유지
@@ -246,6 +265,7 @@ app.whenReady().then(() => {
       return stockAdjustWindows.has(k) || transportWindows.has(k);
     },
     getLockedJobKeys,
+    getLockedJobsByType,
     closeStockAdjustWindow: (date, vendor, seq) => {
       const key = jobKeyOf(date, vendor, seq);
       const w = stockAdjustWindows.get(key);

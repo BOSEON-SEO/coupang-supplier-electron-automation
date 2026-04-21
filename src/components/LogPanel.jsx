@@ -18,6 +18,7 @@ export default function LogPanel({ logs, hideHeader = false }) {
     switch (level) {
       case 'error': return 'log-entry--error';
       case 'warn': return 'log-entry--warn';
+      case 'event': return 'log-entry--event';
       default: return 'log-entry--info';
     }
   };

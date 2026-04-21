@@ -106,11 +106,13 @@ export default function TransportView({
           count:    String(p.count    ?? ''),
           rentalId: String(p.rentalId ?? ''),
         }));
-        entry.skuNotes = {};
-        for (const sku of g.skus) {
-          const n = String(a.skuNotes?.[sku.rowKey] ?? '').trim();
-          if (n) entry.skuNotes[sku.rowKey] = n;
-        }
+      }
+
+      // 비고는 쉽먼트/밀크런 공통 저장
+      entry.skuNotes = {};
+      for (const sku of g.skus) {
+        const n = String(a.skuNotes?.[sku.rowKey] ?? '').trim();
+        if (n) entry.skuNotes[sku.rowKey] = n;
       }
 
       result[g.warehouse] = entry;
@@ -358,7 +360,7 @@ function ShipmentSettings({ assignment, onField }) {
         <span className="tcard__pallet-label">전체 박스</span>
         <input
           type="number" min="1" placeholder="박스 개수"
-          className="stock-adjust-input tcard__pallet-count"
+          className="stock-adjust-input tcard__box-add-input"
           value={addN}
           onChange={(e) => setAddN(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
@@ -390,18 +392,6 @@ function SkuTable({
   const boxNumbers = Array.from({ length: boxCount }, (_, i) => i + 1);
 
   const renderAssignCell = (sku) => {
-    if (isMilkrun) {
-      return (
-        <input
-          type="text"
-          className="stock-adjust-input transport-note-input"
-          placeholder="비고 (선택)"
-          value={assignment.skuNotes?.[sku.rowKey] ?? ''}
-          onChange={(e) => onNote(sku.rowKey, e.target.value)}
-        />
-      );
-    }
-
     const rows = assignment.skuBoxes?.[sku.rowKey] || [];
     // 쉽먼트 기본 1줄 — 저장된 게 없으면 빈 행 하나 보여주기
     const displayRows = rows.length > 0 ? rows : [{ boxNo: '', qty: '' }];
@@ -468,6 +458,16 @@ function SkuTable({
     return rows.reduce((s, b) => s + (Number(b.qty) || 0), 0);
   };
 
+  const renderNoteCell = (sku) => (
+    <input
+      type="text"
+      className="stock-adjust-input transport-note-input"
+      placeholder="비고 (선택)"
+      value={assignment.skuNotes?.[sku.rowKey] ?? ''}
+      onChange={(e) => onNote(sku.rowKey, e.target.value)}
+    />
+  );
+
   return (
     <table className="tcard__sku-table">
       <thead>
@@ -476,8 +476,15 @@ function SkuTable({
           <th className="col-barcode">상품바코드</th>
           <th>상품명</th>
           <th className="col-num">확정</th>
-          <th className="col-boxes">{isMilkrun ? '비고' : '박스 배정'}</th>
-          {!isMilkrun && <th className="col-sum">배정합</th>}
+          {isMilkrun ? (
+            <th className="col-note">비고</th>
+          ) : (
+            <>
+              <th className="col-boxes">박스 배정</th>
+              <th className="col-sum">배정합</th>
+              <th className="col-note">비고</th>
+            </>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -493,13 +500,18 @@ function SkuTable({
               <td className="col-barcode">{sku.sku_barcode}</td>
               <td className="col-name" title={sku.sku_name}>{sku.sku_name}</td>
               <td className="col-num">{sku.confirmed_qty}</td>
-              <td className="col-boxes">{renderAssignCell(sku)}</td>
-              {!isMilkrun && (
-                <td className={`col-sum ${statusClass}`}>
-                  {sum}/{sku.confirmed_qty}
-                  {sum > 0 && diff === 0 && <span className="tcard__sum-mark"> ✓</span>}
-                  {sum > 0 && diff !== 0 && <span className="tcard__sum-mark"> ({diff > 0 ? '+' : ''}{diff})</span>}
-                </td>
+              {isMilkrun ? (
+                <td className="col-note">{renderNoteCell(sku)}</td>
+              ) : (
+                <>
+                  <td className="col-boxes">{renderAssignCell(sku)}</td>
+                  <td className={`col-sum ${statusClass}`}>
+                    {sum}/{sku.confirmed_qty}
+                    {sum > 0 && diff === 0 && <span className="tcard__sum-mark"> ✓</span>}
+                    {sum > 0 && diff !== 0 && <span className="tcard__sum-mark"> ({diff > 0 ? '+' : ''}{diff})</span>}
+                  </td>
+                  <td className="col-note">{renderNoteCell(sku)}</td>
+                </>
               )}
             </tr>
           );

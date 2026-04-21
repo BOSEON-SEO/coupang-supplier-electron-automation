@@ -9,6 +9,7 @@ import { nextPhase } from './PhaseStepper';
 import { buildConfirmationArrayBuffer } from '../core/confirmationBuilder';
 import { parsePoSheets, parsePoBuffer } from '../core/poParser';
 import { applyPoStyle } from '../core/poStyler';
+import ResultView from './ResultView';
 
 /**
  * 작업 뷰 — FortuneSheet 기반 스프레드시트 편집
@@ -45,7 +46,7 @@ const SESSION_STATUS = {
   ERROR: 'error',
 };
 
-export default function WorkView({ vendor, job, onCloseWork }) {
+export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   // ── 스프레드시트 데이터 ──
   const [xlsxBuffer, setXlsxBuffer] = useState(null);
   const [loadedPath, setLoadedPath] = useState(null);
@@ -59,13 +60,25 @@ export default function WorkView({ vendor, job, onCloseWork }) {
   const [loginScriptRunning, setLoginScriptRunning] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
 
-  // ── 재고조정 창으로 인한 잠금 상태 ──
-  // 현재 job 의 재고조정 창이 열려있으면 PO/발주확정서 편집·저장·재생성 금지.
+  // ── 플러그인 창으로 인한 잠금 상태 ──
+  // 어떤 종류의 창이 열렸는지도 함께 — 배지 라벨링에 활용.
   const [lockedJobKeys, setLockedJobKeys] = useState([]);
+  const [locks, setLocks] = useState({}); // { jobKey: { stockAdjust, transport } }
   const currentJobKey = job
     ? `${job.date}/${job.vendor}/${String(job.sequence).padStart(2, '0')}`
     : null;
   const jobLocked = !!currentJobKey && lockedJobKeys.includes(currentJobKey);
+  const currentLockTypes = (currentJobKey && locks[currentJobKey]) || {};
+
+  // ── job 폴더 파일 존재 여부 (phase 액션 버튼 enable/disable 판단용) ──
+  const [poExists, setPoExists] = useState(false);
+  const [confirmationExists, setConfirmationExists] = useState(false);
+
+  // ── 활성 탭 ('po' | 'confirmation' | 'result') ──
+  const [activeTab, setActiveTab] = useState('po');
+
+  // ── 업로드 준비 스크립트가 끝나면 "업로드하셨나요?" 확인 오버레이 ──
+  const [askUploadConfirm, setAskUploadConfirm] = useState(false);
 
   // ── Refs ──
   const cleanupRef = useRef([]);
@@ -79,22 +92,47 @@ export default function WorkView({ vendor, job, onCloseWork }) {
   useEffect(() => { loadedPathRef.current = loadedPath; }, [loadedPath]);
   useEffect(() => { jobRef.current = job; }, [job]);
 
-  // ── 재고조정 lock 구독 ──
+  // ── 플러그인 창 lock 구독 ──
   useEffect(() => {
     const api = window.electronAPI;
     if (!api?.stockAdjust) return undefined;
     let alive = true;
     api.stockAdjust.getLocks().then((res) => {
-      if (alive && Array.isArray(res?.lockedJobKeys)) setLockedJobKeys(res.lockedJobKeys);
+      if (!alive) return;
+      if (Array.isArray(res?.lockedJobKeys)) setLockedJobKeys(res.lockedJobKeys);
+      if (res?.locks && typeof res.locks === 'object') setLocks(res.locks);
     });
     const unsub = api.stockAdjust.onLocksChanged((data) => {
       setLockedJobKeys(Array.isArray(data?.lockedJobKeys) ? data.lockedJobKeys : []);
+      setLocks(data?.locks && typeof data.locks === 'object' ? data.locks : {});
     });
     return () => {
       alive = false;
       if (typeof unsub === 'function') unsub();
     };
   }, []);
+
+  // ── 현재 job 의 플러그인 창 open/close 를 이벤트 로그로 ──
+  const prevLockTypesRef = useRef({});
+  useEffect(() => {
+    if (!currentJobKey) return;
+    const prev = prevLockTypesRef.current;
+    const cur = locks[currentJobKey] || {};
+    if (!prev.stockAdjust && cur.stockAdjust) appendLog('event', '📦 재고조정 창 열림');
+    if (prev.stockAdjust && !cur.stockAdjust) appendLog('event', '📦 재고조정 창 닫힘 — 저장된 변경사항 반영');
+    if (!prev.transport && cur.transport) appendLog('event', '🚚 운송분배 창 열림');
+    if (prev.transport && !cur.transport) appendLog('event', '🚚 운송분배 창 닫힘 — transport.json 저장됨');
+    prevLockTypesRef.current = cur;
+  }, [locks, currentJobKey, appendLog]);
+
+  // ── Python 실행 시작 시 작업 패널 자동 접기 (웹뷰 노출) ──
+  const prevPythonRunningRef = useRef(false);
+  useEffect(() => {
+    if (!prevPythonRunningRef.current && pythonRunning) {
+      onCloseWork?.();
+    }
+    prevPythonRunningRef.current = pythonRunning;
+  }, [pythonRunning, onCloseWork]);
 
   // 재고조정 창이 닫히며 lock 이 풀리는 순간, PO 탭을 보고 있으면 디스크에서 다시 읽어
   // 사용자가 저장한 확정수량 변경을 곧바로 보이게 한다.
@@ -109,6 +147,32 @@ export default function WorkView({ vendor, job, onCloseWork }) {
       loadJobPoFile(j);
     }
   }, [jobLocked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── job 파일 존재 여부 프로브 (action bar 버튼 enable/disable 용) ──
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!job) {
+        if (alive) { setPoExists(false); setConfirmationExists(false); }
+        return;
+      }
+      const api = window.electronAPI;
+      if (!api) return;
+      const [poRes, confRes] = await Promise.all([
+        api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx'),
+        api.resolveJobPath(job.date, job.vendor, job.sequence, 'confirmation.xlsx'),
+      ]);
+      const [poE, confE] = await Promise.all([
+        poRes?.success ? api.fileExists(poRes.path) : Promise.resolve(false),
+        confRes?.success ? api.fileExists(confRes.path) : Promise.resolve(false),
+      ]);
+      if (alive) {
+        setPoExists(!!poE);
+        setConfirmationExists(!!confE);
+      }
+    })();
+    return () => { alive = false; };
+  }, [job, jobLocked]);
 
   const appendLog = useCallback((level, message) => {
     setLogs((prev) => {
@@ -278,6 +342,14 @@ export default function WorkView({ vendor, job, onCloseWork }) {
         if (data.exitCode !== 0 && !data.killed) {
           setLoginStatus(SESSION_STATUS.ERROR);
         }
+      }
+
+      // 업로드 준비 스크립트가 성공적으로 끝나면 "업로드하셨나요?" 오버레이 띄움
+      if (
+        (data.scriptName === 'scripts/po_upload.py' || data.scriptName === 'po_upload.py') &&
+        data.exitCode === 0 && !data.killed
+      ) {
+        setAskUploadConfirm(true);
       }
     });
 
@@ -668,6 +740,8 @@ export default function WorkView({ vendor, job, onCloseWork }) {
       setXlsxBuffer(buf);
       setLoadedPath(confirmPath.path);
       latestSheetsRef.current = null;
+      setConfirmationExists(true);
+      setActiveTab('confirmation');
       appendLog('info', `[확정서] 생성 완료 — ${confirmPath.path}`);
     } catch (err) {
       appendLog('error', `확정서 생성 실패: ${err.message}`);
@@ -721,6 +795,7 @@ export default function WorkView({ vendor, job, onCloseWork }) {
   }, [job, dirty, appendLog]);
 
   // ── 발주확정 업로드 준비 (업로드 직전 정지) ──
+  // 주의: 업로드 이력 확인은 handleUploadClickStart 에서 카운트다운 전에 수행.
   const handleUploadPrepare = useCallback(async () => {
     if (!job) return;
     const api = window.electronAPI;
@@ -770,6 +845,39 @@ export default function WorkView({ vendor, job, onCloseWork }) {
     }
   }, [job, dirty, appendLog, onCloseWork]);
 
+  // ── 업로드 준비 버튼 onClick — 이력 있으면 카운트다운 전에 확인 ──
+  const handleUploadClickStart = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+    try {
+      const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
+      const hist = mres?.success ? mres.manifest?.uploadHistory : null;
+      const prevCount = Array.isArray(hist) ? hist.length : 0;
+      if (prevCount > 0) {
+        const proceed = window.confirm(
+          `이 작업에 업로드 기록이 이미 ${prevCount}회 존재합니다.\n계속 진행하시겠습니까?`
+        );
+        if (!proceed) return;
+      }
+    } catch { /* 조회 실패해도 진행 */ }
+    setPendingAction({ label: '발주확정 업로드 준비', run: handleUploadPrepare });
+  }, [job, handleUploadPrepare]);
+
+  // ── 업로드 기록 (쿠팡 업로드 완료 후 수동 체크) ──
+  const handleRecordUpload = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api?.jobs?.recordUpload) return;
+    const res = await api.jobs.recordUpload(job.date, job.vendor, job.sequence);
+    if (!res?.success) {
+      appendLog('error', `업로드 기록 실패: ${res?.error ?? 'unknown'}`);
+      return;
+    }
+    appendLog('event', `[업로드 기록] 스냅샷 저장: ${res.entry.fileName}`);
+    if (res.manifest) onJobUpdated?.(res.manifest);
+  }, [job, appendLog, onJobUpdated]);
+
   // ── Python 취소 ──
   const handleCancelPython = useCallback(async () => {
     const api = window.electronAPI;
@@ -799,51 +907,36 @@ export default function WorkView({ vendor, job, onCloseWork }) {
   return (
     <div className="workview-container">
       <div className="workview-main">
-      <div className="workview-toolbar">
-        <button
-          className="btn btn--secondary btn--sm"
-          onClick={() => requestDangerous('PO 갱신', handlePoRefresh)}
-          type="button"
-          disabled={!job || pythonRunning}
-          title={!job ? '활성 작업 없음' : `${job.date} · ${job.vendor} · ${job.sequence}차 PO 재다운로드`}
-        >
-          🔄 PO 갱신
-        </button>
-
-        {pythonRunning && (
-          <>
-            <button className="btn btn--danger btn--sm" onClick={handleCancelPython} type="button">
-              ⏹ 취소
-            </button>
-            <span className="python-status python-status--running">● 실행 중</span>
-          </>
-        )}
-        <div className="workview-toolbar__spacer" />
-      </div>
-
+      {/* Row 1: 파일 탭 (왼쪽) + PO 갱신 (오른쪽) */}
       <div className="workview-section-header">
         <div className="workview-file-tabs">
           <button
             type="button"
-            className={`workview-file-tab${loadedPath?.endsWith('po.xlsx') ? ' is-active' : ''}`}
-            onClick={() => job && loadJobPoFile(job)}
+            className={`workview-file-tab${activeTab === 'po' ? ' is-active' : ''}`}
+            onClick={() => {
+              if (!job) return;
+              setActiveTab('po');
+              if (!loadedPath?.endsWith('po.xlsx')) loadJobPoFile(job);
+            }}
             disabled={!job}
           >
             📄 PO 원본
           </button>
           <button
             type="button"
-            className={`workview-file-tab${loadedPath?.endsWith('confirmation.xlsx') ? ' is-active' : ''}`}
+            className={`workview-file-tab${activeTab === 'confirmation' ? ' is-active' : ''}`}
             onClick={async () => {
               if (!job) return;
+              setActiveTab('confirmation');
               const api = window.electronAPI;
               const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'confirmation.xlsx');
               if (!resolved?.success) return;
               const exists = await api.fileExists(resolved.path);
               if (!exists) {
-                appendLog('info', '발주확정서가 아직 생성되지 않았습니다. 📋 재생성 버튼을 누르세요.');
+                appendLog('info', '발주확정서가 아직 생성되지 않았습니다. 📋 확정서 생성 버튼을 누르세요.');
                 return;
               }
+              if (loadedPath === resolved.path) return; // 이미 로드됨
               const read = await api.readFile(resolved.path);
               if (read?.success) {
                 setXlsxBuffer(read.data);
@@ -856,109 +949,192 @@ export default function WorkView({ vendor, job, onCloseWork }) {
           >
             📋 발주확정서
           </button>
-          {dirty && <span className="workview-section-header__dirty">· 변경됨</span>}
-        </div>
-
-        {/* 활성 탭별 컨텍스트 액션 */}
-        <div className="workview-section-header__actions">
+          <button
+            type="button"
+            className={`workview-file-tab${activeTab === 'result' ? ' is-active' : ''}`}
+            onClick={() => setActiveTab('result')}
+            disabled={!job}
+          >
+            📊 결과/출력
+          </button>
+          {dirty && activeTab !== 'result' && <span className="workview-section-header__dirty">· 변경됨</span>}
           {jobLocked && (
             <span
               className="workview-lock-badge"
-              title="재고조정 창이 열려있는 동안 원본 PO / 발주확정서는 편집 잠금"
+              title="해당 창이 열려있는 동안 원본 PO / 발주확정서는 편집 잠금"
             >
-              🔒 재고조정 중
+              {currentLockTypes.stockAdjust && currentLockTypes.transport
+                ? '🔒 재고 조정 · 운송 분배 작업중'
+                : currentLockTypes.stockAdjust
+                ? '🔒 재고 조정 작업중'
+                : currentLockTypes.transport
+                ? '🔒 운송 분배 작업중'
+                : '🔒 작업중'}
             </span>
           )}
-          {loadedPath?.endsWith('confirmation.xlsx') && (
-            <>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => job && window.electronAPI?.transport?.open(job.date, job.vendor, job.sequence)}
-                disabled={!job || jobLocked}
-                title={jobLocked ? '이미 플러그인 창이 열려있습니다' : '밀크런 물류센터별 출고지/박스/중량/팔레트 지정'}
-              >
-                🚚 운송 분배
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary btn--sm"
-                onClick={handleBuildConfirmation}
-                disabled={!job || pythonRunning || jobLocked}
-                title={jobLocked ? '플러그인 창이 열려있습니다' : 'PO 의 확정수량을 반영해 발주확정서 재생성'}
-              >
-                🔄 재생성
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => requestDangerous('발주확정 업로드 준비', handleUploadPrepare)}
-                disabled={!job || pythonRunning || jobLocked}
-                title={jobLocked ? '플러그인 창이 열려있습니다' : '업로드 폼·약관 동의·파일 주입까지 자동 — 업로드 실행 버튼은 수동'}
-              >
-                ⬆ 업로드 준비
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => handleDownload('confirmation')}
-                disabled={!job}
-                title="발주확정서를 xlsx 로 다운로드"
-              >
-                ⬇ 다운로드
-              </button>
-            </>
-          )}
-          {loadedPath?.endsWith('po.xlsx') && !loadedPath?.endsWith('confirmation.xlsx') && (
-            <>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => job && window.electronAPI?.stockAdjust?.open(job.date, job.vendor, job.sequence)}
-                disabled={!job || jobLocked}
-                title={jobLocked ? '이미 재고조정 창이 열려있습니다' : 'SKU 별로 그룹핑해서 각 발주별 출고수량을 지정'}
-              >
-                📦 재고조정
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary btn--sm"
-                onClick={handleBuildConfirmation}
-                disabled={!job || pythonRunning || jobLocked}
-                title={jobLocked ? '재고조정 창이 열려있습니다' : 'PO 의 확정수량을 반영해 발주확정서 생성'}
-              >
-                📋 확정서 생성
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => handleDownload('po')}
-                disabled={!job}
-                title="PO 원본을 xlsx 로 다운로드"
-              >
-                ⬇ 다운로드
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            className="btn btn--secondary btn--sm"
-            onClick={handleSaveNow}
-            disabled={!dirty || saving || !xlsxBuffer || jobLocked}
-            title={jobLocked ? '재고조정 창이 열려있습니다' : '현재 파일에 덮어쓰기'}
-          >
-            💾 {saving ? '저장 중...' : '저장'}
-          </button>
         </div>
+
+        <div className="workview-section-header__spacer" />
+
+        {pythonRunning && (
+          <>
+            <button className="btn btn--danger btn--sm" onClick={handleCancelPython} type="button">
+              ⏹ 취소
+            </button>
+            <span className="python-status python-status--running">● 실행 중</span>
+          </>
+        )}
+
+        <button
+          className="btn btn--caution btn--sm"
+          onClick={() => requestDangerous('PO 갱신', handlePoRefresh)}
+          type="button"
+          disabled={!job || pythonRunning}
+          title={!job ? '활성 작업 없음' : `${job.date} · ${job.vendor} · ${job.sequence}차 PO 재다운로드 — 파이프라인 초기화`}
+        >
+          🔄 PO 갱신
+        </button>
       </div>
-      <div className="workview-table-section">
-        <SpreadsheetView
-          xlsxBuffer={xlsxBuffer}
-          fileName="po.xlsx"
-          onChange={handleSheetChange}
-          onReady={(sheets) => { latestSheetsRef.current = sheets; }}
-        />
+
+      {/* Row 2: 탭 컨텍스트 액션 (왼쪽) + 다운로드/저장 (오른쪽) — 결과 탭에서는 생략 */}
+      {activeTab !== 'result' && (
+      <div className="workview-actions-bar">
+        {activeTab === 'po' && (
+          <>
+            <button
+              type="button"
+              className="btn btn--phase-adjust btn--sm"
+              onClick={() => job && window.electronAPI?.stockAdjust?.open(job.date, job.vendor, job.sequence)}
+              disabled={!job || !poExists || jobLocked}
+              title={
+                !poExists ? 'po.xlsx 가 아직 없습니다'
+                  : jobLocked ? '이미 플러그인 창이 열려있습니다'
+                  : 'SKU 별로 그룹핑해서 각 발주별 출고수량을 지정'
+              }
+            >
+              📦 재고조정
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={handleBuildConfirmation}
+              disabled={!job || !poExists || pythonRunning || jobLocked}
+              title={
+                !poExists ? 'po.xlsx 가 아직 없습니다'
+                  : jobLocked ? '플러그인 창이 열려있습니다'
+                  : 'PO 의 확정수량을 반영해 발주확정서 생성/재생성'
+              }
+            >
+              {confirmationExists ? '🔄 확정서 재생성' : '📋 확정서 생성'}
+            </button>
+          </>
+        )}
+        {activeTab === 'confirmation' && (
+          <>
+            <button
+              type="button"
+              className="btn btn--phase-transport btn--sm"
+              onClick={() => job && window.electronAPI?.transport?.open(job.date, job.vendor, job.sequence)}
+              disabled={!job || !confirmationExists || jobLocked}
+              title={
+                !confirmationExists ? '확정서가 아직 없습니다'
+                  : jobLocked ? '이미 플러그인 창이 열려있습니다'
+                  : '창고별 쉽먼트/밀크런 결정 · 박스/팔레트 배정'
+              }
+            >
+              🚚 운송 분배
+            </button>
+            <button
+              type="button"
+              className="btn btn--phase-upload btn--sm"
+              onClick={handleUploadClickStart}
+              disabled={!job || !confirmationExists || pythonRunning || jobLocked}
+              title={
+                !confirmationExists ? '확정서가 아직 없습니다'
+                  : jobLocked ? '플러그인 창이 열려있습니다'
+                  : '업로드 폼·약관 동의·파일 주입까지 자동 — 업로드 실행 버튼은 수동'
+              }
+            >
+              ⬆ 업로드 준비
+            </button>
+          </>
+        )}
+
+        <div className="workview-actions-bar__spacer" />
+
+        {activeTab !== 'result' && (
+          <>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => handleDownload(activeTab === 'confirmation' ? 'confirmation' : 'po')}
+              disabled={!job || !xlsxBuffer}
+              title="현재 탭 파일을 xlsx 로 다운로드"
+            >
+              ⬇ 다운로드
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={handleSaveNow}
+              disabled={!dirty || saving || !xlsxBuffer || jobLocked}
+              title={jobLocked ? '플러그인 창이 열려있습니다' : '현재 파일에 덮어쓰기'}
+            >
+              💾 {saving ? '저장 중...' : '저장'}
+            </button>
+          </>
+        )}
       </div>
+      )}
+
+      {activeTab === 'result' ? (
+        <div className="workview-table-section">
+          <ResultView job={job} appendLog={appendLog} onJobUpdated={onJobUpdated} />
+        </div>
+      ) : (
+        <div className="workview-table-section">
+          <SpreadsheetView
+            xlsxBuffer={xlsxBuffer}
+            fileName="po.xlsx"
+            onChange={handleSheetChange}
+            onReady={(sheets) => { latestSheetsRef.current = sheets; }}
+          />
+        </div>
+      )}
+
+      {askUploadConfirm && (
+        <div className="workview-overlay" role="dialog" aria-modal="true">
+          <div className="workview-overlay__card">
+            <h3 className="workview-overlay__title">📤 쿠팡에 업로드를 완료하셨나요?</h3>
+            <p className="workview-overlay__desc">
+              웹 뷰에서 <b>업로드 실행</b> 버튼을 눌러 정상적으로 제출되었다면,
+              지금 스냅샷을 업로드 이력으로 기록할 수 있습니다.
+              <br />
+              기록하면 현재 <code>confirmation.xlsx</code> 가 <code>history/</code> 폴더에 복사되고,
+              phase 가 <code>uploaded</code> 로 전환됩니다.
+            </p>
+            <div className="workview-overlay__actions">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setAskUploadConfirm(false)}
+              >
+                아니오 / 닫기
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={async () => {
+                  await handleRecordUpload();
+                  setAskUploadConfirm(false);
+                }}
+              >
+                ✅ 예, 기록합니다
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       </div>
 

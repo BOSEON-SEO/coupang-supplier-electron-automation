@@ -197,6 +197,7 @@ body {
 .work-bar--open {
   background: var(--color-bg);
   border-top-color: var(--color-primary);
+  border-bottom-color: transparent;
 }
 
 .work-bar__label { letter-spacing: 0.02em; }
@@ -283,6 +284,56 @@ body {
 
 .btn--danger:hover {
   background: #b5281f;
+}
+
+/* phase 액션 버튼 — 단계별 색상 구분 */
+.btn--phase-adjust {
+  background: #00897b;
+  color: #fff;
+  border-color: #00897b;
+}
+.btn--phase-adjust:hover:not(:disabled) {
+  background: #00695c;
+  border-color: #00695c;
+}
+.btn--phase-transport {
+  background: #43a047;
+  color: #fff;
+  border-color: #43a047;
+}
+.btn--phase-transport:hover:not(:disabled) {
+  background: #2e7d32;
+  border-color: #2e7d32;
+}
+.btn--phase-upload {
+  background: #fb8c00;
+  color: #fff;
+  border-color: #fb8c00;
+}
+.btn--phase-upload:hover:not(:disabled) {
+  background: #ef6c00;
+  border-color: #ef6c00;
+}
+.btn--phase-adjust:disabled,
+.btn--phase-transport:disabled,
+.btn--phase-upload:disabled {
+  opacity: 0.5;
+}
+
+/* 주의 강조 (PO 갱신 — 파이프라인 초기화) */
+.btn--caution {
+  background: transparent;
+  color: #d84315;
+  border: 1px solid #d84315;
+  font-weight: 600;
+}
+.btn--caution:hover:not(:disabled) {
+  background: #d84315;
+  color: #fff;
+  border-color: #d84315;
+}
+.btn--caution:disabled {
+  opacity: 0.4;
 }
 
 .btn--sm {
@@ -1571,24 +1622,22 @@ button.session-badge:disabled {
   flex-wrap: wrap;
 }
 
+/* Row 1: 탭(왼쪽) + PO 갱신/상태(오른쪽) */
 .workview-section-header {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   padding: 0 2px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 6px;
 }
+
+.workview-section-header__spacer { flex: 1; }
 
 .workview-section-header__dirty {
   color: var(--color-warning);
-  text-transform: none;
-  letter-spacing: 0;
   font-weight: 500;
   margin-left: 8px;
 }
@@ -1597,6 +1646,116 @@ button.session-badge:disabled {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Row 2: 컨텍스트 액션(왼쪽) + 다운로드/저장(오른쪽) */
+.workview-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 2px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+  min-height: 32px;
+}
+.workview-actions-bar__spacer {
+  flex: 1;
+}
+
+/* 결과/출력 뷰 */
+.result-view {
+  padding: 16px;
+  overflow: auto;
+  height: 100%;
+}
+.result-view--empty,
+.result-view__empty {
+  color: var(--color-text-muted);
+  padding: 24px 0;
+  text-align: center;
+}
+.result-view__error {
+  color: var(--color-danger);
+  padding: 12px 0;
+}
+.result-view__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.result-view__title {
+  margin: 0;
+  font-size: 15px;
+}
+.result-view__meta {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.result-view__meta code {
+  background: var(--color-bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.result-view__spacer { flex: 1; }
+
+.result-view__section {
+  margin-bottom: 20px;
+}
+.result-view__section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 13px;
+}
+.result-table th,
+.result-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: middle;
+}
+.result-table thead th {
+  background: #eceff1;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.result-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.result-table tbody tr:hover td {
+  background: #f5faff;
+}
+.result-table__col-label { width: 140px; }
+.result-table__col-size  { width: 100px; font-variant-numeric: tabular-nums; text-align: right; }
+.result-table__col-mtime { width: 160px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.result-table__col-actions {
+  width: 200px;
+  text-align: right;
+  white-space: nowrap;
+}
+.result-table__col-actions .btn + .btn {
+  margin-left: 6px;
+}
+.result-table__icon { margin-right: 6px; }
+.result-table__label { font-weight: 500; }
+.result-table code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: var(--color-text);
 }
 
 /* 파일 전환 탭 (PO 원본 ↔ 발주확정서 등) */
@@ -1868,6 +2027,13 @@ button.session-badge:disabled {
   color: var(--color-danger);
 }
 
+.log-entry--event .log-entry__level {
+  color: #6a1b9a;
+}
+.log-entry--event {
+  background: #faf5ff;
+}
+
 .log-entry__message {
   word-break: break-all;
 }
@@ -1886,6 +2052,50 @@ button.session-badge:disabled {
   font-size: 12px;
   font-weight: 600;
   user-select: none;
+}
+
+/* 업로드 완료 확인 오버레이 — 작업 패널 영역만 dim */
+.workview-main { position: relative; }
+.workview-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 20px;
+  backdrop-filter: blur(2px);
+}
+.workview-overlay__card {
+  background: var(--color-surface);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  max-width: 480px;
+  width: 100%;
+  padding: 22px 24px;
+}
+.workview-overlay__title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: var(--color-text);
+}
+.workview-overlay__desc {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.55;
+}
+.workview-overlay__desc code {
+  background: var(--color-bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.workview-overlay__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ── 재고조정 창 ──────────────────────────────────────────── */
@@ -2258,6 +2468,10 @@ button.session-badge:disabled {
   gap: 8px;
   flex-wrap: wrap;
 }
+.tcard__box-add-input {
+  width: 110px;
+  text-align: right;
+}
 .tcard__box-list {
   color: var(--color-text-muted);
   font-size: 12px;
@@ -2292,12 +2506,13 @@ button.session-badge:disabled {
 .tcard__sku-table .col-num      { width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
 .tcard__sku-table .col-boxes    { width: 280px; }
 .tcard__sku-table .col-sum      {
-  width: 90px;
+  width: 68px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   white-space: nowrap;
 }
+.tcard__sku-table .col-note     { min-width: 160px; }
 .col-sum.is-ok    { color: var(--color-success); }
 .col-sum.is-short { color: var(--color-warning); }
 .col-sum.is-over  { color: var(--color-danger); }

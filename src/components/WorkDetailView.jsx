@@ -148,7 +148,7 @@ export default function WorkDetailView({
         <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
       </button>
         <div className="work-panel__inner">
-          <WorkView vendor={vendor} job={job} onCloseWork={onCloseWork} />
+          <WorkView vendor={vendor} job={job} onCloseWork={onCloseWork} onJobUpdated={onJobUpdated} />
         </div>
       </section>
     </div>

@@ -230,7 +230,7 @@ function findConfirmedQtyColIndex(headerRow) {
 function registerIpcHandlers({
   ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget,
   openStockAdjustWindow, openTransportWindow,
-  isJobLocked, getLockedJobKeys, closeStockAdjustWindow,
+  isJobLocked, getLockedJobKeys, getLockedJobsByType, closeStockAdjustWindow,
 }) {
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
   const CREDENTIALS_PATH = path.join(dataDir, 'credentials.enc');
@@ -409,6 +409,124 @@ function registerIpcHandlers({
       if (count > 0) byDate[name] = { count, hasIncomplete };
     }
     return { success: true, byDate };
+  });
+
+  /**
+   * jobs:recordUpload — 쿠팡에 업로드한 시점의 confirmation.xlsx 스냅샷을
+   * job/history/ 에 복사 보관하고 manifest.uploadHistory 에 엔트리 누적.
+   * phase 는 'uploaded' 로 전환.
+   *
+   * PO/확정서 는 계속 자유롭게 편집 가능 — 이 기록은 "무엇을 언제 올렸는지"
+   * 증거물 보관 용도.
+   */
+  ipcMain.handle('jobs:recordUpload', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const src = path.join(dir, 'confirmation.xlsx');
+    if (!fs.existsSync(src)) {
+      return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
+    }
+    try {
+      const histDir = path.join(dir, 'history');
+      fs.mkdirSync(histDir, { recursive: true });
+
+      const now = new Date();
+      const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19); // 2026-04-22T14-30-45
+      const destName = `${ts}-confirmation.xlsx`;
+      const dest = path.join(histDir, destName);
+      fs.copyFileSync(src, dest);
+      const size = fs.statSync(dest).size;
+
+      const cur = readManifest(dataDir, date, vendor, sequence) || {
+        schemaVersion: 1, vendor, date, sequence,
+        phase: 'po_downloaded', completed: false,
+        createdAt: now.toISOString(), stats: {},
+      };
+      const history = Array.isArray(cur.uploadHistory) ? cur.uploadHistory : [];
+      const entry = {
+        timestamp: now.toISOString(),
+        fileName: destName,
+        path: dest,
+        size,
+      };
+      cur.uploadHistory = [...history, entry];
+      cur.phase = 'uploaded';
+      cur.vendor = vendor;
+      cur.date = date;
+      cur.sequence = sequence;
+      writeManifest(dataDir, cur);
+
+      return { success: true, entry, manifest: cur };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * jobs:deleteUploadHistory — 업로드 이력 한 건 제거 (timestamp 로 매칭).
+   * history/ 파일 삭제 + manifest.uploadHistory 에서 엔트리 제거.
+   * 이력이 모두 비워지면 phase 를 'confirmed' 로 되돌림.
+   */
+  ipcMain.handle('jobs:deleteUploadHistory', async (_e, date, vendor, sequence, timestamp) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (typeof timestamp !== 'string' || !timestamp) {
+      return { success: false, error: 'timestamp required' };
+    }
+    try {
+      const cur = readManifest(dataDir, date, vendor, sequence);
+      if (!cur) return { success: false, error: 'manifest not found' };
+      const history = Array.isArray(cur.uploadHistory) ? cur.uploadHistory : [];
+      const target = history.find((h) => h.timestamp === timestamp);
+      if (!target) return { success: false, error: 'history entry not found' };
+
+      // 파일 삭제 — dataDir 하위 경로만 허용 (path escape 방지)
+      try {
+        const resolved = path.resolve(target.path || '');
+        const base = path.resolve(dataDir);
+        if (resolved.startsWith(base + path.sep) && fs.existsSync(resolved)) {
+          fs.unlinkSync(resolved);
+        }
+      } catch { /* 파일 삭제 실패는 무시 — manifest 는 업데이트 */ }
+
+      cur.uploadHistory = history.filter((h) => h.timestamp !== timestamp);
+      if (cur.uploadHistory.length === 0) {
+        cur.phase = 'confirmed';
+        delete cur.uploadHistory;
+      }
+      writeManifest(dataDir, cur);
+      return { success: true, manifest: cur };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /** jobs:listFiles — job 폴더의 파일 목록 (name, size, mtime) */
+  ipcMain.handle('jobs:listFiles', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args', files: [] };
+    }
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    if (!fs.existsSync(dir)) return { success: true, files: [] };
+    try {
+      const files = [];
+      for (const name of fs.readdirSync(dir)) {
+        const p = path.join(dir, name);
+        try {
+          const st = fs.statSync(p);
+          if (st.isFile()) {
+            files.push({ name, size: st.size, mtime: st.mtimeMs });
+          }
+        } catch { /* 접근 불가 파일 무시 */ }
+      }
+      files.sort((a, b) => a.name.localeCompare(b.name));
+      return { success: true, files };
+    } catch (err) {
+      return { success: false, error: err.message, files: [] };
+    }
   });
 
   /** jobs:loadManifest */
@@ -1129,7 +1247,10 @@ function registerIpcHandlers({
   });
 
   ipcMain.handle('stockAdjust:getLocks', async () => {
-    return { lockedJobKeys: typeof getLockedJobKeys === 'function' ? getLockedJobKeys() : [] };
+    return {
+      lockedJobKeys: typeof getLockedJobKeys === 'function' ? getLockedJobKeys() : [],
+      locks: typeof getLockedJobsByType === 'function' ? getLockedJobsByType() : {},
+    };
   });
 
   /**
