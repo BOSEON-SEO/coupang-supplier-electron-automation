@@ -84,6 +84,49 @@ let pendingDownloadTarget = null;
 function setPendingDownloadTarget(absPath) { pendingDownloadTarget = absPath; }
 
 /**
+ * Ctrl+F 찾기 — 포커스된 webContents 의 accelerator 를 가로채서 renderer 에 알림.
+ * found-in-page 결과도 renderer 로 forwarding.
+ *
+ *   target: 'main' | 'webview' — renderer FindBar 가 어느 contents 를 대상으로
+ *           findInPage / stopFindInPage 호출할지 결정.
+ */
+function attachFindHandlers(wc, { target = 'main', interceptKeys = true, rendererWc = null } = {}) {
+  if (!wc || wc.isDestroyed?.()) return;
+
+  // renderer = FindBar 가 띄워진 webContents. 보통은 자기 자신(같은 창의 renderer),
+  // 웹뷰일 때만 mainWindow.webContents 로 별도 지정.
+  const getRenderer = () => {
+    const r = rendererWc || wc;
+    return r && !r.isDestroyed() ? r : null;
+  };
+
+  // 웹뷰는 자체 React 가 없어 Ctrl+F 를 가로채야 함. 일반 BrowserWindow(main·plugin)
+  // 의 renderer 는 window keydown 으로 React 쪽에서 직접 받음 → interceptKeys=false.
+  if (interceptKeys) {
+    wc.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      const key = (input.key || '').toLowerCase();
+      if (key === 'f' && (input.control || input.meta) && !input.alt && !input.shift) {
+        event.preventDefault();
+        const r = getRenderer();
+        if (r) r.send('find:open', { target });
+      }
+    });
+  }
+
+  wc.on('found-in-page', (_e, result) => {
+    const r = getRenderer();
+    if (!r) return;
+    r.send('find:result', {
+      target,
+      activeMatchOrdinal: result.activeMatchOrdinal,
+      matches: result.matches,
+      finalUpdate: result.finalUpdate,
+    });
+  });
+}
+
+/**
  * 벤더별 WebContentsView 생성/교체.
  * - partition: persist:vendor-{vendorId} 로 세션 격리
  * - 기존 webView 가 있으면 destroy 후 재생성
@@ -143,6 +186,13 @@ function ensureWebView(vendorId) {
   wcv.webContents.on('did-navigate-in-page', (_e, url) => notifyUrl(url));
   wcv.webContents.on('did-finish-load', () => notifyUrl(wcv.webContents.getURL()));
 
+  // 웹뷰는 renderer 가 없어 Ctrl+F intercept 필수. 이벤트는 mainWindow renderer 에 전달.
+  attachFindHandlers(wcv.webContents, {
+    target: 'webview',
+    interceptKeys: true,
+    rendererWc: mainWindow?.webContents,
+  });
+
   webView = wcv;
   webViewVendor = vendorId;
   return wcv;
@@ -188,6 +238,10 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
 
+  // main 쪽은 intercept 하지 않음 — renderer 가 window keydown 으로 직접 받아
+  // 스프레드시트(canvas) 포커스면 FortuneSheet 네이티브, 아니면 FindBar 열기로 분기.
+  attachFindHandlers(mainWindow.webContents, { target: 'main', interceptKeys: false });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -231,6 +285,9 @@ function openPluginWindow(kind, { date, vendor, sequence }) {
   } else {
     win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: hash.slice(1) });
   }
+
+  // 플러그인 창도 find: 지원 — renderer 가 keydown 을 직접 받아 처리.
+  attachFindHandlers(win.webContents, { target: 'main', interceptKeys: false });
 
   map.set(key, win);
   broadcastLocks();
@@ -332,6 +389,36 @@ app.whenReady().then(() => {
   ipcMain.handle('webview:getUrl', () => {
     if (!webView) return { url: null };
     return { url: webView.webContents.getURL() };
+  });
+
+  // ── 찾기 (Ctrl+F) ──
+  //   target === 'webview' → WebContentsView(쿠팡) 대상
+  //   그 외 → event.sender (요청을 보낸 창의 renderer webContents 그대로)
+  const resolveFindTarget = (event, target) => {
+    if (target === 'webview') {
+      return (webView && !webView.webContents.isDestroyed())
+        ? webView.webContents : null;
+    }
+    return event.sender && !event.sender.isDestroyed() ? event.sender : null;
+  };
+
+  ipcMain.handle('find:query', async (event, payload) => {
+    const { target, text, options } = payload || {};
+    const wc = resolveFindTarget(event, target);
+    if (!wc) return { success: false, error: 'no webContents' };
+    if (!text) {
+      wc.stopFindInPage('clearSelection');
+      return { success: true, matches: 0 };
+    }
+    wc.findInPage(String(text), options || {});
+    return { success: true };
+  });
+
+  ipcMain.handle('find:close', async (event, payload) => {
+    const wc = resolveFindTarget(event, payload?.target);
+    if (!wc) return { success: false };
+    wc.stopFindInPage('clearSelection');
+    return { success: true };
   });
 
   createWindow();

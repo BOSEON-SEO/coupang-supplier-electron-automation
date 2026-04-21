@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import StockAdjustView from './components/StockAdjustView';
+import FindBar from './components/FindBar';
 
 /**
  * 재고조정 창 루트.
@@ -48,7 +49,7 @@ export default function StockAdjustApp({ params }) {
       setError(res?.error || '저장 실패');
       return;
     }
-    await api.stockAdjust.close();
+    // 저장 후 창은 유지 — 사용자가 직접 닫거나 취소로 나감.
   }, [date, vendor, sequence]);
 
   const handleCancel = useCallback(async () => {
@@ -90,6 +91,7 @@ export default function StockAdjustApp({ params }) {
           onCancel={handleCancel}
         />
       )}
+      <FindBar />
     </div>
   );
 }

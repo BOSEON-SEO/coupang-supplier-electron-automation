@@ -115,7 +115,7 @@ export default function WorkDetailView({
           {job.completed && <span className="work-detail-header__completed">✓ 완료</span>}
         </div>
         <div className="work-detail-header__stepper">
-          <PhaseStepper phase={job.phase} completed={job.completed} />
+          <PhaseStepper job={job} />
         </div>
         <button
           type="button"

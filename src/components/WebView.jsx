@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { subscribeReserveTop } from '../lib/webviewReserve';
 
 /**
  * 웹 뷰 탭 — Main 의 WebContentsView 를 컨테이너 위에 overlay
@@ -50,7 +51,8 @@ export default function WebView({ vendor, isActive }) {
   // 벤더 바뀌면 busy 리셋
   useEffect(() => { setLoginBusy(false); }, [vendor]);
 
-  // 컨테이너 bounds 추적 → main
+  // 컨테이너 bounds 추적 → main. reserveTop 은 FindBar 오픈 시 WCV 상단을 양보.
+  const reserveTopRef = useRef(0);
   useEffect(() => {
     const api = window.electronAPI?.webview;
     if (!api || !containerRef.current) return;
@@ -59,7 +61,13 @@ export default function WebView({ vendor, isActive }) {
       const el = containerRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      api.setBounds({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      const rt = reserveTopRef.current;
+      api.setBounds({
+        x: rect.x,
+        y: rect.y + rt,
+        width: rect.width,
+        height: Math.max(0, rect.height - rt),
+      });
     };
 
     updateBounds();
@@ -69,11 +77,18 @@ export default function WebView({ vendor, isActive }) {
     window.addEventListener('scroll', updateBounds, { passive: true, capture: true });
     window.addEventListener('webview-bounds-update', updateBounds);
 
+    // FindBar 가 예약 영역을 바꿀 때마다 즉시 재적용
+    const unsub = subscribeReserveTop((v) => {
+      reserveTopRef.current = v;
+      updateBounds();
+    });
+
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', updateBounds);
       window.removeEventListener('scroll', updateBounds, { capture: true });
       window.removeEventListener('webview-bounds-update', updateBounds);
+      unsub();
     };
   }, []);
 

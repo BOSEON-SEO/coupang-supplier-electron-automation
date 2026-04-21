@@ -14,8 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 작업(Job) 관리 ──
   jobs: {
-    list: (date) => ipcRenderer.invoke('jobs:list', date),
-    listMonth: (year, month) => ipcRenderer.invoke('jobs:listMonth', year, month),
+    list: (date, vendor) => ipcRenderer.invoke('jobs:list', date, vendor),
+    listMonth: (year, month, vendor) => ipcRenderer.invoke('jobs:listMonth', year, month, vendor),
     listFiles: (date, vendor, sequence) => ipcRenderer.invoke('jobs:listFiles', date, vendor, sequence),
     recordUpload: (date, vendor, sequence) => ipcRenderer.invoke('jobs:recordUpload', date, vendor, sequence),
     deleteUploadHistory: (date, vendor, sequence, timestamp) =>
@@ -93,6 +93,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_e, data) => callback(data);
       ipcRenderer.on('webview:url-changed', handler);
       return () => ipcRenderer.removeListener('webview:url-changed', handler);
+    },
+  },
+
+  // ── 찾기 (Ctrl+F) ──
+  find: {
+    query: (target, text, options) =>
+      ipcRenderer.invoke('find:query', { target, text, options }),
+    close: (target) =>
+      ipcRenderer.invoke('find:close', { target }),
+    onOpen: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('find:open', handler);
+      return () => ipcRenderer.removeListener('find:open', handler);
+    },
+    onResult: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('find:result', handler);
+      return () => ipcRenderer.removeListener('find:result', handler);
     },
   },
 

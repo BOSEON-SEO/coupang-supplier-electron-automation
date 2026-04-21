@@ -2,7 +2,7 @@ import React, { useMemo, useState, useCallback } from 'react';
 
 /**
  * SKU 바코드별 그룹핑된 PO 를 보여주고, 각 발주 행별 출고수량(=확정수량) 을
- * 사용자가 지정한다. "저장하고 닫기" 누르면 patches 배열을 상위로 넘긴다.
+ * 사용자가 지정한다. "저장" 누르면 patches 배열을 상위로 넘긴다 (창은 유지).
  *
  * Props:
  *   - groups: [{ sku_barcode, sku_id, sku_name, total_order_qty, rows: [{ rowIndex, coupang_order_seq, departure_warehouse, order_quantity, confirmed_qty }] }]
@@ -193,7 +193,7 @@ export default function StockAdjustView({ groups, saving, onSave, onCancel }) {
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? '저장 중…' : '💾 저장하고 닫기'}
+          {saving ? '저장 중…' : '💾 저장'}
         </button>
       </footer>
     </>

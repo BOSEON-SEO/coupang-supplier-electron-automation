@@ -38,20 +38,29 @@ export default function TransportView({
   };
 
   // ── 쉽먼트: 박스 배정 조작 ──
-  const getBoxes = (wh, rowKey) => getAssign(wh)?.skuBoxes?.[rowKey] || [];
-  const setBoxes = (wh, rowKey, next) => {
-    const cur = getAssign(wh);
-    patchAssign(wh, { skuBoxes: { ...(cur.skuBoxes || {}), [rowKey]: next } });
+  // 함수형 setOverrides 기반 — 같은 틱에 연속 호출돼도 (add + update 등) 직렬로 누적.
+  // 이전 버전은 getAssign 을 호출 시점에 읽어서 stale cur 로 덮어썼음.
+  const mutateBoxes = (wh, rowKey, updater) => {
+    setOverrides((prev) => {
+      const base = { ...(initial[wh] || {}), ...(prev[wh] || {}) };
+      const curSkuBoxes = base.skuBoxes || {};
+      const curRows = curSkuBoxes[rowKey] || [];
+      const nextRows = updater(curRows);
+      return {
+        ...prev,
+        [wh]: {
+          ...base,
+          skuBoxes: { ...curSkuBoxes, [rowKey]: nextRows },
+        },
+      };
+    });
   };
-  const addBoxRow = (wh, rowKey) => setBoxes(wh, rowKey, [...getBoxes(wh, rowKey), { boxNo: '', qty: '' }]);
-  const updateBoxRow = (wh, rowKey, idx, patch) => {
-    const cur = getBoxes(wh, rowKey);
-    setBoxes(wh, rowKey, cur.map((b, i) => (i === idx ? { ...b, ...patch } : b)));
-  };
-  const removeBoxRow = (wh, rowKey, idx) => {
-    const cur = getBoxes(wh, rowKey);
-    setBoxes(wh, rowKey, cur.filter((_, i) => i !== idx));
-  };
+  const addBoxRow = (wh, rowKey) =>
+    mutateBoxes(wh, rowKey, (rows) => [...rows, { boxNo: '', qty: '' }]);
+  const updateBoxRow = (wh, rowKey, idx, patch) =>
+    mutateBoxes(wh, rowKey, (rows) => rows.map((b, i) => (i === idx ? { ...b, ...patch } : b)));
+  const removeBoxRow = (wh, rowKey, idx) =>
+    mutateBoxes(wh, rowKey, (rows) => rows.filter((_, i) => i !== idx));
 
   // ── 밀크런: 팔레트 목록 조작 ──
   const getPallets = (wh) => getAssign(wh)?.pallets || [];
@@ -129,9 +138,42 @@ export default function TransportView({
     );
   }
 
+  const totalSkuCount = groups.reduce((s, g) => s + (g.skus?.length || 0), 0);
+  const allCollapsed = groups.length > 0 && groups.every((g) => !!collapsed[g.warehouse]);
+  const handleExpandAll = () => setCollapsed({});
+  const handleCollapseAll = () => {
+    const next = {};
+    for (const g of groups) next[g.warehouse] = true;
+    setCollapsed(next);
+  };
+
   return (
     <>
       <div className="stock-adjust-body">
+        <div className="transport-summary">
+          <span className="transport-summary__text">
+            총 <strong>{groups.length}</strong>개 창고 · <strong>{totalSkuCount}</strong>개 제품
+          </span>
+          <div className="transport-summary__spacer" />
+          <button
+            type="button"
+            className="transport-summary__toggle"
+            onClick={handleExpandAll}
+            disabled={!allCollapsed && groups.every((g) => !collapsed[g.warehouse])}
+            title="모든 창고 펼치기"
+          >
+            ⌄ 전체 펼치기
+          </button>
+          <button
+            type="button"
+            className="transport-summary__toggle"
+            onClick={handleCollapseAll}
+            disabled={allCollapsed}
+            title="모든 창고 접기"
+          >
+            ⌃ 전체 접기
+          </button>
+        </div>
         <div className="transport-cards">
           {groups.map((g) => (
             <WarehouseCard
@@ -162,7 +204,7 @@ export default function TransportView({
       <footer className="stock-adjust-footer">
         <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={saving}>취소</button>
         <button type="button" className="btn btn--primary" onClick={handleSave} disabled={saving}>
-          {saving ? '저장 중…' : '💾 저장하고 닫기'}
+          {saving ? '저장 중…' : '💾 저장'}
         </button>
       </footer>
     </>

@@ -79,6 +79,11 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
 
   // ── 업로드 준비 스크립트가 끝나면 "업로드하셨나요?" 확인 오버레이 ──
   const [askUploadConfirm, setAskUploadConfirm] = useState(false);
+  // ── 밀크런 등록 스크립트가 끝나면 "저장하셨나요?" 확인 오버레이 ──
+  const [askMilkrunConfirm, setAskMilkrunConfirm] = useState(false);
+  // ── 쉽먼트 등록 스크립트가 끝나면 "생성하셨나요?" 확인 오버레이 ──
+  // 센터 단위로 처리되므로 직전 처리한 센터명을 같이 보관.
+  const [askShipmentConfirm, setAskShipmentConfirm] = useState(null); // null | { center }
 
   // ── Refs ──
   const cleanupRef = useRef([]);
@@ -87,6 +92,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   const loadedPathRef = useRef(loadedPath);
   const jobRef = useRef(job);
   const latestSheetsRef = useRef(null);
+  const lastShipmentResultRef = useRef(null); // 마지막 쉽먼트 스크립트의 result payload
 
   useEffect(() => { vendorRef.current = vendor; }, [vendor]);
   useEffect(() => { loadedPathRef.current = loadedPath; }, [loadedPath]);
@@ -371,8 +377,14 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
         try {
           const result = JSON.parse(data.parsed.data || data.line);
           if (result.success && jobRef.current) {
-            appendLog('info', `[PO 결과 수신] 자동 로드`);
-            loadJobPoFile(jobRef.current);
+            const sn = data.scriptName || '';
+            if (sn.endsWith('po_download.py')) {
+              appendLog('info', `[PO 결과 수신] 자동 로드`);
+              loadJobPoFile(jobRef.current);
+            } else if (sn.endsWith('shipment_register.py')) {
+              // done 이벤트가 오버레이 띄울 때 center 쓰도록 ref 에 보관
+              lastShipmentResultRef.current = result;
+            }
           }
         } catch { /* 무시 */ }
       }
@@ -438,6 +450,29 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
         data.exitCode === 0 && !data.killed
       ) {
         setAskUploadConfirm(true);
+      }
+
+      // 밀크런 등록 스크립트가 성공적으로 끝나면 "저장하셨나요?" 오버레이 띄움
+      if (
+        (data.scriptName === 'scripts/milkrun_register.py' || data.scriptName === 'milkrun_register.py') &&
+        data.exitCode === 0 && !data.killed
+      ) {
+        setAskMilkrunConfirm(true);
+      }
+
+      // 쉽먼트 등록 스크립트가 성공적으로 끝나면 "생성하셨나요?" 오버레이 띄움
+      if (
+        (data.scriptName === 'scripts/shipment_register.py' || data.scriptName === 'shipment_register.py') &&
+        data.exitCode === 0 && !data.killed
+      ) {
+        const r = lastShipmentResultRef.current;
+        setAskShipmentConfirm({
+          center: r?.center || null,
+          boxCount: r?.boxCount ?? null,
+          skuFilled: r?.skuFilled ?? null,
+          skuTotal: r?.skuTotal ?? null,
+        });
+        lastShipmentResultRef.current = null;
       }
     });
 
@@ -967,6 +1002,170 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     setPendingAction({ label: '발주확정 업로드 준비', run: handleUploadPrepare });
   }, [job, handleUploadPrepare]);
 
+  // ── 밀크런 대량 접수 (저장 직전 dry-run) ──
+  // transport.json 의 '밀크런' assignment 들을 사이트 폼에 채우고 저장은 수동.
+  const handleMilkrunRegister = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+
+    // transport.json 존재 확인 — 없으면 운송 분배부터 하라고 안내
+    const tpath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'transport.json');
+    if (!tpath?.success) {
+      appendLog('error', `경로 해석 실패: ${tpath?.error}`);
+      return;
+    }
+    const texists = await api.fileExists(tpath.path);
+    if (!texists) {
+      appendLog('warn', 'transport.json 이 없습니다 — 먼저 🚚 운송 분배에서 밀크런 지정을 저장하세요.');
+      return;
+    }
+
+    appendLog('info', `밀크런 접수 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
+    const res = await api.runPython('scripts/milkrun_register.py', [
+      '--vendor', job.vendor,
+      '--date', job.date,
+      '--sequence', String(job.sequence),
+    ]);
+    if (res.success) {
+      setPythonRunning(true);
+      onCloseWork?.();
+    } else {
+      appendLog('error', `밀크런 접수 실행 실패: ${res.error}`);
+    }
+  }, [job, appendLog, onCloseWork]);
+
+  // ── 밀크런 등록 버튼 onClick — 이력 있으면 카운트다운 전에 확인 ──
+  // 재등록 불가 + 사이트 리스트에서 사라지는 특성이라 이중 등록 방지 용도.
+  const handleMilkrunClickStart = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+    try {
+      const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
+      const hist = mres?.success ? mres.manifest?.milkrunHistory : null;
+      const prevCount = Array.isArray(hist) ? hist.length : 0;
+      if (prevCount > 0) {
+        const proceed = window.confirm(
+          `이 작업에 밀크런 등록 기록이 이미 ${prevCount}회 존재합니다.\n`
+          + `밀크런은 재등록 불가 — 사이트 리스트에서 사라진 항목은 다시 채울 수 없습니다.\n\n`
+          + `그래도 계속 진행하시겠습니까?`
+        );
+        if (!proceed) return;
+      }
+    } catch { /* 조회 실패해도 진행 */ }
+    setPendingAction({ label: '밀크런 대량 접수', run: handleMilkrunRegister });
+  }, [job, handleMilkrunRegister]);
+
+  // ── 쉽먼트 등록 (생성 직전 dry-run, 센터 단위) ──
+  // transport.json 의 '쉽먼트' assignment 첫 번째 센터를 처리.
+  // 여러 센터가 있으면 사용자가 반복 실행 → 생성 → 다음 센터 순으로 진행.
+  const handleShipmentRegister = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+
+    const tpath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'transport.json');
+    if (!tpath?.success) {
+      appendLog('error', `경로 해석 실패: ${tpath?.error}`);
+      return;
+    }
+    const texists = await api.fileExists(tpath.path);
+    if (!texists) {
+      appendLog('warn', 'transport.json 이 없습니다 — 먼저 🚚 운송 분배에서 쉽먼트 지정을 저장하세요.');
+      return;
+    }
+
+    appendLog('info', `쉽먼트 접수 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
+    const res = await api.runPython('scripts/shipment_register.py', [
+      '--vendor', job.vendor,
+      '--date', job.date,
+      '--sequence', String(job.sequence),
+    ]);
+    if (res.success) {
+      setPythonRunning(true);
+      onCloseWork?.();
+    } else {
+      appendLog('error', `쉽먼트 접수 실행 실패: ${res.error}`);
+    }
+  }, [job, appendLog, onCloseWork]);
+
+  // ── 쉽먼트 등록 버튼 onClick — 이력 있으면 카운트다운 전에 확인 ──
+  // 쉽먼트는 센터 단위로 여러 번 실행될 수 있음 — 경고는 띄우되 반복 허용.
+  const handleShipmentClickStart = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+    try {
+      const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
+      const hist = mres?.success ? mres.manifest?.shipmentHistory : null;
+      const prevCount = Array.isArray(hist) ? hist.length : 0;
+      if (prevCount > 0) {
+        const centers = Array.isArray(hist)
+          ? hist.map((h) => h.center).filter(Boolean).join(', ')
+          : '';
+        const proceed = window.confirm(
+          `이 작업에 쉽먼트 등록 기록이 이미 ${prevCount}회 존재합니다.`
+          + (centers ? `\n(센터: ${centers})` : '')
+          + `\n\n쉽먼트는 센터마다 1회씩 — 이미 생성한 센터는 재생성 불가합니다.`
+          + `\n계속 진행하시겠습니까?`
+        );
+        if (!proceed) return;
+      }
+    } catch { /* 조회 실패해도 진행 */ }
+    setPendingAction({ label: '쉽먼트 생성', run: handleShipmentRegister });
+  }, [job, handleShipmentRegister]);
+
+  // ── 쉽먼트 등록 기록 (사이트에서 생성 완료 후 수동 체크) ──
+  // manifest.shipmentHistory 에 { timestamp, center } 누적.
+  const handleRecordShipment = useCallback(async (center) => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api?.jobs?.loadManifest || !api?.jobs?.updateManifest) return;
+    try {
+      const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
+      const manifest = mres?.success ? (mres.manifest || {}) : {};
+      const prev = Array.isArray(manifest.shipmentHistory) ? manifest.shipmentHistory : [];
+      const entry = { timestamp: new Date().toISOString() };
+      if (center) entry.center = center;
+      const patch = { shipmentHistory: [...prev, entry] };
+      const res = await api.jobs.updateManifest(job.date, job.vendor, job.sequence, patch);
+      if (!res?.success) {
+        appendLog('error', `쉽먼트 기록 실패: ${res?.error ?? 'unknown'}`);
+        return;
+      }
+      appendLog('event', `[📦 쉽먼트 등록 기록] ${center || '(센터 미지정)'} · ${entry.timestamp}`);
+      if (res.manifest) onJobUpdated?.(res.manifest);
+    } catch (err) {
+      appendLog('error', `쉽먼트 기록 실패: ${err.message}`);
+    }
+  }, [job, appendLog, onJobUpdated]);
+
+  // ── 밀크런 등록 기록 (사이트에서 저장 완료 후 수동 체크) ──
+  // 파일 스냅샷 없이 timestamp 만 manifest.milkrunHistory 에 누적.
+  // 재등록 불가 + 목록에서 사라지는 특성상, 언제 등록했는지 추적 용도.
+  const handleRecordMilkrun = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api?.jobs?.loadManifest || !api?.jobs?.updateManifest) return;
+    try {
+      const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
+      const manifest = mres?.success ? (mres.manifest || {}) : {};
+      const prev = Array.isArray(manifest.milkrunHistory) ? manifest.milkrunHistory : [];
+      const entry = { timestamp: new Date().toISOString() };
+      const patch = { milkrunHistory: [...prev, entry] };
+      const res = await api.jobs.updateManifest(job.date, job.vendor, job.sequence, patch);
+      if (!res?.success) {
+        appendLog('error', `밀크런 기록 실패: ${res?.error ?? 'unknown'}`);
+        return;
+      }
+      appendLog('event', `[🚛 밀크런 등록 기록] ${entry.timestamp}`);
+      if (res.manifest) onJobUpdated?.(res.manifest);
+    } catch (err) {
+      appendLog('error', `밀크런 기록 실패: ${err.message}`);
+    }
+  }, [job, appendLog, onJobUpdated]);
+
   // ── 업로드 기록 (쿠팡 업로드 완료 후 수동 체크) ──
   const handleRecordUpload = useCallback(async () => {
     if (!job) return;
@@ -1108,9 +1307,10 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
               type="button"
               className="btn btn--phase-adjust btn--sm"
               onClick={() => job && window.electronAPI?.stockAdjust?.open(job.date, job.vendor, job.sequence)}
-              disabled={!job || !poExists || jobLocked}
+              disabled={!job || !poExists || pythonRunning || jobLocked}
               title={
                 !poExists ? 'po.xlsx 가 아직 없습니다'
+                  : pythonRunning ? '자동화 진행 중입니다'
                   : jobLocked ? '이미 플러그인 창이 열려있습니다'
                   : 'SKU 별로 그룹핑해서 각 발주별 출고수량을 지정'
               }
@@ -1140,9 +1340,10 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
               type="button"
               className="btn btn--phase-transport btn--sm"
               onClick={() => job && window.electronAPI?.transport?.open(job.date, job.vendor, job.sequence)}
-              disabled={!job || !confirmationExists || jobLocked}
+              disabled={!job || !confirmationExists || pythonRunning || jobLocked}
               title={
                 !confirmationExists ? '확정서가 아직 없습니다'
+                  : pythonRunning ? '자동화 진행 중입니다'
                   : jobLocked ? '이미 플러그인 창이 열려있습니다'
                   : '창고별 쉽먼트/밀크런 결정 · 박스/팔레트 배정'
               }
@@ -1165,18 +1366,26 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             <button
               type="button"
               className="btn btn--phase-milkrun btn--sm"
-              onClick={() => appendLog('warn', '🚛 밀크런 등록 — 추후 구현 예정')}
+              onClick={handleMilkrunClickStart}
               disabled={!job || !confirmationExists || pythonRunning || jobLocked}
-              title="밀크런 배치등록 (추후 구현)"
+              title={
+                !confirmationExists ? '확정서가 아직 없습니다'
+                  : jobLocked ? '플러그인 창이 열려있습니다'
+                  : 'transport.json 의 밀크런 지정을 /milkrun/batchRegister 폼에 자동 채움 — 저장은 수동'
+              }
             >
               🚛 밀크런 등록
             </button>
             <button
               type="button"
               className="btn btn--phase-shipment btn--sm"
-              onClick={() => appendLog('warn', '📦 쉽먼트 등록 — 추후 구현 예정')}
+              onClick={handleShipmentClickStart}
               disabled={!job || !confirmationExists || pythonRunning || jobLocked}
-              title="쉽먼트 등록 (추후 구현)"
+              title={
+                !confirmationExists ? '확정서가 아직 없습니다'
+                  : jobLocked ? '플러그인 창이 열려있습니다'
+                  : 'transport.json 의 쉽먼트 지정 중 첫 번째 센터를 사이트 폼에 자동 채움 — 생성은 수동'
+              }
             >
               📦 쉽먼트 등록
             </button>
@@ -1250,6 +1459,82 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
                 onClick={async () => {
                   await handleRecordUpload();
                   setAskUploadConfirm(false);
+                }}
+              >
+                ✅ 예, 기록합니다
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {askMilkrunConfirm && (
+        <div className="workview-overlay" role="dialog" aria-modal="true">
+          <div className="workview-overlay__card">
+            <h3 className="workview-overlay__title">🚛 밀크런 저장을 완료하셨나요?</h3>
+            <p className="workview-overlay__desc">
+              웹 뷰에서 <b>저장</b> 버튼을 눌러 정상 접수되었다면,
+              지금 등록 이력을 기록해 두세요.
+              <br />
+              저장된 건은 <b>재등록 불가</b> — 리스트에서 사라지므로,
+              언제 접수했는지 추적 목적의 timestamp 만 <code>manifest.milkrunHistory</code> 에 남깁니다.
+            </p>
+            <div className="workview-overlay__actions">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setAskMilkrunConfirm(false)}
+              >
+                아니오 / 닫기
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={async () => {
+                  await handleRecordMilkrun();
+                  setAskMilkrunConfirm(false);
+                }}
+              >
+                ✅ 예, 기록합니다
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {askShipmentConfirm && (
+        <div className="workview-overlay" role="dialog" aria-modal="true">
+          <div className="workview-overlay__card">
+            <h3 className="workview-overlay__title">📦 쉽먼트 생성을 완료하셨나요?</h3>
+            <p className="workview-overlay__desc">
+              웹 뷰에서 <b>생성</b> 버튼을 눌러 정상 생성되었다면, 지금 기록해두세요.
+              {askShipmentConfirm.center && (
+                <>
+                  <br />
+                  대상 센터: <b>{askShipmentConfirm.center}</b>
+                  {askShipmentConfirm.boxCount != null && <> · 박스 {askShipmentConfirm.boxCount}</>}
+                  {askShipmentConfirm.skuFilled != null && askShipmentConfirm.skuTotal != null && (
+                    <> · SKU {askShipmentConfirm.skuFilled}/{askShipmentConfirm.skuTotal}</>
+                  )}
+                </>
+              )}
+              <br />
+              쉽먼트는 센터마다 1회 — 기록은 <code>manifest.shipmentHistory</code> 에 timestamp·center 로 누적됩니다.
+            </p>
+            <div className="workview-overlay__actions">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setAskShipmentConfirm(null)}
+              >
+                아니오 / 닫기
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={async () => {
+                  await handleRecordShipment(askShipmentConfirm?.center || null);
+                  setAskShipmentConfirm(null);
                 }}
               >
                 ✅ 예, 기록합니다

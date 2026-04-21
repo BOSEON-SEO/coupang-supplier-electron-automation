@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import JobCard from './JobCard';
+import NewJobModal from './NewJobModal';
 
 /**
  * 달력 메뉴 — 월 네비 + 작업 있는 날짜 점 표시 + 선택 시 그날의 작업 카드 리스트.
@@ -29,23 +30,38 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
   const [byDate, setByDate] = useState({});
   const [jobsForDay, setJobsForDay] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [ymPickerOpen, setYmPickerOpen] = useState(false);
+  const [showNewJobModal, setShowNewJobModal] = useState(false);
+  const ymPickerRef = useRef(null);
 
   const loadMonth = useCallback(async () => {
     const api = window.electronAPI?.jobs;
     if (!api) return;
-    const res = await api.listMonth(year, month);
+    const res = await api.listMonth(year, month, activeVendor || undefined);
     if (res?.success) setByDate(res.byDate || {});
-  }, [year, month]);
+  }, [year, month, activeVendor]);
 
   const loadDay = useCallback(async () => {
     const api = window.electronAPI?.jobs;
     if (!api || !selectedDate) return;
-    const res = await api.list(selectedDate);
+    const res = await api.list(selectedDate, activeVendor || undefined);
     if (res?.success) setJobsForDay(res.jobs || []);
-  }, [selectedDate]);
+  }, [selectedDate, activeVendor]);
 
   useEffect(() => { loadMonth(); }, [loadMonth]);
   useEffect(() => { loadDay(); }, [loadDay]);
+
+  // 연·월 피커 바깥 클릭으로 닫기
+  useEffect(() => {
+    if (!ymPickerOpen) return undefined;
+    const onDoc = (e) => {
+      if (ymPickerRef.current && !ymPickerRef.current.contains(e.target)) {
+        setYmPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [ymPickerOpen]);
 
   const cells = useMemo(() => {
     const first = new Date(year, month - 1, 1);
@@ -74,16 +90,15 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     setSelectedDate(todayStr());
   };
 
-  const handleNewJob = async () => {
-    if (!activeVendor) {
-      alert('먼저 헤더에서 벤더를 선택하세요.');
-      return;
-    }
-    if (!selectedDate) {
-      alert('먼저 날짜를 선택하세요.');
-      return;
-    }
-    setCreating(true);
+  // 새 작업 버튼 — 모달 오픈
+  const handleOpenNewJobModal = () => {
+    if (!activeVendor) { alert('먼저 헤더에서 벤더를 선택하세요.'); return; }
+    if (!selectedDate) { alert('먼저 날짜를 선택하세요.'); return; }
+    setShowNewJobModal(true);
+  };
+
+  // 공통 — 새 job manifest 생성
+  const createJobManifest = useCallback(async () => {
     const api = window.electronAPI;
     const vendorMeta = vendors?.find((v) => v.id === activeVendor);
     const res = await api.jobs.create(selectedDate, activeVendor, {
@@ -91,27 +106,69 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     });
     if (!res?.success) {
       alert(res?.error || '작업 생성 실패');
+      return null;
+    }
+    return res.manifest;
+  }, [vendors, activeVendor, selectedDate]);
+
+  // 쿠팡 자동 다운로드 모드
+  const handleCoupangMode = useCallback(async () => {
+    setCreating(true);
+    try {
+      const job = await createJobManifest();
+      if (!job) return;
+      const api = window.electronAPI;
+      const dl = await api.runPython('scripts/po_download.py', [
+        '--vendor', activeVendor,
+        '--date-from', selectedDate,
+        '--date-to', selectedDate,
+        '--sequence', String(job.sequence),
+      ]);
+      if (!dl?.success && !dl?.error?.includes('already running')) {
+        alert(`PO 다운로드 시작 실패: ${dl?.error || 'unknown'}\n작업은 생성되었습니다.`);
+      }
+      await loadMonth();
+      await loadDay();
+      setShowNewJobModal(false);
+      onOpenJob(job, { isNew: true });
+    } finally {
       setCreating(false);
-      return;
     }
-    const job = res.manifest;
+  }, [createJobManifest, activeVendor, selectedDate, loadMonth, loadDay, onOpenJob]);
 
-    // PO 자동 다운로드 트리거 (실패해도 작업은 생성된 상태)
-    const dl = await api.runPython('scripts/po_download.py', [
-      '--vendor', activeVendor,
-      '--date-from', selectedDate,
-      '--date-to', selectedDate,
-      '--sequence', String(job.sequence),
-    ]);
-    if (!dl?.success && !dl?.error?.includes('already running')) {
-      alert(`PO 다운로드 시작 실패: ${dl?.error || 'unknown'}\n작업은 생성되었습니다.`);
+  // 파일 업로드 모드 — 사용자가 선택한 xlsx 를 job/po.xlsx 로 저장
+  const handleFileMode = useCallback(async (fileBuffer, fileName) => {
+    setCreating(true);
+    try {
+      const job = await createJobManifest();
+      if (!job) return;
+      const api = window.electronAPI;
+      const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx');
+      if (!resolved?.success) {
+        alert(`경로 해석 실패: ${resolved?.error}`);
+        return;
+      }
+      const w = await api.writeFile(resolved.path, fileBuffer);
+      if (!w?.success) {
+        alert(`PO 파일 저장 실패: ${w?.error ?? 'unknown'}`);
+        return;
+      }
+      // phase 를 po_downloaded 로 명시 세팅 (jobs:create 는 기본값으로 두지만 보증용)
+      await api.jobs.updateManifest(job.date, job.vendor, job.sequence, {
+        phase: 'po_downloaded',
+        source: 'file-upload',
+        sourceFileName: fileName,
+      });
+      const refreshed = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
+      const finalJob = refreshed?.success ? refreshed.manifest : job;
+      await loadMonth();
+      await loadDay();
+      setShowNewJobModal(false);
+      onOpenJob(finalJob, { isNew: true });
+    } finally {
+      setCreating(false);
     }
-
-    await loadMonth();
-    await loadDay();
-    setCreating(false);
-    onOpenJob(job, { isNew: true });
-  };
+  }, [createJobManifest, loadMonth, loadDay, onOpenJob]);
 
   // 해당 날짜의 activeVendor 마지막 차수가 미완료면 새 작업 생성 불가 (ipc 가드와 동일 규칙)
   const lastSeqJob = activeVendor
@@ -136,7 +193,38 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
       <div className="calendar-view__header">
         <div className="calendar-view__nav">
           <button type="button" className="btn btn--secondary" onClick={goPrevMonth} aria-label="이전 달">◀</button>
-          <h2 className="calendar-view__title">{year}년 {month}월</h2>
+          <div className="calendar-view__title-wrap" ref={ymPickerRef}>
+            <button
+              type="button"
+              className="calendar-view__title-btn"
+              onClick={() => setYmPickerOpen((o) => !o)}
+              title="연도 · 월 선택"
+            >
+              <h2 className="calendar-view__title">{year}년 {month}월</h2>
+              <span className="calendar-view__title-chev">▾</span>
+            </button>
+            {ymPickerOpen && (
+              <div className="ym-picker">
+                <div className="ym-picker__year-row">
+                  <button type="button" onClick={() => setYear((y) => y - 1)} aria-label="이전 해">◀</button>
+                  <span className="ym-picker__year">{year}</span>
+                  <button type="button" onClick={() => setYear((y) => y + 1)} aria-label="다음 해">▶</button>
+                </div>
+                <div className="ym-picker__month-grid">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`ym-picker__month${m === month ? ' is-active' : ''}`}
+                      onClick={() => { setMonth(m); setYmPickerOpen(false); }}
+                    >
+                      {m}월
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           <button type="button" className="btn btn--secondary" onClick={goNextMonth} aria-label="다음 달">▶</button>
           <button type="button" className="btn btn--secondary" onClick={goToday}>오늘</button>
         </div>
@@ -185,7 +273,7 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
             <button
               type="button"
               className="btn btn--primary"
-              onClick={handleNewJob}
+              onClick={handleOpenNewJobModal}
               disabled={newJobDisabled}
               title={newJobTitle}
             >
@@ -217,6 +305,17 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
           )}
         </aside>
       </div>
+
+      {showNewJobModal && (
+        <NewJobModal
+          date={selectedDate}
+          vendor={activeVendor}
+          nextSequence={(lastSeqJob?.sequence || 0) + 1}
+          onCancel={() => setShowNewJobModal(false)}
+          onCoupang={handleCoupangMode}
+          onFile={handleFileMode}
+        />
+      )}
     </div>
   );
 }

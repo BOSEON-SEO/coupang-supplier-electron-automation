@@ -365,31 +365,40 @@ function registerIpcHandlers({
   //                    phase: 'po_downloaded'|'matched'|'assigned'|'uploaded',
   //                    completed: bool, createdAt, updatedAt, stats? }
 
-  /** jobs:list — 특정 날짜의 모든 작업 (manifest 배열) */
-  ipcMain.handle('jobs:list', async (_e, date) => {
+  /**
+   * jobs:list — 특정 날짜의 작업 목록 (manifest 배열).
+   * vendor 인자 주면 해당 벤더만, 없으면 전체.
+   */
+  ipcMain.handle('jobs:list', async (_e, date, vendor) => {
     if (!isValidDate(date)) return { success: false, error: 'invalid date', jobs: [] };
     const dayDir = path.join(dataDir, date);
     if (!fs.existsSync(dayDir)) return { success: true, jobs: [] };
 
+    const filter = (vendor && isValidVendor(vendor)) ? vendor : null;
     const jobs = [];
-    for (const vendor of fs.readdirSync(dayDir)) {
-      if (!isValidVendor(vendor)) continue;
-      for (const seq of listVendorSequences(dataDir, date, vendor)) {
-        const m = readManifest(dataDir, date, vendor, seq);
+    for (const v of fs.readdirSync(dayDir)) {
+      if (!isValidVendor(v)) continue;
+      if (filter && v !== filter) continue;
+      for (const seq of listVendorSequences(dataDir, date, v)) {
+        const m = readManifest(dataDir, date, v, seq);
         if (m) jobs.push(m);
       }
     }
     return { success: true, jobs };
   });
 
-  /** jobs:listMonth — 해당 연·월에 작업이 있는 날짜별 카운트 (달력 표시용) */
-  ipcMain.handle('jobs:listMonth', async (_e, year, month) => {
+  /**
+   * jobs:listMonth — 연·월에 작업이 있는 날짜별 카운트 (달력 배지).
+   * vendor 인자 주면 해당 벤더만 집계, 없으면 전체.
+   */
+  ipcMain.handle('jobs:listMonth', async (_e, year, month, vendor) => {
     if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
       return { success: false, error: 'invalid year/month', byDate: {} };
     }
     const prefix = `${year}-${String(month).padStart(2, '0')}-`;
     if (!fs.existsSync(dataDir)) return { success: true, byDate: {} };
 
+    const filter = (vendor && isValidVendor(vendor)) ? vendor : null;
     const byDate = {};
     for (const name of fs.readdirSync(dataDir)) {
       if (!name.startsWith(prefix) || !isValidDate(name)) continue;
@@ -397,10 +406,11 @@ function registerIpcHandlers({
       let count = 0;
       let hasIncomplete = false;
       try {
-        for (const vendor of fs.readdirSync(dayDir)) {
-          if (!isValidVendor(vendor)) continue;
-          for (const seq of listVendorSequences(dataDir, name, vendor)) {
-            const m = readManifest(dataDir, name, vendor, seq);
+        for (const v of fs.readdirSync(dayDir)) {
+          if (!isValidVendor(v)) continue;
+          if (filter && v !== filter) continue;
+          for (const seq of listVendorSequences(dataDir, name, v)) {
+            const m = readManifest(dataDir, name, v, seq);
             if (!m) continue;
             count += 1;
             if (!m.completed) hasIncomplete = true;
@@ -1420,14 +1430,15 @@ function registerIpcHandlers({
         return { success: false, error: '필수 열(물류센터/입고유형) 을 찾지 못했습니다.' };
       }
 
-      // 물류센터별 그룹 — 전체 행 (쉽먼트/밀크런 결정은 이제 transport 창에서)
+      // 물류센터별 그룹 — 확정수량 > 0 인 SKU 만 (0 은 납품 제외 행)
       const byWh = new Map();
       for (let r = 1; r < aoa.length; r += 1) {
         const row = aoa[r] || [];
         const wh = String(row[iWh] ?? '').trim();
         if (!wh) continue;
-        const type = String(row[iType] ?? '').trim();
         const confirmedQty = Number(row[iQty]) || 0;
+        if (confirmedQty <= 0) continue; // 납품 제외 SKU 숨김
+        const type = String(row[iType] ?? '').trim();
         if (!byWh.has(wh)) {
           byWh.set(wh, {
             warehouse: wh,

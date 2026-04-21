@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import TransportView from './components/TransportView';
+import FindBar from './components/FindBar';
 
 /**
  * 운송 분배 창 루트.
@@ -54,7 +55,7 @@ export default function TransportApp({ params }) {
       setError(res?.error || '저장 실패');
       return;
     }
-    await api.transport.close();
+    // 저장 후 창은 유지 — 사용자가 직접 닫거나 취소로 나감.
   }, [date, vendor, sequence]);
 
   const handleCancel = useCallback(async () => {
@@ -99,6 +100,7 @@ export default function TransportApp({ params }) {
           onCancel={handleCancel}
         />
       )}
+      <FindBar />
     </div>
   );
 }
