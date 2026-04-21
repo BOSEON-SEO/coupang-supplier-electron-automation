@@ -259,7 +259,69 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     setDirty(true);
   }, []);
 
-  // 수동 저장
+  // ── PO → confirmation 확정수량/부족사유 부분 패치 (I, M 컬럼만) ──
+  // 입고유형(C) 과 사용자 직접 편집은 보존. confirmation.xlsx 없으면 skipped.
+  const patchConfirmationFromPo = useCallback(async () => {
+    const j = jobRef.current;
+    if (!j) return { success: false, skipped: true };
+    const api = window.electronAPI;
+    if (!api?.confirmation?.patchQuantities) return { success: false, skipped: true };
+
+    const confPath = await api.resolveJobPath(j.date, j.vendor, j.sequence, 'confirmation.xlsx');
+    if (!confPath?.success) return { success: false, error: confPath?.error };
+    const confExists = await api.fileExists(confPath.path);
+    if (!confExists) return { success: false, skipped: true };
+
+    const poPath = await api.resolveJobPath(j.date, j.vendor, j.sequence, 'po.xlsx');
+    if (!poPath?.success) return { success: false, error: poPath?.error };
+    const poRead = await api.readFile(poPath.path);
+    if (!poRead?.success) return { success: false, error: poRead?.error };
+
+    const masterData = parsePoBuffer(poRead.data);
+    if (!masterData.length) return { success: false, error: 'PO 데이터 비어있음' };
+
+    const [vendorList, settingsRes] = await Promise.all([
+      api.loadVendors(),
+      api.loadSettings(),
+    ]);
+    const defaults = settingsRes?.settings || {};
+    const vendorMeta = vendorList?.vendors?.find?.((v) => v.id === j.vendor) || {};
+    const override = vendorMeta.settings || {};
+    const pick = (k) =>
+      (override[k] !== undefined && override[k] !== '') ? override[k] : (defaults[k] ?? '');
+    const defaultShortageReason = pick('defaultShortageReason')
+      || '협력사 재고부족 - 수입상품 입고지연 (선적/통관지연)';
+
+    const patches = masterData.map((row) => {
+      const confirmedQty = row.export_yn === 'N'
+        ? '0'
+        : String(row.confirmed_qty ?? row.order_quantity ?? 0);
+      const confirmedNum = Number(confirmedQty) || 0;
+      const orderNum = Number(row.order_quantity) || 0;
+      const shortageReason = (confirmedNum < orderNum) ? defaultShortageReason : '';
+      return {
+        key: `${row.coupang_order_seq}|${row.departure_warehouse}|${row.sku_barcode}`,
+        confirmedQty,
+        shortageReason,
+      };
+    });
+
+    const res = await api.confirmation.patchQuantities(j.date, j.vendor, j.sequence, patches);
+    if (!res?.success) return res || { success: false };
+
+    // 현재 확정서를 보고 있으면 즉시 리로드
+    if (loadedPathRef.current?.endsWith('confirmation.xlsx')) {
+      const read = await api.readFile(confPath.path);
+      if (read?.success) {
+        setXlsxBuffer(read.data);
+        setLoadedPath(confPath.path);
+        latestSheetsRef.current = null;
+      }
+    }
+    return res;
+  }, []);
+
+  // 수동 저장 — PO 저장이면 confirmation.xlsx 의 I/M 도 자동 패치
   const handleSaveNow = useCallback(async () => {
     const target = loadedPathRef.current;
     const data = latestSheetsRef.current;
@@ -275,6 +337,16 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       if (w?.success) {
         setDirty(false);
         appendLog('info', '[저장] 완료');
+
+        // PO 저장 후 자동으로 확정서의 확정수량·부족사유 갱신
+        if (target.endsWith('po.xlsx')) {
+          const res = await patchConfirmationFromPo();
+          if (res?.success) {
+            appendLog('event', `[확정서 자동갱신] ${res.patched}행 반영${res.unmatched?.length ? ` (미매칭 ${res.unmatched.length}행)` : ''}`);
+          } else if (!res?.skipped && res?.error) {
+            appendLog('warn', `[확정서 자동갱신] 실패: ${res.error}`);
+          }
+        }
       } else {
         appendLog('error', `저장 실패: ${w?.error ?? 'unknown'}`);
       }
@@ -283,7 +355,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     } finally {
       setSaving(false);
     }
-  }, [appendLog]);
+  }, [appendLog, patchConfirmationFromPo]);
 
   // ── Python 이벤트 리스너 ──
   useEffect(() => {
@@ -662,8 +734,10 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     }
   }, [job, appendLog]);
 
-  // ── 발주확정서 제작/재생성 (항상 디스크의 po.xlsx 기준) ──
-  // PO 편집 중이었다면 먼저 저장한 뒤, 그 내용으로 재빌드.
+  // ── 발주확정서 제작/부분갱신 ──
+  //   없을 때: PO 에서 전체 생성 (초기 1회)
+  //   있을 때: I(확정수량) · M(납품부족사유) 만 in-place 패치 — 다른 편집 전부 보존
+  // PO 편집 중이었다면 먼저 저장한 뒤 진행.
   const handleBuildConfirmation = useCallback(async () => {
     if (!job) return;
     const api = window.electronAPI;
@@ -684,6 +758,19 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
         appendLog('error', `PO 저장 실패: ${err.message}`);
         return;
       }
+    }
+
+    // confirmation.xlsx 가 이미 있으면 부분 갱신 경로
+    if (confirmationExists) {
+      const res = await patchConfirmationFromPo();
+      if (res?.skipped) return;
+      if (!res?.success) {
+        appendLog('error', `확정수량 반영 실패: ${res?.error ?? 'unknown'}`);
+        return;
+      }
+      appendLog('info', `[확정수량 반영] ${res.patched}행 갱신${res.unmatched?.length ? ` (미매칭 ${res.unmatched.length}행)` : ''}`);
+      setActiveTab('confirmation');
+      return;
     }
 
     try {
@@ -762,7 +849,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     } catch (err) {
       appendLog('error', `확정서 생성 실패: ${err.message}`);
     }
-  }, [job, dirty, appendLog]);
+  }, [job, dirty, confirmationExists, patchConfirmationFromPo, appendLog]);
 
   // ── 현재 탭 파일을 사용자 지정 위치로 다운로드 ──
   const handleDownload = useCallback(async (kind) => {
@@ -1038,10 +1125,12 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
               title={
                 !poExists ? 'po.xlsx 가 아직 없습니다'
                   : jobLocked ? '플러그인 창이 열려있습니다'
-                  : 'PO 의 확정수량을 반영해 발주확정서 생성/재생성'
+                  : confirmationExists
+                    ? 'PO 의 확정수량·부족사유만 확정서에 반영 (입고유형·사용자 편집 보존)'
+                    : 'PO 로부터 발주확정서 최초 생성'
               }
             >
-              {confirmationExists ? '🔄 확정서 재생성' : '📋 확정서 생성'}
+              {confirmationExists ? '🔄 확정수량 반영' : '📋 확정서 생성'}
             </button>
           </>
         )}

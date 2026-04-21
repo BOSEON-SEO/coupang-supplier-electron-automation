@@ -66,6 +66,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // ── 발주확정서 부분 패치 ──
+  confirmation: {
+    patchQuantities: (date, vendor, sequence, patches) =>
+      ipcRenderer.invoke('confirmation:patchQuantities', date, vendor, sequence, patches),
+  },
+
   // ── 운송 분배 서브 창 ──
   transport: {
     open: (date, vendor, sequence) => ipcRenderer.invoke('transport:open', date, vendor, sequence),

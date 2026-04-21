@@ -1602,6 +1602,84 @@ function registerIpcHandlers({
       return { success: false, error: err.message };
     }
   });
+
+  /**
+   * confirmation:patchQuantities — confirmation.xlsx 의 확정수량(I) · 납품부족사유(M) 만
+   * in-place 패치. 입고유형(C)·사용자 직접 편집(회송담당자 수정 등)은 보존.
+   *
+   * 매칭 키: 발주번호|물류센터|상품바코드
+   * patches: Array<{ key: string, confirmedQty: string, shortageReason: string }>
+   */
+  ipcMain.handle('confirmation:patchQuantities', async (_e, date, vendor, sequence, patches) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!Array.isArray(patches)) {
+      return { success: false, error: 'patches must be array' };
+    }
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const confPath = path.join(dir, 'confirmation.xlsx');
+    if (!fs.existsSync(confPath)) {
+      return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
+    }
+    try {
+      const byKey = new Map();
+      for (const p of patches) {
+        if (p && typeof p.key === 'string') byKey.set(p.key, p);
+      }
+
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.readFile(confPath);
+      const ws = wb.getWorksheet('상품목록') || wb.worksheets[0];
+      if (!ws) return { success: false, error: '상품목록 시트 없음' };
+
+      let iOrder = null;
+      let iWh = null;
+      let iBarcode = null;
+      let iQty = null;
+      let iReason = null;
+      ws.getRow(1).eachCell((cell, col) => {
+        const v = String(cell.value ?? '').trim();
+        if (v === '발주번호') iOrder = col;
+        else if (v === '물류센터') iWh = col;
+        else if (v === '상품바코드') iBarcode = col;
+        else if (v === '확정수량') iQty = col;
+        else if (v === '납품부족사유') iReason = col;
+      });
+      if (!iOrder || !iWh || !iBarcode || !iQty || !iReason) {
+        return { success: false, error: '필수 컬럼을 찾지 못했습니다.' };
+      }
+
+      const last = ws.actualRowCount || ws.rowCount;
+      let patched = 0;
+      const matchedKeys = new Set();
+      for (let r = 2; r <= last; r += 1) {
+        const order = String(ws.getCell(r, iOrder).value ?? '').trim();
+        const wh = String(ws.getCell(r, iWh).value ?? '').trim();
+        const barcode = String(ws.getCell(r, iBarcode).value ?? '').trim();
+        if (!order || !wh || !barcode) continue;
+        const key = `${order}|${wh}|${barcode}`;
+        const p = byKey.get(key);
+        if (!p) continue;
+        ws.getCell(r, iQty).value = String(p.confirmedQty ?? '');
+        ws.getCell(r, iReason).value = String(p.shortageReason ?? '');
+        matchedKeys.add(key);
+        patched += 1;
+      }
+
+      if (patched > 0) {
+        await wb.xlsx.writeFile(confPath);
+      }
+
+      const unmatched = [];
+      for (const k of byKey.keys()) {
+        if (!matchedKeys.has(k)) unmatched.push(k);
+      }
+      return { success: true, patched, unmatched };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
 }
 
 module.exports = { registerIpcHandlers, detectPython, resetPythonCache };
