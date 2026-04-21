@@ -121,7 +121,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     if (!prev.stockAdjust && cur.stockAdjust) appendLog('event', '📦 재고조정 창 열림');
     if (prev.stockAdjust && !cur.stockAdjust) appendLog('event', '📦 재고조정 창 닫힘 — 저장된 변경사항 반영');
     if (!prev.transport && cur.transport) appendLog('event', '🚚 운송분배 창 열림');
-    if (prev.transport && !cur.transport) appendLog('event', '🚚 운송분배 창 닫힘 — transport.json 저장됨');
+    if (prev.transport && !cur.transport) appendLog('event', '🚚 운송분배 창 닫힘 — 발주확정서 입고유형 갱신');
     prevLockTypesRef.current = cur;
   }, [locks, currentJobKey, appendLog]);
 
@@ -134,19 +134,35 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     prevPythonRunningRef.current = pythonRunning;
   }, [pythonRunning, onCloseWork]);
 
-  // 재고조정 창이 닫히며 lock 이 풀리는 순간, PO 탭을 보고 있으면 디스크에서 다시 읽어
-  // 사용자가 저장한 확정수량 변경을 곧바로 보이게 한다.
-  const prevLockedRef = useRef(false);
+  // 플러그인 창이 닫히며 lock 이 풀리는 순간, 해당 변경 결과를 뷰에 자동 반영.
+  //   재고조정 닫힘 → po.xlsx 보고 있으면 리로드 (확정수량 변경)
+  //   운송분배 닫힘 → confirmation.xlsx 보고 있으면 리로드 (입고유형 패치 반영)
+  const prevLockTypesReloadRef = useRef({});
   useEffect(() => {
-    const wasLocked = prevLockedRef.current;
-    prevLockedRef.current = jobLocked;
-    if (!wasLocked || jobLocked) return;
+    const prev = prevLockTypesReloadRef.current;
+    const cur = currentLockTypes;
+    prevLockTypesReloadRef.current = { ...cur };
     const j = jobRef.current;
     const p = loadedPathRef.current || '';
-    if (j && p.endsWith('po.xlsx')) {
+    if (!j) return;
+    if (prev.stockAdjust && !cur.stockAdjust && p.endsWith('po.xlsx')) {
       loadJobPoFile(j);
     }
-  }, [jobLocked]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (prev.transport && !cur.transport && p.endsWith('confirmation.xlsx')) {
+      (async () => {
+        const api = window.electronAPI;
+        if (!api) return;
+        const resolved = await api.resolveJobPath(j.date, j.vendor, j.sequence, 'confirmation.xlsx');
+        if (!resolved?.success) return;
+        const read = await api.readFile(resolved.path);
+        if (read?.success) {
+          setXlsxBuffer(read.data);
+          setLoadedPath(resolved.path);
+          latestSheetsRef.current = null;
+        }
+      })();
+    }
+  }, [currentLockTypes.stockAdjust, currentLockTypes.transport]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── job 파일 존재 여부 프로브 (action bar 버튼 enable/disable 용) ──
   useEffect(() => {
@@ -1055,7 +1071,25 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
                   : '업로드 폼·약관 동의·파일 주입까지 자동 — 업로드 실행 버튼은 수동'
               }
             >
-              ⬆ 업로드 준비
+              📤 발주확정
+            </button>
+            <button
+              type="button"
+              className="btn btn--phase-milkrun btn--sm"
+              onClick={() => appendLog('warn', '🚛 밀크런 등록 — 추후 구현 예정')}
+              disabled={!job || !confirmationExists || pythonRunning || jobLocked}
+              title="밀크런 배치등록 (추후 구현)"
+            >
+              🚛 밀크런 등록
+            </button>
+            <button
+              type="button"
+              className="btn btn--phase-shipment btn--sm"
+              onClick={() => appendLog('warn', '📦 쉽먼트 등록 — 추후 구현 예정')}
+              disabled={!job || !confirmationExists || pythonRunning || jobLocked}
+              title="쉽먼트 등록 (추후 구현)"
+            >
+              📦 쉽먼트 등록
             </button>
           </>
         )}
@@ -1071,7 +1105,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
               disabled={!job || !xlsxBuffer}
               title="현재 탭 파일을 xlsx 로 다운로드"
             >
-              ⬇ 다운로드
+              📥 다운로드
             </button>
             <button
               type="button"

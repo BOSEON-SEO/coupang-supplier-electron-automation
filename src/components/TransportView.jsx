@@ -357,9 +357,8 @@ function ShipmentSettings({ assignment, onField }) {
   return (
     <div className="tcard__settings tcard__settings--shipment">
       <div className="tcard__box-add">
-        <span className="tcard__pallet-label">전체 박스</span>
         <input
-          type="number" min="1" placeholder="박스 개수"
+          type="number" min="1" placeholder="수량"
           className="stock-adjust-input tcard__box-add-input"
           value={addN}
           onChange={(e) => setAddN(e.target.value)}

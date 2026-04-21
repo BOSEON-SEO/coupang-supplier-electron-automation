@@ -12,6 +12,7 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { safeStorage, dialog } = require('electron');
 const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1556,7 +1557,47 @@ function registerIpcHandlers({
         assignments,
       };
       fs.writeFileSync(transportPath, JSON.stringify(payload, null, 2), 'utf-8');
-      return { success: true, path: transportPath };
+
+      // confirmation.xlsx 의 입고유형(C) 컬럼을 물류센터별 transportType 으로 in-place 패치.
+      // 다른 셀(확정수량/납품부족사유 등 사용자 편집)은 보존.
+      let confirmationPatched = 0;
+      const confPath = path.join(dir, 'confirmation.xlsx');
+      if (fs.existsSync(confPath)) {
+        try {
+          const wb = new ExcelJS.Workbook();
+          await wb.xlsx.readFile(confPath);
+          const ws = wb.getWorksheet('상품목록') || wb.worksheets[0];
+          if (ws) {
+            let iWh = null;
+            let iType = null;
+            ws.getRow(1).eachCell((cell, col) => {
+              const v = String(cell.value ?? '').trim();
+              if (v === '물류센터') iWh = col;
+              if (v === '입고유형') iType = col;
+            });
+            if (iWh && iType) {
+              const last = ws.actualRowCount || ws.rowCount;
+              for (let r = 2; r <= last; r += 1) {
+                const wh = String(ws.getCell(r, iWh).value ?? '').trim();
+                if (!wh) continue;
+                const a = assignments[wh];
+                if (a && a.transportType) {
+                  ws.getCell(r, iType).value = a.transportType;
+                  confirmationPatched += 1;
+                }
+              }
+              if (confirmationPatched > 0) {
+                await wb.xlsx.writeFile(confPath);
+              }
+            }
+          }
+        } catch (err) {
+          // 패치 실패는 transport 저장 자체를 실패로 만들지 않음 — 로그만
+          console.warn('[transport:save] confirmation 입고유형 패치 실패:', err.message);
+        }
+      }
+
+      return { success: true, path: transportPath, confirmationPatched };
     } catch (err) {
       return { success: false, error: err.message };
     }

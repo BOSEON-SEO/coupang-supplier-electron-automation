@@ -314,9 +314,29 @@ body {
   background: #ef6c00;
   border-color: #ef6c00;
 }
+.btn--phase-milkrun {
+  background: #1976d2;
+  color: #fff;
+  border-color: #1976d2;
+}
+.btn--phase-milkrun:hover:not(:disabled) {
+  background: #0d47a1;
+  border-color: #0d47a1;
+}
+.btn--phase-shipment {
+  background: #5e35b1;
+  color: #fff;
+  border-color: #5e35b1;
+}
+.btn--phase-shipment:hover:not(:disabled) {
+  background: #4527a0;
+  border-color: #4527a0;
+}
 .btn--phase-adjust:disabled,
 .btn--phase-transport:disabled,
-.btn--phase-upload:disabled {
+.btn--phase-upload:disabled,
+.btn--phase-milkrun:disabled,
+.btn--phase-shipment:disabled {
   opacity: 0.5;
 }
 
@@ -2469,7 +2489,7 @@ button.session-badge:disabled {
   flex-wrap: wrap;
 }
 .tcard__box-add-input {
-  width: 110px;
+  width: 64px;
   text-align: right;
 }
 .tcard__box-list {
