@@ -5,6 +5,7 @@ import WorkDetailView from './components/WorkDetailView';
 import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
 import SettingsView from './components/SettingsView';
+import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
@@ -45,6 +46,20 @@ export default function App() {
   }, []);
   useEffect(() => { reloadVendors(); }, [reloadVendors]);
 
+  // ── 전역 설정 (사이드바 메뉴 토글 등) ────────────────────
+  const [globalSettings, setGlobalSettings] = useState({});
+  const reloadGlobalSettings = useCallback(async () => {
+    const res = await window.electronAPI?.loadSettings();
+    setGlobalSettings(res?.settings || {});
+  }, []);
+  useEffect(() => {
+    reloadGlobalSettings();
+    const onChanged = () => reloadGlobalSettings();
+    window.addEventListener('settings-changed', onChanged);
+    return () => window.removeEventListener('settings-changed', onChanged);
+  }, [reloadGlobalSettings]);
+  const pluginsMenuEnabled = !!globalSettings.pluginsMenuEnabled;
+
   // ── 플러그인 로드 ─────────────────────────────────────────
   // 현재는 entitlements 하드코딩 (라이선스 서버 미연결). 출시 단계에 교체.
   const entitlements = useMemo(() => ['core', 'hello', 'tbnws.plugin'], []);
@@ -66,23 +81,29 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // ── PO 다운로드 완료 감지: 작업 패널 자동 열기 + 토스트 ──
+  // ── 다운로드 완료 감지: PO 는 작업 패널 자동 열기 + 토스트, 서류는 토스트만 ──
   useEffect(() => {
     const api = window.electronAPI;
     if (!api?.onPythonDone) return;
+    const downloadScripts = [
+      { suffix: 'po_download.py',            label: 'PO',         openWork: true  },
+      { suffix: 'milkrun_docs_download.py',  label: '밀크런 서류', openWork: false },
+      { suffix: 'shipment_docs_download.py', label: '쉽먼트 서류', openWork: false },
+    ];
     const unsub = api.onPythonDone((data) => {
       const name = data?.scriptName || '';
-      if (!name.includes('po_download.py')) return;
+      const hit = downloadScripts.find((s) => name.includes(s.suffix));
+      if (!hit) return;
 
       if (data.killed) {
-        showToast({ type: 'warn', text: 'PO 다운로드가 취소되었습니다.' });
+        showToast({ type: 'warn', text: `${hit.label} 다운로드가 취소되었습니다.` });
       } else if (data.exitCode === 0) {
-        setWorkOpen(true);
-        showToast({ type: 'success', text: 'PO 다운로드가 완료되었습니다.' });
+        if (hit.openWork) setWorkOpen(true);
+        showToast({ type: 'success', text: `${hit.label} 다운로드가 완료되었습니다.` });
       } else {
         showToast({
           type: 'error',
-          text: `PO 다운로드 실패 (exitCode=${data.exitCode ?? '?'})`,
+          text: `${hit.label} 다운로드 실패 (exitCode=${data.exitCode ?? '?'})`,
           duration: 6000,
         });
       }
@@ -112,6 +133,7 @@ export default function App() {
           activeView={view}
           onChange={setView}
           workActive={!!activeJob}
+          pluginsMenuEnabled={pluginsMenuEnabled}
         />
 
         <main className="app-main">
@@ -147,6 +169,9 @@ export default function App() {
 
           {/* 설정 view */}
           {view === 'settings' && <SettingsView activeVendor={vendor} />}
+
+          {/* 플러그인 view — 사이드바 토글이 켜져 있을 때만 */}
+          {view === 'plugins' && pluginsMenuEnabled && <PluginsView />}
         </main>
       </div>
 

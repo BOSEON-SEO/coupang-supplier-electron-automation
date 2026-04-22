@@ -153,6 +153,8 @@ export default function SettingsView({ activeVendor }) {
         setVendors(next);
       }
       setStatus('저장됨');
+      // App 등 상위 컴포넌트가 설정 재로드하도록 신호
+      window.dispatchEvent(new Event('settings-changed'));
     } catch (err) {
       setStatus(`저장 실패: ${err.message}`);
     } finally {
@@ -263,6 +265,22 @@ export default function SettingsView({ activeVendor }) {
           💾 {saving ? '저장 중...' : '저장'}
         </button>
         {status && <span className="settings-view__status">{status}</span>}
+      </div>
+
+      {/* 고급 — 글로벌(벤더 무관) 토글들 */}
+      <div className="settings-advanced">
+        <div className="settings-advanced__title">고급</div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={!!defaults.pluginsMenuEnabled}
+            onChange={(e) => handleDefaultChange('pluginsMenuEnabled', e.target.checked)}
+          />
+          <span className="settings-toggle__label">플러그인 메뉴 표시</span>
+          <span className="settings-toggle__hint">
+            사이드바에 🔌 플러그인 메뉴를 추가합니다 (로드된 플러그인 현황 확인용).
+          </span>
+        </label>
       </div>
 
       <div className="settings-table">
