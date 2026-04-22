@@ -236,6 +236,7 @@ export function listLoadedPlugins() {
     id: manifest.id,
     name: manifest.name,
     version: manifest.version,
+    settingsSchema: Array.isArray(manifest.settingsSchema) ? manifest.settingsSchema : [],
   }));
 }
 

@@ -267,22 +267,6 @@ export default function SettingsView({ activeVendor }) {
         {status && <span className="settings-view__status">{status}</span>}
       </div>
 
-      {/* 고급 — 글로벌(벤더 무관) 토글들 */}
-      <div className="settings-advanced">
-        <div className="settings-advanced__title">고급</div>
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={!!defaults.pluginsMenuEnabled}
-            onChange={(e) => handleDefaultChange('pluginsMenuEnabled', e.target.checked)}
-          />
-          <span className="settings-toggle__label">플러그인 메뉴 표시</span>
-          <span className="settings-toggle__hint">
-            사이드바에 🔌 플러그인 메뉴를 추가합니다 (로드된 플러그인 현황 확인용).
-          </span>
-        </label>
-      </div>
-
       <div className="settings-table">
         <div className="settings-table__row settings-table__row--header">
           <div className="settings-table__label"></div>
@@ -328,6 +312,22 @@ export default function SettingsView({ activeVendor }) {
             })}
           </React.Fragment>
         ))}
+      </div>
+
+      {/* 고급 — 글로벌(벤더 무관) 토글들 */}
+      <div className="settings-advanced">
+        <div className="settings-advanced__title">고급</div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={!!defaults.pluginsMenuEnabled}
+            onChange={(e) => handleDefaultChange('pluginsMenuEnabled', e.target.checked)}
+          />
+          <span className="settings-toggle__label">플러그인 메뉴 표시</span>
+          <span className="settings-toggle__hint">
+            사이드바에 🔌 플러그인 메뉴를 추가합니다 (로드된 플러그인 현황 확인용).
+          </span>
+        </label>
       </div>
 
       {activeModalField && (

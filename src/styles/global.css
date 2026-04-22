@@ -1433,6 +1433,71 @@ body {
   color: #2e7d32;
 }
 
+/* 플러그인별 설정 폼 */
+.plugin-settings {
+  padding: 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.plugin-settings__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plugin-settings__row--toggle {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.plugin-settings__row--toggle input[type="checkbox"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+}
+.plugin-settings__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.plugin-settings__input {
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.plugin-settings__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.plugin-settings__input--textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+.plugin-settings__hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+.plugin-settings__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 6px;
+}
+.plugin-settings__status {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .settings-table__label {
   font-size: 13px;
   font-weight: 500;

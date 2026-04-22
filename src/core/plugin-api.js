@@ -85,8 +85,23 @@
  * @property {string} [entitlement]
  *   로딩에 필요한 entitlement 플래그. 없으면 entitlements 무관하게 로드.
  *   예: 'tbnws.plugin'. 라이선스 서버 미연결 시 (개발 모드) 는 무시.
+ * @property {PluginSettingField[]} [settingsSchema]
+ *   플러그인 고유 설정 필드 정의. PluginsView 가 이걸 읽어 폼 자동 생성.
+ *   값은 글로벌 settings.json 의 `plugins.<id>.<key>` 경로에 저장됨.
  * @property {(ctx: PluginContext) => (void | Disposable)} activate
  *   플러그인 진입점. Disposable 반환 시 deactivate 때 자동 호출.
+ */
+
+/**
+ * @typedef {object} PluginSettingField
+ *   플러그인 설정 필드 정의. PluginsView 가 자동 렌더.
+ *
+ * @property {string} key           예: 'apiBaseUrl'
+ * @property {string} label         표시 레이블
+ * @property {'text' | 'password' | 'number' | 'url' | 'textarea' | 'boolean'} type
+ * @property {string} [description] 필드 아래 설명 텍스트
+ * @property {string} [placeholder]
+ * @property {any}    [default]     기본값 (값 없을 때 UI 에 표시)
  */
 
 /**

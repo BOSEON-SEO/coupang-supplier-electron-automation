@@ -23,6 +23,29 @@ const manifest = {
   version: '0.1.0',
   entitlement: 'tbnws.plugin',
 
+  settingsSchema: [
+    {
+      key: 'apiBaseUrl',
+      label: 'API Base URL',
+      type: 'url',
+      placeholder: 'https://tbnws-admin.internal/api',
+      description: 'TBNWS 사내 관리 백엔드 주소. 예) http://10.0.0.5:8080',
+    },
+    {
+      key: 'apiToken',
+      label: 'API 인증 토큰',
+      type: 'password',
+      description: 'Bearer 토큰 또는 세션 쿠키 값. 백엔드 관리자에게 문의.',
+    },
+    {
+      key: 'category',
+      label: '벤더 카테고리',
+      type: 'text',
+      placeholder: 'BASIC 또는 CANON',
+      description: '쿠팡 발주서 검증 시 백엔드로 전달되는 벤더 구분값.',
+    },
+  ],
+
   activate(ctx) {
     const disposables = [];
 
