@@ -183,26 +183,221 @@ function ensureWebView(vendorId) {
       }
       return;
     }
-    // 2) 폴더 모드 (밀크런 서류 일괄) — 소비하지 않고 여러 파일 계속 받음
+    // 2) 폴더 모드 (밀크런/쉽먼트 서류 일괄) — 소비하지 않고 여러 파일 계속 받음
+    //    파일명은 사이트가 보낸 suggested_filename 그대로 저장 (덮어쓰기)
     if (pendingDownloadDir) {
       try {
         fs.mkdirSync(pendingDownloadDir, { recursive: true });
         const suggested = item.getFilename() || `download-${Date.now()}`;
-        let finalName = suggested;
-        let i = 1;
-        while (fs.existsSync(path.join(pendingDownloadDir, finalName))) {
-          const ext = path.extname(suggested);
-          const base = path.basename(suggested, ext);
-          finalName = `${base} (${i})${ext}`;
-          i += 1;
-        }
-        item.setSavePath(path.join(pendingDownloadDir, finalName));
+        item.setSavePath(path.join(pendingDownloadDir, suggested));
       } catch (err) {
         console.error('[will-download] dir setSavePath failed:', err.message);
       }
       return;
     }
     // 둘 다 없으면 기본 동작 (OS 대화상자)
+  });
+
+  // ── popup 인터셉트 — 폴더 모드일 때 새 창을 hidden 으로 열어 PDF 캡처 ──
+  // 쿠팡 밀크런 서류 버튼은 PDF 자체가 아니라 "프린트용 HTML 페이지" 를
+  // window.open 으로 띄운다. 두 단계로 동작:
+  //   (a) window.open('about:blank', ...) 로 빈 창 생성
+  //   (b) JS 로 콘텐츠 주입 + 자동 window.print()
+  // 따라서 setWindowOpenHandler 에서 url 을 잡아 직접 loadURL 하면 (a) 단계의
+  // about:blank 만 받아져서 빈 PDF 가 됨. 해결: popup 은 'allow' 하되 hidden
+  // BrowserWindow 로 띄우고, did-create-window 에서 그 popup 의 webContents 가
+  // 콘텐츠 navigate 후 printToPDF.  pendingDownloadDir 활성 시에만 동작.
+  const PRINT_BLOCK_PRELOAD = path.join(__dirname, 'preload-printblock.js');
+
+  wcv.webContents.setWindowOpenHandler(({ url: _url }) => {
+    if (pendingDownloadDir) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          show: false,
+          webPreferences: {
+            session: wcv.webContents.session,
+            backgroundThrottling: false,
+            // popup 이 콘텐츠 주입 직후 자동 window.print() 를 호출해
+            // OS 프린트 다이얼로그를 띄우는 걸 막기 위한 preload.
+            preload: PRINT_BLOCK_PRELOAD,
+            sandbox: false,
+            // ⚠ contextIsolation=false: preload 가 사이트 JS 와 같은 world
+            // 에서 동작해야 window.print 교체가 실제로 적용됨. true 면
+            // preload 의 window.print 교체가 격리된 world 에만 반영돼서
+            // 사이트 JS 의 window.print() 는 그대로 동작 → OS 프린트
+            // 다이얼로그 발생. hidden + 사용자 입력 없는 read-only 창이라
+            // 보안상 수용 가능.
+            contextIsolation: false,
+            nodeIntegration: false,
+          },
+        },
+      };
+    }
+    return { action: 'allow' };
+  });
+
+  wcv.webContents.on('did-create-window', (childWin, _details) => {
+    if (!pendingDownloadDir) return;
+    const targetDir = pendingDownloadDir;
+
+    // 방어적 override — preload 누락 케이스 대비
+    childWin.webContents.on('dom-ready', () => {
+      childWin.webContents.executeJavaScript(
+        'try { window.print = () => {}; } catch (e) {}; void 0', true,
+      ).catch(() => {});
+    });
+
+    let captured = false;
+    const captureToPDF = async () => {
+      if (captured || childWin.isDestroyed()) return;
+      captured = true;
+      let handledByEmbed = false;
+      try {
+        // 이미지/렌더링 안정화 대기
+        await new Promise((r) => setTimeout(r, 1500));
+        if (childWin.isDestroyed()) return;
+
+        // 1) popup 이 iframe 으로 실제 콘텐츠를 감싸는 패턴 (밀크런 printPOFiles
+        //    → previewPOFiles). iframe.src 자체가 application/pdf 응답을 주는
+        //    endpoint 라 downloadURL 로 직접 바이너리 PDF 를 받는다.
+        const iframeSrc = await childWin.webContents.executeJavaScript(
+          `(() => {
+            const f = document.querySelector('iframe[src]');
+            return f ? f.src : '';
+          })()`,
+          true,
+        ).catch(() => '');
+
+        if (iframeSrc && iframeSrc !== 'about:blank') {
+          handledByEmbed = true;
+          // previewPOFiles 같은 endpoint 는 application/pdf 를 직접 응답.
+          // Chromium 이 PDF Viewer 로 inline 표시(<embed>)하지만 우리는
+          // 그걸 캡처할 수 없으므로 downloadURL 로 바이너리 PDF 를 직접 받는다.
+          console.log('[popup] inner iframe (PDF endpoint):', iframeSrc);
+          const sess = childWin.webContents.session;
+          const onDownload = (_event, item) => {
+            item.once('done', (_e, state) => {
+              console.log('[popup→iframe→download] state:', state);
+              sess.removeListener('will-download', onDownload);
+              if (!childWin.isDestroyed()) childWin.close();
+            });
+          };
+          sess.on('will-download', onDownload);
+          try {
+            childWin.webContents.downloadURL(iframeSrc);
+          } catch (err) {
+            console.error('[popup→iframe→download] downloadURL failed:', err.message);
+            sess.removeListener('will-download', onDownload);
+            if (!childWin.isDestroyed()) childWin.close();
+          }
+          // 안전망: 20초 뒤 강제 close
+          setTimeout(() => {
+            try { sess.removeListener('will-download', onDownload); } catch {}
+            if (!childWin.isDestroyed()) childWin.close();
+          }, 20_000);
+          return;
+        }
+
+        // 2) HTML 렌더 페이지 — printToPDF
+        //    printBackground:false + margins:none 로 중복/배경 이슈 최소화.
+        // 사이트 자체 버그로 div#20_20173 같은 라벨 div 가 동일 outerHTML 로
+        // 여러 번 그려지는 경우가 있어 dedupe 후 캡처 (예: 빨간 라벨 popup).
+        try {
+          const result = await childWin.webContents.executeJavaScript(`(() => {
+            const targets = Array.from(document.body ? document.body.children : []);
+            const seen = new Set();
+            let removed = 0;
+            for (const el of targets) {
+              if (el.classList && el.classList.contains('pagebreak')) continue;
+              const key = el.outerHTML;
+              if (seen.has(key)) {
+                const next = el.nextElementSibling;
+                if (next && next.classList && next.classList.contains('pagebreak')) {
+                  next.remove();
+                }
+                el.remove();
+                removed += 1;
+              } else {
+                seen.add(key);
+              }
+            }
+            // 마지막에 남은 trailing pagebreak 모두 제거 (빈 페이지 방지)
+            let trailing = 0;
+            while (true) {
+              const last = document.body && document.body.lastElementChild;
+              if (!last) break;
+              if (last.classList && last.classList.contains('pagebreak')) {
+                last.remove();
+                trailing += 1;
+              } else { break; }
+            }
+            // 마지막 element 의 page-break-after CSS 도 제거
+            const last = document.body && document.body.lastElementChild;
+            if (last) {
+              last.style.pageBreakAfter = 'avoid';
+              last.style.breakAfter = 'avoid';
+            }
+            return { removed, trailing };
+          })()`, true);
+          if (result.removed > 0 || result.trailing > 0) {
+            console.log('[popup dedupe] removed', result.removed,
+                        'duplicates, trimmed', result.trailing, 'trailing pagebreaks');
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        } catch (e) { console.log('[popup dedupe] failed:', e.message); }
+
+        const title = await childWin.webContents
+          .executeJavaScript('document.title || ""', true)
+          .catch(() => '');
+        const pdfBuffer = await childWin.webContents.printToPDF({
+          printBackground: false,
+          pageSize: 'A4',
+          margins: { marginType: 'none' },
+          preferCSSPageSize: true,
+        });
+        let baseName = (title || '').trim();
+        if (!baseName) {
+          try {
+            const u = new URL(childWin.webContents.getURL());
+            const seq = u.searchParams.get('milkrunSeq')
+              || u.searchParams.get('milkrun-seq')
+              || u.searchParams.get('purchaseOrderSeq')
+              || '';
+            baseName = seq ? `milkrun_${seq}` : `print_${Date.now()}`;
+          } catch { baseName = `print_${Date.now()}`; }
+        }
+        baseName = baseName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+        const fileName = baseName.toLowerCase().endsWith('.pdf')
+          ? baseName : `${baseName}.pdf`;
+        fs.mkdirSync(targetDir, { recursive: true });
+        const fp = path.join(targetDir, fileName);
+        fs.writeFileSync(fp, pdfBuffer);
+        console.log('[popup→printToPDF] saved:', fp, `(${pdfBuffer.length} bytes)`);
+      } catch (err) {
+        console.error('[popup→printToPDF] failed:', err.message);
+      } finally {
+        // embed 분기에서는 will-download 'done' 핸들러가 close 담당 — 여기선 skip
+        if (!handledByEmbed && !childWin.isDestroyed()) childWin.close();
+      }
+    };
+
+    // about:blank 단계는 무시하고 실제 콘텐츠가 로드되면 캡처
+    childWin.webContents.on('did-finish-load', () => {
+      const cur = childWin.webContents.getURL();
+      if (cur === 'about:blank' || cur === '') return;
+      captureToPDF();
+    });
+
+    // about:blank 인 채로 JS 로만 콘텐츠가 주입되는 경우 폴백 — 일정 시간 후 강제 캡처
+    setTimeout(() => { captureToPDF(); }, 5000);
+
+    childWin.webContents.on('did-fail-load', (_e, errorCode, errorDesc) => {
+      // -3 은 ERR_ABORTED — 보통 navigate 전환이라 무시해도 됨
+      if (errorCode === -3) return;
+      console.error('[popup→printToPDF] did-fail-load:', errorCode, errorDesc);
+      if (!childWin.isDestroyed()) childWin.close();
+    });
   });
 
   // URL 변경 이벤트를 Renderer 의 주소창에 전달

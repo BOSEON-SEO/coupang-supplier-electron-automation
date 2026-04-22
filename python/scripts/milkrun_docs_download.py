@@ -215,28 +215,44 @@ def _collect_milkrun_seqs(page) -> list[str]:
 
 
 def _click_doc_button(page, *, seq: str, button_name: str) -> bool:
-    """행 seq 의 해당 버튼을 클릭. 성공 시 True."""
+    """행 seq 의 해당 버튼을 클릭. 성공 시 True.
+
+    이전 popup 의 printToPDF 완료 직후 부모 페이지가 아직 정리 중일 수 있어
+    일반 click 이 timeout 나는 케이스가 있다. force → JS click 순으로 폴백.
+    """
     sel = f'span[name="{button_name}"][milkrun-seq="{seq}"]'
+    # 1) normal click (짧은 timeout — 빠르게 폴백으로 넘어가기 위함)
     try:
-        page.locator(sel).first.click(timeout=BUTTON_TIMEOUT_MS)
+        page.locator(sel).first.click(timeout=3_000)
         return True
     except Exception as exc:
-        send_log(f"  클릭 실패 ({button_name}, seq={seq}): {exc}")
-        # JS click 폴백
-        try:
-            page.evaluate(
-                """({ sel }) => {
-                    const el = document.querySelector(sel);
-                    if (el) { el.click(); return true; }
-                    return false;
-                }""",
-                {"sel": sel},
-            )
+        send_log(f"  normal click 실패 ({button_name}, seq={seq}): {str(exc)[:120]}")
+    # 2) force click — pointer-events intercept 우회
+    try:
+        page.locator(sel).first.click(force=True, timeout=3_000)
+        send_log(f"  force click 적용 ({button_name}, seq={seq})")
+        return True
+    except Exception as exc:
+        send_log(f"  force click 실패 ({button_name}, seq={seq}): {str(exc)[:120]}")
+    # 3) JS click — 네이티브 el.click()
+    try:
+        ok = page.evaluate(
+            """({ sel }) => {
+                const el = document.querySelector(sel);
+                if (!el) return false;
+                el.click();
+                return true;
+            }""",
+            {"sel": sel},
+        )
+        if ok:
             send_log(f"  JS click 폴백 적용 ({button_name}, seq={seq})")
             return True
-        except Exception as exc2:
-            send_error(f"  JS click 폴백도 실패: {exc2}")
-            return False
+        send_error(f"  JS click 폴백 — element 자체를 찾지 못함: {sel}")
+        return False
+    except Exception as exc2:
+        send_error(f"  JS click 폴백 예외: {exc2}")
+        return False
 
 
 # ─── 메인 ────────────────────────────────────────────────────────
@@ -370,18 +386,33 @@ def main():
         except Exception:
             pass
 
-        _step_log("DOWNLOAD", "OK",
-                  f"clicks={clicks_ok}/{total_buttons} files={len(downloaded)}")
+        # 마지막 popup→printToPDF 가 늦게 저장될 수 있어 추가 대기
+        time.sleep(3.0)
 
-        # ── 파일 메타(크기) 수집 ──
+        _step_log("DOWNLOAD", "OK",
+                  f"clicks={clicks_ok}/{total_buttons} polled={len(downloaded)}")
+
+        # ── 파일 메타: 폴더 전체 재스캔 (polling 누락분도 포함) ──
+        # popup→printToPDF 가 클릭 응답보다 늦게 떨어지는 경우 polling 이 놓치기
+        # 때문에, 종료 직전 폴더 전체를 다시 읽어 실제 결과를 보고한다.
         files_meta = []
-        for name in downloaded:
+        try:
+            actual_files = sorted(
+                f for f in os.listdir(download_dir)
+                if os.path.isfile(os.path.join(download_dir, f))
+                and not f.lower().endswith((".crdownload", ".tmp", ".part"))
+            )
+        except Exception as exc:
+            send_log(f"[WARN] 폴더 재스캔 실패: {exc}")
+            actual_files = list(downloaded)
+        for name in actual_files:
             p = os.path.join(download_dir, name)
             try:
                 size = os.path.getsize(p)
             except Exception:
                 size = None
             files_meta.append({"name": name, "size": size})
+        send_log(f"폴더 재스캔 결과: {len(files_meta)}개 (polling {len(downloaded)}개)")
 
         send_progress(100, f"완료 — {len(files_meta)}개 파일")
 

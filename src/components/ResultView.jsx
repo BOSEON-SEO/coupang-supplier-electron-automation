@@ -240,10 +240,10 @@ export default function ResultView({
     if (res.manifest) onJobUpdated?.(res.manifest);
   }, [job, appendLog, onJobUpdated]);
 
-  // ── 다운로드 이력을 type별로 분리 (최신순) ──
+  // ── 다운로드 이력을 type별로 분리 (오래된 → 최신 순, 처리 이력과 동일) ──
   const { milkrunDocs, shipmentDocs } = useMemo(() => {
     const all = Array.isArray(job?.downloadHistory) ? [...job.downloadHistory] : [];
-    all.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+    all.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     return {
       milkrunDocs: all.filter((h) => h.type === 'milkrun-docs'),
       shipmentDocs: all.filter((h) => h.type === 'shipment-docs'),
@@ -256,7 +256,8 @@ export default function ResultView({
     const hist = kind === 'milkrun' ? milkrunDocs : shipmentDocs;
     const label = kind === 'milkrun' ? '밀크런 서류' : '쉽먼트 서류';
     if (hist.length > 0) {
-      const lastTs = formatDate(new Date(hist[0].timestamp).getTime());
+      // 오름차순 정렬이므로 마지막 원소가 최근
+      const lastTs = formatDate(new Date(hist[hist.length - 1].timestamp).getTime());
       const ok = window.confirm(
         `${label} 다운로드 기록이 이미 ${hist.length}회 있습니다 (최근: ${lastTs}).\n`
         + `다시 받으면 새 폴더에 저장되고 이력에 추가됩니다.\n\n`

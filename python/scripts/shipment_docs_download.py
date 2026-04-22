@@ -380,18 +380,31 @@ def main():
         except Exception:
             pass
 
-        _step_log("DOWNLOAD", "OK",
-                  f"pages={pages_done} clicks={clicks_ok}/{clicks_ok + clicks_fail} files={len(downloaded)}")
+        # 마지막 다운로드가 늦게 떨어질 수 있어 추가 대기
+        time.sleep(3.0)
 
-        # 파일 메타
+        _step_log("DOWNLOAD", "OK",
+                  f"pages={pages_done} clicks={clicks_ok}/{clicks_ok + clicks_fail} polled={len(downloaded)}")
+
+        # ── 파일 메타: 폴더 전체 재스캔 (polling 누락분도 포함) ──
         files_meta = []
-        for name in downloaded:
+        try:
+            actual_files = sorted(
+                f for f in os.listdir(download_dir)
+                if os.path.isfile(os.path.join(download_dir, f))
+                and not f.lower().endswith((".crdownload", ".tmp", ".part"))
+            )
+        except Exception as exc:
+            send_log(f"[WARN] 폴더 재스캔 실패: {exc}")
+            actual_files = list(downloaded)
+        for name in actual_files:
             p = os.path.join(download_dir, name)
             try:
                 size = os.path.getsize(p)
             except Exception:
                 size = None
             files_meta.append({"name": name, "size": size})
+        send_log(f"폴더 재스캔 결과: {len(files_meta)}개 (polling {len(downloaded)}개)")
 
         send_progress(100, f"완료 — {len(files_meta)}개 파일")
 
