@@ -132,7 +132,12 @@ module.exports = {
         if (buffer.length === 0) {
           return { success: false, error: 'fileBuffer 가 비어있습니다.' };
         }
-        const category = payload?.category || settings.category || '';
+        // category = 작업 벤더 (renderer 에서 payload.category 로 전달).
+        // 없으면 빈 문자열 — 백엔드가 400 반환하는 게 맞음.
+        const category = payload?.category || '';
+        if (!category) {
+          return { success: false, error: 'category (작업 벤더) 가 비어있습니다.' };
+        }
         const { body, contentType } = buildMultipart([
           { name: 'category', value: category },
           {

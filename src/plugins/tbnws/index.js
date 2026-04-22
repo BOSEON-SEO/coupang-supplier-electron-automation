@@ -34,13 +34,6 @@ const manifest = {
       type: 'password',
       description: 'Bearer 토큰 또는 세션 쿠키 값. 백엔드 관리자에게 문의.',
     },
-    {
-      key: 'category',
-      label: '벤더 카테고리',
-      type: 'text',
-      placeholder: 'BASIC 또는 CANON',
-      description: '쿠팡 발주서 검증 시 백엔드로 전달되는 벤더 구분값.',
-    },
   ],
 
   activate(ctx) {
@@ -81,7 +74,8 @@ const manifest = {
           const res = await ctx.ipcInvoke('po.checkForm', {
             fileName: payload?.fileName,
             fileBuffer: payload?.buffer,
-            // category 는 main.js 가 설정에서 읽어옴 (override 필요 시 여기서 전달)
+            // 백엔드의 'category' 파라미터 = 작업 벤더. 헤더 벤더(ctx.currentVendor) 아님.
+            category: payload?.job?.vendor || '',
           });
           if (!res?.success) {
             console.warn('[tbnws] po.checkForm 실패:', res?.error);
