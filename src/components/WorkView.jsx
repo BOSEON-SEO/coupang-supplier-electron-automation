@@ -1512,7 +1512,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
                 </button>
                 <button
                   type="button"
-                  className="btn btn--secondary btn--sm"
+                  className="btn btn--phase-regenerate btn--sm"
                   onClick={handleRegenerateConfirmation}
                   disabled={!job || !poExists || pythonRunning || jobLocked}
                   title={

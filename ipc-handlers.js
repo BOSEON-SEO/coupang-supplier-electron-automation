@@ -1562,6 +1562,12 @@ function registerIpcHandlers({
         if (ov !== undefined && ov !== '') return ov;
         return defaults[k] ?? '';
       };
+      const rawInvoices = String(pick('shipmentFakeInvoices') || '');
+      const fakeInvoices = rawInvoices
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter((s) => s !== '')
+        .slice(0, 9);
       const defTransport = {
         originId:     pick('transportOrigin'),
         rentalId:     pick('transportRental'),
@@ -1570,6 +1576,7 @@ function registerIpcHandlers({
         palletWidth:  pick('transportPalletWidth'),
         palletHeight: pick('transportPalletHeight'),
         palletDepth:  pick('transportPalletDepth'),
+        fakeInvoices,
       };
 
       const originList = Array.isArray(defaults.transportOriginList) ? defaults.transportOriginList : [];
@@ -1608,8 +1615,9 @@ function registerIpcHandlers({
               transportType,
 
               // 쉽먼트 전용
-              boxCount:  s.boxCount  ?? 0,
-              skuBoxes:  s.skuBoxes  || {},
+              boxCount:    s.boxCount    ?? 0,
+              skuBoxes:    s.skuBoxes    || {},
+              boxInvoices: Array.isArray(s.boxInvoices) ? s.boxInvoices : [],
 
               // 밀크런 전용
               originId:   s.originId   ?? defTransport.originId,

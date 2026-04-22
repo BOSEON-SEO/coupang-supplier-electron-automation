@@ -228,7 +228,14 @@ def _load_shipment_entries(path: str) -> list[dict]:
         # boxCount 가 0 인데 skuBoxes 에서 최대 박스번호 추정 가능
         if box_count <= 0:
             box_count = max(b["box_num"] for s in skus for b in s["boxes"])
-        entries.append({"center": center, "boxCount": box_count, "skus": skus})
+        raw_inv = a.get("boxInvoices") or []
+        box_invoices = [str(x or "").strip() for x in raw_inv][:9]
+        entries.append({
+            "center": center,
+            "boxCount": box_count,
+            "skus": skus,
+            "boxInvoices": box_invoices,
+        })
     return entries
 
 
@@ -958,7 +965,20 @@ def main():
             _step_log("STEP4B", "OK")
 
         # ── Step 5: 택배사·발송일시·가송장번호 ──
-        invoices = _parse_invoices(args.invoices)
+        # 센터별 boxInvoices 가 있으면 그걸 우선 사용 (빈 슬롯은 전역 --invoices 의 같은 index 로 fallback).
+        global_invoices = _parse_invoices(args.invoices)
+        center_invoices = target_entry.get("boxInvoices") or []
+        if center_invoices:
+            merged = []
+            for i in range(target_entry["boxCount"]):
+                v = center_invoices[i].strip() if i < len(center_invoices) else ""
+                if not v and i < len(global_invoices):
+                    v = global_invoices[i]
+                if v:
+                    merged.append(v)
+            invoices = merged
+        else:
+            invoices = global_invoices
         has_step5_input = bool(
             args.delivery_company or args.send_date or args.send_time or invoices
         )

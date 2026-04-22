@@ -332,11 +332,21 @@ body {
   background: #4527a0;
   border-color: #4527a0;
 }
+.btn--phase-regenerate {
+  background: #ef6c00;
+  color: #fff;
+  border-color: #ef6c00;
+}
+.btn--phase-regenerate:hover:not(:disabled) {
+  background: #c25500;
+  border-color: #c25500;
+}
 .btn--phase-adjust:disabled,
 .btn--phase-transport:disabled,
 .btn--phase-upload:disabled,
 .btn--phase-milkrun:disabled,
-.btn--phase-shipment:disabled {
+.btn--phase-shipment:disabled,
+.btn--phase-regenerate:disabled {
   opacity: 0.5;
 }
 
@@ -2966,20 +2976,63 @@ button.session-badge:disabled {
 .tcard__pallet-x { color: var(--color-text-muted); font-size: 11px; }
 .tcard__pallet-unit { color: var(--color-text-muted); font-size: 11px; margin-right: 6px; }
 
-.tcard__box-add {
+.tcard__box-slots {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
 }
-.tcard__box-add-input {
-  width: 64px;
-  text-align: right;
+.tcard__box-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.tcard__box-list {
-  color: var(--color-text-muted);
-  font-size: 12px;
+.tcard__box-slot-toggle {
+  width: 100%;
+  padding: 4px 2px;
+  font-size: 11px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  background: #f1f3f5;
+  color: var(--color-text-muted);
+  border: 1px solid #dee2e6;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.tcard__box-slot-toggle:hover {
+  background: #e3e6ea;
+}
+.tcard__box-slot.is-active .tcard__box-slot-toggle {
+  background: #43a047;
+  color: #fff;
+  border-color: #2e7d32;
+}
+.tcard__box-slot.is-active .tcard__box-slot-toggle:hover {
+  background: #2e7d32;
+}
+.tcard__box-slot-input {
+  width: 100%;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 4px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 0 0 4px 4px;
+}
+.tcard__box-slot-input::placeholder {
+  color: #8a96a3;
+  opacity: 1;
+}
+.tcard__box-slot-input:disabled {
+  background: #fafafa;
+  color: #888;
+  cursor: not-allowed;
+}
+.tcard__box-slot-input:disabled::placeholder {
+  color: #8a96a3;
+  -webkit-text-fill-color: #8a96a3;
+  opacity: 1;
 }
 
 .transport-note-input {

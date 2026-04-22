@@ -105,6 +105,11 @@ export default function TransportView({
             .filter((b) => b.boxNo !== '' && b.qty > 0);
           if (boxes.length) entry.skuBoxes[sku.rowKey] = boxes;
         }
+        // 박스별 송장번호 — 사용자 입력만 저장 (빈칸은 런타임에 공용설정으로 fallback).
+        const userInv = Array.isArray(a.boxInvoices) ? a.boxInvoices : [];
+        entry.boxInvoices = Array.from({ length: entry.boxCount }, (_, i) =>
+          String(userInv[i] ?? '').trim()
+        );
       } else {
         entry.originId = String(a.originId ?? '');
         entry.totalBoxes = String(a.totalBoxes ?? '');
@@ -263,6 +268,7 @@ function WarehouseCard({
           ) : (
             <ShipmentSettings
               assignment={assignment}
+              defaults={defaults}
               onField={onField}
             />
           )}
@@ -378,46 +384,56 @@ function MilkrunSettings({
 }
 
 // ──────────────────────────────────────────────────────────────
-function ShipmentSettings({ assignment, onField }) {
-  const [addN, setAddN] = useState('');
-  const boxCount = Number(assignment.boxCount) || 0;
+const SHIPMENT_BOX_MAX = 9;
 
-  const handleAdd = () => {
-    const n = Number(addN);
-    if (!Number.isFinite(n) || n <= 0) return;
-    onField('boxCount', boxCount + Math.floor(n));
-    setAddN('');
+function ShipmentSettings({ assignment, defaults, onField }) {
+  const boxCount = Math.min(Number(assignment.boxCount) || 0, SHIPMENT_BOX_MAX);
+  const fakeInvoices = Array.isArray(defaults?.fakeInvoices) ? defaults.fakeInvoices : [];
+  const boxInvoices = Array.isArray(assignment.boxInvoices) ? assignment.boxInvoices : [];
+
+  // 스테퍼 방식 토글 — 박스번호가 연속 1..N 을 유지해야 SKU 배정과 호환됨.
+  //   활성 슬롯 클릭 → boxCount = N - 1
+  //   비활성 슬롯 클릭 → boxCount = N
+  const toggleBox = (n) => {
+    const next = n <= boxCount ? n - 1 : n;
+    onField('boxCount', next);
   };
 
-  const handleReset = () => {
-    if (!window.confirm('전체 박스 개수를 0 으로 초기화하시겠습니까? (이미 배정된 박스번호는 유효성 경고가 뜰 수 있습니다)')) return;
-    onField('boxCount', 0);
+  const updateInvoice = (idx, value) => {
+    const next = Array.from({ length: SHIPMENT_BOX_MAX }, (_, i) =>
+      i === idx ? value : (boxInvoices[i] ?? '')
+    );
+    onField('boxInvoices', next);
   };
-
-  const numbers = Array.from({ length: boxCount }, (_, i) => i + 1);
 
   return (
     <div className="tcard__settings tcard__settings--shipment">
-      <div className="tcard__box-add">
-        <input
-          type="number" min="1" placeholder="수량"
-          className="stock-adjust-input tcard__box-add-input"
-          value={addN}
-          onChange={(e) => setAddN(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-        />
-        <button type="button" className="btn btn--secondary btn--xs" onClick={handleAdd}>
-          박스 추가
-        </button>
-        <span className="tcard__box-list">
-          현재 {boxCount}개
-          {boxCount > 0 && ` · 1~${boxCount}`}
-        </span>
-        {boxCount > 0 && (
-          <button type="button" className="btn btn--ghost btn--xs" onClick={handleReset}>
-            초기화
-          </button>
-        )}
+      <div className="tcard__box-slots">
+        {Array.from({ length: SHIPMENT_BOX_MAX }, (_, i) => {
+          const n = i + 1;
+          const active = n <= boxCount;
+          return (
+            <div key={n} className={`tcard__box-slot${active ? ' is-active' : ''}`}>
+              <button
+                type="button"
+                className="tcard__box-slot-toggle"
+                onClick={() => toggleBox(n)}
+                aria-pressed={active}
+                title={active ? `박스 ${n}..${SHIPMENT_BOX_MAX} 비활성화` : `박스 1..${n} 활성화`}
+              >
+                #{n}
+              </button>
+              <input
+                type="text"
+                className="stock-adjust-input tcard__box-slot-input"
+                value={boxInvoices[i] ?? ''}
+                placeholder={fakeInvoices[i] || ''}
+                onChange={(e) => updateInvoice(i, e.target.value)}
+                disabled={!active}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
