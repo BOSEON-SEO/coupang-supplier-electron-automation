@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import CalendarView from './components/CalendarView';
 import WorkDetailView from './components/WorkDetailView';
@@ -9,6 +9,8 @@ import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
+import { runHook } from './core/plugin-registry';
+import { KNOWN_HOOKS } from './core/plugin-api';
 
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
@@ -19,6 +21,8 @@ export default function App() {
 
   // 활성 작업 (vendor + date + sequence + manifest)
   const [activeJob, setActiveJob] = useState(null);
+  const activeJobRef = useRef(null);
+  useEffect(() => { activeJobRef.current = activeJob; }, [activeJob]);
 
   // 작업 패널 토글 — 항상 닫힌 채로 시작
   const [workOpen, setWorkOpen] = useState(false);
@@ -100,6 +104,33 @@ export default function App() {
       } else if (data.exitCode === 0) {
         if (hit.openWork) setWorkOpen(true);
         showToast({ type: 'success', text: `${hit.label} 다운로드가 완료되었습니다.` });
+        // PO 다운 완료 → 플러그인 po.postprocess 훅 호출 (파일 읽어 Buffer 로).
+        if (hit.suffix === 'po_download.py') {
+          const job = activeJobRef.current;
+          if (job) {
+            (async () => {
+              try {
+                const resolved = await api.resolveJobPath(
+                  job.date, job.vendor, job.sequence, 'po.xlsx',
+                );
+                if (!resolved?.success) return;
+                const read = await api.readFile(resolved.path);
+                if (!read?.success || !read.data) return;
+                await runHook(
+                  KNOWN_HOOKS.PO_POSTPROCESS,
+                  { buffer: read.data, fileName: 'po.xlsx', job },
+                  {
+                    currentVendor: job.vendor,
+                    entitlements,
+                    electronAPI: window.electronAPI,
+                  },
+                );
+              } catch (err) {
+                console.warn('[po.postprocess / python] 실패', err);
+              }
+            })();
+          }
+        }
       } else {
         showToast({
           type: 'error',
@@ -109,7 +140,7 @@ export default function App() {
       }
     });
     return () => { if (typeof unsub === 'function') unsub(); };
-  }, [showToast]);
+  }, [showToast, entitlements]);
 
   const handleOpenJob = (job, opts) => {
     setActiveJob(job);
