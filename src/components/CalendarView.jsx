@@ -168,6 +168,17 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
       });
       const refreshed = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
       const finalJob = refreshed?.success ? refreshed.manifest : job;
+
+      // 플러그인 po.postprocess 훅 — 파일 업로드 방식은 buffer 이미 확보됨.
+      // Python 다운로드 모드는 완료 후 별도로 처리 예정 (URL 확정 후).
+      try {
+        await runHook(KNOWN_HOOKS.PO_POSTPROCESS, {
+          buffer: fileBuffer,
+          fileName,
+          job: finalJob,
+        });
+      } catch (err) { console.warn('[po.postprocess hook]', err); }
+
       await loadMonth();
       await loadDay();
       setShowNewJobModal(false);
@@ -175,7 +186,7 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     } finally {
       setCreating(false);
     }
-  }, [createJobManifest, loadMonth, loadDay, onOpenJob]);
+  }, [createJobManifest, loadMonth, loadDay, onOpenJob, runHook]);
 
   // 해당 날짜·activeVendor 의 기존 차수 목록 (중복 방지용)
   const usedSequences = activeVendor

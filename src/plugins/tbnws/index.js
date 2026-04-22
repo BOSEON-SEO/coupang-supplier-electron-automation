@@ -1,20 +1,17 @@
 /**
  * TBNWS 플러그인 — 투비네트웍스 전용 커스터마이즈.
  *
- * 계획된 기능 (아직 스켈레톤):
- *   1. PO 후처리 (po.postprocess)
- *      - 원본 PO 에 내부 컬럼 추가해 별도 파일 생성
+ * 계획된 기능:
+ *   1. ✅ po.postprocess: 원본 PO 에 자사 컬럼 추가 (스텁 — URL 확정 후 채움)
  *   2. 재고조정 자동 채움 (stock-adjust.autofill)
- *      - 자사 재고표 대조해 납품여부·비고 자동 지정
  *   3. 제품 그룹핑 (product.group-key)
- *      - 투비 내부 상품코드로 SKU → 그룹키 매핑
  *   4. 재고 반영 phase (registerPhase)
- *      - 사내 백엔드 출고예정·로케이션 이동 + eFlexs 반출신청
- *   5. job.completed 라이프사이클
- *      - 밀크런/쉽먼트 기반 커스텀 파일 생성 (엑셀·PDF)
+ *   5. job.completed 라이프사이클 (커스텀 파일 생성)
+ *
+ * 백엔드 HTTP 는 main-half(main.js) 에서 처리. renderer 는 ctx.ipcInvoke 로 호출.
  */
 
-import { KNOWN_SCOPES } from '../../core/plugin-api';
+import { KNOWN_SCOPES, KNOWN_HOOKS } from '../../core/plugin-api';
 
 /** @type {import('../../core/plugin-api').PluginManifest} */
 const manifest = {
@@ -58,7 +55,6 @@ const manifest = {
         scope: KNOWN_SCOPES.WORK_TOOLBAR,
         order: 50,
         variant: 'secondary',
-        when: (whenCtx) => whenCtx.currentVendor === 'tbnws' || true, // 개발 단계는 항상 표시
         handler: (args) => {
           alert(
             `[TBNWS 플러그인]\n` +
@@ -70,7 +66,41 @@ const manifest = {
       }),
     );
 
-    // TODO: po.postprocess 훅 등록
+    /**
+     * po.postprocess 훅 — PO 원본을 받아 자사 컬럼 추가된 workbook 생성.
+     *
+     * payload: { buffer: ArrayBuffer, fileName: string, job: object }
+     * 반환: { buffer: ArrayBuffer, fileName: string } — 변환된 새 파일
+     *
+     * 현재는 스텁: apiBaseUrl 미설정이면 원본 그대로 통과(next 호출).
+     * URL 확정 후 coupangCheckForm API 호출 → 응답 파싱 → 컬럼 추가 로직 구현.
+     */
+    disposables.push(
+      ctx.registerHook(KNOWN_HOOKS.PO_POSTPROCESS, async (payload, hookCtx, next) => {
+        try {
+          const res = await ctx.ipcInvoke('po.checkForm', {
+            fileName: payload?.fileName,
+            fileBuffer: payload?.buffer,
+            // category 는 main.js 가 설정에서 읽어옴 (override 필요 시 여기서 전달)
+          });
+          if (!res?.success) {
+            console.warn('[tbnws] po.checkForm 실패:', res?.error);
+            return next();  // 실패 시 원본 체인 계속
+          }
+          // TODO: res.data (SKU 배열 + 재고 정보) 를 원본 workbook 에 컬럼 추가
+          // 현재는 데이터만 로그 — 실제 엑셀 변환은 다음 단계에서.
+          console.info('[tbnws] coupangCheckForm 응답 수신:', {
+            rowCount: Array.isArray(res.data) ? res.data.length : 'n/a',
+            sample: Array.isArray(res.data) ? res.data[0] : res.data,
+          });
+          return next();
+        } catch (err) {
+          console.error('[tbnws] po.postprocess 실패', err);
+          return next();  // 훅 실패가 체인을 끊지 않도록
+        }
+      }),
+    );
+
     // TODO: stock-adjust.autofill 훅 등록
     // TODO: product.group-key 훅 등록
     // TODO: registerPhase 로 '재고 반영' 단계 삽입
