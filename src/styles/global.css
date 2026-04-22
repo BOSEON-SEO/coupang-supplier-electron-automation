@@ -286,6 +286,16 @@ body {
   background: #b5281f;
 }
 
+/* slot 버튼 — 플러그인 Command 렌더링 */
+.slot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.slot-btn__icon { font-size: 14px; line-height: 1; }
+.slot-btn__label { line-height: 1; }
+.slot-btn.is-busy { opacity: 0.6; cursor: wait; }
+
 /* phase 액션 버튼 — 단계별 색상 구분 */
 .btn--phase-adjust {
   background: #00897b;

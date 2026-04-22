@@ -27,6 +27,24 @@ let phases = [];
 /** @type {Map<string, Set<Function>>} */
 const eventListeners = new Map();
 
+/** 레지스트리 변경(로드/언로드/등록/해제) 시 호출되는 구독자. useSyncExternalStore 용. */
+const registrySubscribers = new Set();
+function notifyRegistryChanged() {
+  for (const fn of registrySubscribers) {
+    try { fn(); } catch (err) { console.error('[plugin registry subscriber]', err); }
+  }
+}
+
+/**
+ * 레지스트리 변경 구독. useSyncExternalStore 에서 사용.
+ * @param {() => void} cb
+ * @returns {() => void}
+ */
+export function subscribe(cb) {
+  registrySubscribers.add(cb);
+  return () => registrySubscribers.delete(cb);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 유틸
 // ═══════════════════════════════════════════════════════════════════
@@ -87,7 +105,11 @@ export function loadPlugin(manifest, runtime) {
       }
       const entry = { pluginId, cmd };
       commands.push(entry);
-      const d = () => { commands = commands.filter((e) => e !== entry); };
+      notifyRegistryChanged();
+      const d = () => {
+        commands = commands.filter((e) => e !== entry);
+        notifyRegistryChanged();
+      };
       disposables.push(d);
       return d;
     },
@@ -98,7 +120,11 @@ export function loadPlugin(manifest, runtime) {
       }
       const entry = { pluginId, role, view };
       views.push(entry);
-      const d = () => { views = views.filter((e) => e !== entry); };
+      notifyRegistryChanged();
+      const d = () => {
+        views = views.filter((e) => e !== entry);
+        notifyRegistryChanged();
+      };
       disposables.push(d);
       return d;
     },
@@ -110,7 +136,11 @@ export function loadPlugin(manifest, runtime) {
       const priority = (opts && Number.isFinite(opts.priority)) ? opts.priority : 0;
       const entry = { pluginId, hookId, handler, priority };
       hooks.push(entry);
-      const d = () => { hooks = hooks.filter((e) => e !== entry); };
+      notifyRegistryChanged();
+      const d = () => {
+        hooks = hooks.filter((e) => e !== entry);
+        notifyRegistryChanged();
+      };
       disposables.push(d);
       return d;
     },
@@ -121,7 +151,11 @@ export function loadPlugin(manifest, runtime) {
       }
       const entry = { pluginId, phase };
       phases.push(entry);
-      const d = () => { phases = phases.filter((e) => e !== entry); };
+      notifyRegistryChanged();
+      const d = () => {
+        phases = phases.filter((e) => e !== entry);
+        notifyRegistryChanged();
+      };
       disposables.push(d);
       return d;
     },
