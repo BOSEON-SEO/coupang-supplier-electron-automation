@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { registerIpcHandlers } = require('./ipc-handlers');
+const { loadPluginMainHalves } = require('./plugin-main-loader');
 
 // 쿠팡 서플라이어 사이트 진입 URL
 const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
@@ -554,6 +555,9 @@ app.whenReady().then(() => {
       if (w && !w.isDestroyed()) w.close();
     },
   });
+
+  // 플러그인 main-half 로드 — src/plugins/*/main.js 자동 스캔
+  loadPluginMainHalves({ ipcMain, app });
 
   // ── WebContentsView 제어 IPC ────────────────────────────
   ipcMain.handle('webview:setVendor', (_e, vendorId) => {

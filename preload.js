@@ -116,6 +116,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // ── 플러그인 전용 IPC ──
+  //   renderer 의 ctx.ipcInvoke('<channel>', ...) 가 이걸 거쳐
+  //   main 의 'plugin:<pluginId>:<channel>' 핸들러로 디스패치.
+  //   채널 이름은 pluginId 프리픽스로 네임스페이스 분리.
+  invokePluginChannel: (pluginId, channel, ...args) => {
+    if (typeof pluginId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,29}$/.test(pluginId)) {
+      return Promise.reject(new Error(`invalid pluginId: ${pluginId}`));
+    }
+    if (typeof channel !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,59}$/i.test(channel)) {
+      return Promise.reject(new Error(`invalid channel: ${channel}`));
+    }
+    return ipcRenderer.invoke(`plugin:${pluginId}:${channel}`, ...args);
+  },
+
   // ── 위험 동작 ──
   confirmDangerous: (actionName) => ipcRenderer.invoke('action:confirmDangerous', actionName),
 
