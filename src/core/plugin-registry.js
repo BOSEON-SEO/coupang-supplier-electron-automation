@@ -27,9 +27,16 @@ let phases = [];
 /** @type {Map<string, Set<Function>>} */
 const eventListeners = new Map();
 
-/** 레지스트리 변경(로드/언로드/등록/해제) 시 호출되는 구독자. useSyncExternalStore 용. */
+/**
+ * 레지스트리 변경 버전 카운터.
+ * useSyncExternalStore 에 "변화 감지용 stable scalar" 를 제공하기 위함 —
+ * getSnapshot 이 같은 입력에 같은 값을 반환해야 무한 루프를 피할 수 있어
+ * 배열 참조 대신 정수를 구독한다. 실제 데이터는 호출자가 useMemo 로 계산.
+ */
+let registryVersion = 0;
 const registrySubscribers = new Set();
 function notifyRegistryChanged() {
+  registryVersion += 1;
   for (const fn of registrySubscribers) {
     try { fn(); } catch (err) { console.error('[plugin registry subscriber]', err); }
   }
@@ -43,6 +50,11 @@ function notifyRegistryChanged() {
 export function subscribe(cb) {
   registrySubscribers.add(cb);
   return () => registrySubscribers.delete(cb);
+}
+
+/** 현재 버전. useSyncExternalStore getSnapshot 으로 사용. */
+export function getRegistryVersion() {
+  return registryVersion;
 }
 
 // ═══════════════════════════════════════════════════════════════════

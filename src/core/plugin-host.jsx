@@ -12,7 +12,9 @@ import React, { createContext, useContext, useMemo, useSyncExternalStore, useSta
 import {
   getCommandsForScope,
   resolveView,
+  runHook,
   subscribe as subscribeRegistry,
+  getRegistryVersion,
   __internal,
 } from './plugin-registry';
 
@@ -42,21 +44,12 @@ export function usePluginRuntime() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 내부 헬퍼 — getSnapshot 은 같은 입력에 같은 참조를 유지해야 루프 방지
+// 레지스트리 버전 구독 — useSyncExternalStore 는 stable scalar 를 받음.
+// 실제 데이터는 version 을 dep 로 useMemo 로 계산 → 루프 없음.
 // ═══════════════════════════════════════════════════════════════════
 
-function useStableCommands(scope, mergedCtx) {
-  const getSnapshot = useCallback(
-    () => getCommandsForScope(scope, mergedCtx),
-    [scope, mergedCtx],
-  );
-  const snap = useSyncExternalStore(subscribeRegistry, getSnapshot, getSnapshot);
-  // fingerprint 기반 동일성 체크로 재렌더 줄임
-  const [prev, setPrev] = useState(snap);
-  const fp = snap.map((c) => c.id).join('|');
-  const prevFp = prev.map((c) => c.id).join('|');
-  if (fp !== prevFp) setPrev(snap);
-  return fp === prevFp ? prev : snap;
+function useRegistryVersion() {
+  return useSyncExternalStore(subscribeRegistry, getRegistryVersion, getRegistryVersion);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -68,6 +61,7 @@ function useStableCommands(scope, mergedCtx) {
  */
 export function SlotRenderer({ scope, ctx, args, className }) {
   const runtime = usePluginRuntime();
+  const version = useRegistryVersion();
   const mergedCtx = useMemo(
     () => ({
       currentVendor: runtime.currentVendor,
@@ -77,7 +71,11 @@ export function SlotRenderer({ scope, ctx, args, className }) {
     [runtime.currentVendor, runtime.entitlements, ctx],
   );
 
-  const cmds = useStableCommands(scope, mergedCtx);
+  const cmds = useMemo(
+    () => getCommandsForScope(scope, mergedCtx),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, scope, mergedCtx],
+  );
   if (!cmds.length) return null;
 
   return (
@@ -134,6 +132,7 @@ function SlotButton({ cmd, args, ctx, className }) {
  */
 export function ViewOutlet({ role, ctx, fallback, viewProps }) {
   const runtime = usePluginRuntime();
+  const version = useRegistryVersion();
   const mergedCtx = useMemo(
     () => ({
       currentVendor: runtime.currentVendor,
@@ -143,11 +142,11 @@ export function ViewOutlet({ role, ctx, fallback, viewProps }) {
     [runtime.currentVendor, runtime.entitlements, ctx],
   );
 
-  const getSnapshot = useCallback(
+  const view = useMemo(
     () => resolveView(role, mergedCtx),
-    [role, mergedCtx],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, role, mergedCtx],
   );
-  const view = useSyncExternalStore(subscribeRegistry, getSnapshot, getSnapshot);
 
   if (!view) return fallback || null;
   const Comp = view.component;
@@ -155,13 +154,34 @@ export function ViewOutlet({ role, ctx, fallback, viewProps }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// useRunHook — 현재 런타임 컨텍스트를 자동 주입하는 runHook wrapper
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * @returns {(hookId: string, payload: any, extra?: object) => Promise<any>}
+ *   컴포넌트 내에서 훅 실행 시 entitlements / currentVendor / electronAPI 자동 주입.
+ */
+export function useRunHook() {
+  const runtime = usePluginRuntime();
+  return useCallback((hookId, payload, extra) => {
+    return runHook(hookId, payload, {
+      currentVendor: runtime.currentVendor,
+      entitlements: runtime.entitlements,
+      electronAPI: typeof window !== 'undefined' ? window.electronAPI : null,
+      ...(extra || {}),
+    });
+  }, [runtime.currentVendor, runtime.entitlements]);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // 디버그 — 개발 중 "플러그인이 뭐 등록됐나" 확인용
 // ═══════════════════════════════════════════════════════════════════
 
 export function useRegistrySnapshot() {
-  return useSyncExternalStore(
-    subscribeRegistry,
+  const version = useRegistryVersion();
+  return useMemo(
     () => __internal.counts(),
-    () => __internal.counts(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version],
   );
 }
