@@ -132,14 +132,8 @@ module.exports = {
         if (buffer.length === 0) {
           return { success: false, error: 'fileBuffer 가 비어있습니다.' };
         }
-        // category = 작업 벤더 (renderer 에서 payload.category 로 전달).
-        // 없으면 빈 문자열 — 백엔드가 400 반환하는 게 맞음.
-        const category = payload?.category || '';
-        if (!category) {
-          return { success: false, error: 'category (작업 벤더) 가 비어있습니다.' };
-        }
+        // 백엔드 coupangCheckForm 은 file 만 받는다 (벤더 판정은 SKU 마스터에서 자동).
         const { body, contentType } = buildMultipart([
-          { name: 'category', value: category },
           {
             name: 'file',
             value: buffer,
@@ -147,7 +141,7 @@ module.exports = {
             contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           },
         ]);
-        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/coupang/coupangList/coupangCheckForm`;
+        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/api/coupang/coupangList/coupangCheckForm`;
         try {
           const res = await request(url, {
             method: 'POST',

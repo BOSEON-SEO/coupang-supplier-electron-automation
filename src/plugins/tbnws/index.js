@@ -74,8 +74,7 @@ const manifest = {
           const res = await ctx.ipcInvoke('po.checkForm', {
             fileName: payload?.fileName,
             fileBuffer: payload?.buffer,
-            // 백엔드의 'category' 파라미터 = 작업 벤더. 헤더 벤더(ctx.currentVendor) 아님.
-            category: payload?.job?.vendor || '',
+            // 백엔드 coupangCheckForm 은 file 만 받음 — 벤더 판정은 SKU 마스터 자동.
           });
           if (!res?.success) {
             console.warn('[tbnws] po.checkForm 실패:', res?.error);
