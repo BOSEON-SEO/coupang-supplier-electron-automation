@@ -550,24 +550,24 @@ function registerIpcHandlers({
     return { success: true, manifest: m };
   });
 
-  /** jobs:create — 새 작업. 차수 가드 적용 (직전 차수가 completed=true 여야 함) */
+  /** jobs:create — 새 작업.
+   *   opts.sequence: 명시 차수. 미지정 시 (마지막+1) 자동 할당.
+   *   기존 차수와 충돌 시 거부. 직전 차수 미완료 가드는 제거됨.
+   */
   ipcMain.handle('jobs:create', async (_e, date, vendor, opts) => {
     if (!isValidDate(date) || !isValidVendor(vendor)) {
       return { success: false, error: 'invalid date or vendor' };
     }
     const seqs = listVendorSequences(dataDir, date, vendor);
-    if (seqs.length > 0) {
-      const lastSeq = seqs[seqs.length - 1];
-      const last = readManifest(dataDir, date, vendor, lastSeq);
-      if (last && !last.completed) {
-        return {
-          success: false,
-          error: `이전 차수(${lastSeq}차)가 아직 완료되지 않았습니다. 먼저 완료 처리하거나 진행을 마무리하세요.`,
-          blockingSequence: lastSeq,
-        };
-      }
+    const lastSeq = seqs.length > 0 ? seqs[seqs.length - 1] : 0;
+    const explicit = opts && opts.sequence != null ? Number(opts.sequence) : null;
+    const newSeq = explicit != null ? explicit : lastSeq + 1;
+    if (!isValidSeq(newSeq)) {
+      return { success: false, error: `invalid sequence: ${opts?.sequence}` };
     }
-    const newSeq = (seqs[seqs.length - 1] || 0) + 1;
+    if (seqs.includes(newSeq)) {
+      return { success: false, error: `이미 존재하는 차수입니다: ${newSeq}차`, conflictSequence: newSeq };
+    }
     if (newSeq > 99) return { success: false, error: 'sequence overflow (>99)' };
 
     const now = new Date().toISOString();

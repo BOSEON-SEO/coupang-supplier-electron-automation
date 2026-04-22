@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 
 /**
  * 새 작업 생성 모달 — 두 가지 소스 중 선택:
@@ -7,24 +7,46 @@ import React, { useRef, useState } from 'react';
  *   2. '파일로 직접 업로드'     — 사용자가 xlsx 직접 업로드 → job 폴더의 po.xlsx 로 저장
  *
  * Props:
- *   - date, vendor, nextSequence: 표시용 메타 정보
+ *   - date, vendor: 표시용 메타 정보
+ *   - usedSequences: number[]  — 이미 생성된 차수 목록 (중복 방지)
+ *   - defaultSequence: number  — 스피너 기본값 (보통 마지막+1)
  *   - onCancel()
- *   - onCoupang()             — 자동 가져오기 선택 시
- *   - onFile(fileBuffer, fileName)  — 파일 업로드 선택 시
+ *   - onCoupang(sequence)             — 자동 가져오기 선택 시
+ *   - onFile(fileBuffer, fileName, sequence)  — 파일 업로드 선택 시
  */
 export default function NewJobModal({
-  date, vendor, nextSequence,
+  date, vendor, usedSequences = [], defaultSequence = 1,
   onCancel, onCoupang, onFile,
 }) {
   const [mode, setMode] = useState(null); // null | 'coupang' | 'file'
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sequence, setSequence] = useState(defaultSequence);
   const fileInputRef = useRef(null);
 
+  const used = useMemo(() => new Set(usedSequences), [usedSequences]);
+  const isDuplicate = used.has(sequence);
+  const invalid = !Number.isInteger(sequence) || sequence < 1 || sequence > 99;
+  const seqError = invalid
+    ? '1~99 사이의 숫자를 입력하세요.'
+    : isDuplicate
+      ? `이미 존재하는 차수입니다: ${sequence}차`
+      : null;
+
+  const step = (delta) => {
+    setSequence((s) => {
+      const next = (Number.isInteger(s) ? s : defaultSequence) + delta;
+      if (next < 1) return 1;
+      if (next > 99) return 99;
+      return next;
+    });
+  };
+
   const handleCoupang = async () => {
+    if (seqError) { alert(seqError); return; }
     setMode('coupang');
     setBusy(true);
-    try { await onCoupang(); } finally { setBusy(false); }
+    try { await onCoupang(sequence); } finally { setBusy(false); }
   };
 
   const handleFilePick = (e) => {
@@ -34,12 +56,13 @@ export default function NewJobModal({
   };
 
   const handleFileConfirm = async () => {
+    if (seqError) { alert(seqError); return; }
     const f = fileInputRef.current?.files?.[0];
     if (!f) return;
     setBusy(true);
     try {
       const buf = await f.arrayBuffer();
-      await onFile(buf, f.name);
+      await onFile(buf, f.name, sequence);
     } finally {
       setBusy(false);
     }
@@ -59,8 +82,41 @@ export default function NewJobModal({
           <span>·</span>
           <span><b>{vendor}</b></span>
           <span>·</span>
-          <span>{nextSequence}차</span>
+          <span className="newjob-seq">
+            <button
+              type="button"
+              className="newjob-seq__btn"
+              onClick={() => step(-1)}
+              disabled={busy || sequence <= 1}
+              aria-label="차수 감소"
+            >−</button>
+            <input
+              type="number"
+              className={`newjob-seq__input${seqError ? ' is-invalid' : ''}`}
+              min={1}
+              max={99}
+              value={Number.isInteger(sequence) ? sequence : ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === '') { setSequence(NaN); return; }
+                const n = parseInt(v, 10);
+                if (Number.isFinite(n)) setSequence(n);
+              }}
+              disabled={busy}
+            />
+            <button
+              type="button"
+              className="newjob-seq__btn"
+              onClick={() => step(1)}
+              disabled={busy || sequence >= 99}
+              aria-label="차수 증가"
+            >+</button>
+            <span className="newjob-seq__suffix">차</span>
+          </span>
         </div>
+        {seqError && (
+          <div className="newjob-seq__error">{seqError}</div>
+        )}
 
         {!mode && (
           <div className="newjob-options">
@@ -68,7 +124,7 @@ export default function NewJobModal({
               type="button"
               className="newjob-option"
               onClick={handleCoupang}
-              disabled={busy}
+              disabled={busy || !!seqError}
             >
               <span className="newjob-option__icon">🌐</span>
               <span className="newjob-option__title">쿠팡에서 자동으로 가져오기</span>
@@ -80,7 +136,7 @@ export default function NewJobModal({
               type="button"
               className="newjob-option"
               onClick={() => setMode('file')}
-              disabled={busy}
+              disabled={busy || !!seqError}
             >
               <span className="newjob-option__icon">📁</span>
               <span className="newjob-option__title">파일로 직접 업로드</span>
@@ -123,7 +179,7 @@ export default function NewJobModal({
                 type="button"
                 className="btn btn--primary"
                 onClick={handleFileConfirm}
-                disabled={busy || !fileName}
+                disabled={busy || !fileName || !!seqError}
               >
                 {busy ? '업로드 중…' : '✅ 이 파일로 생성'}
               </button>

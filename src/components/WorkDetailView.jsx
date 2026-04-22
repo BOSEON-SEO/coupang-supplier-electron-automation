@@ -71,7 +71,7 @@ export default function WorkDetailView({
 
   const handleComplete = useCallback(async () => {
     if (!job) return;
-    if (!window.confirm(`${job.vendor} ${job.sequence}차 작업을 완료 처리하시겠습니까?\n완료 후에는 이 차수에 더 작업할 수 없습니다.`)) return;
+    if (!window.confirm(`${job.vendor} ${job.sequence}차 작업을 완료 처리하시겠습니까?`)) return;
     setBusy(true);
     setError('');
     const api = window.electronAPI;

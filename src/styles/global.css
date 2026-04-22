@@ -2029,6 +2029,68 @@ button.session-badge:disabled {
   font-size: 11px;
 }
 
+.newjob-seq {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.newjob-seq__btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.newjob-seq__btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.newjob-seq__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.newjob-seq__input {
+  width: 44px;
+  height: 22px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  padding: 0 4px;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.newjob-seq__input::-webkit-outer-spin-button,
+.newjob-seq__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.newjob-seq__input.is-invalid {
+  border-color: #d93025;
+  color: #d93025;
+}
+.newjob-seq__suffix {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.newjob-seq__error {
+  font-size: 12px;
+  color: #d93025;
+  margin: -8px 0 12px 0;
+  padding: 6px 10px;
+  background: rgba(217, 48, 37, 0.08);
+  border-left: 3px solid #d93025;
+  border-radius: 4px;
+}
+
 .newjob-options {
   display: grid;
   grid-template-columns: 1fr 1fr;

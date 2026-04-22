@@ -97,12 +97,13 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     setShowNewJobModal(true);
   };
 
-  // 공통 — 새 job manifest 생성
-  const createJobManifest = useCallback(async () => {
+  // 공통 — 새 job manifest 생성 (sequence 명시 가능)
+  const createJobManifest = useCallback(async (sequence) => {
     const api = window.electronAPI;
     const vendorMeta = vendors?.find((v) => v.id === activeVendor);
     const res = await api.jobs.create(selectedDate, activeVendor, {
       plugin: vendorMeta?.plugin ?? null,
+      sequence,
     });
     if (!res?.success) {
       alert(res?.error || '작업 생성 실패');
@@ -112,10 +113,10 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
   }, [vendors, activeVendor, selectedDate]);
 
   // 쿠팡 자동 다운로드 모드
-  const handleCoupangMode = useCallback(async () => {
+  const handleCoupangMode = useCallback(async (sequence) => {
     setCreating(true);
     try {
-      const job = await createJobManifest();
+      const job = await createJobManifest(sequence);
       if (!job) return;
       const api = window.electronAPI;
       const dl = await api.runPython('scripts/po_download.py', [
@@ -137,10 +138,10 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
   }, [createJobManifest, activeVendor, selectedDate, loadMonth, loadDay, onOpenJob]);
 
   // 파일 업로드 모드 — 사용자가 선택한 xlsx 를 job/po.xlsx 로 저장
-  const handleFileMode = useCallback(async (fileBuffer, fileName) => {
+  const handleFileMode = useCallback(async (fileBuffer, fileName, sequence) => {
     setCreating(true);
     try {
-      const job = await createJobManifest();
+      const job = await createJobManifest(sequence);
       if (!job) return;
       const api = window.electronAPI;
       const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx');
@@ -170,22 +171,20 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     }
   }, [createJobManifest, loadMonth, loadDay, onOpenJob]);
 
-  // 해당 날짜의 activeVendor 마지막 차수가 미완료면 새 작업 생성 불가 (ipc 가드와 동일 규칙)
-  const lastSeqJob = activeVendor
+  // 해당 날짜·activeVendor 의 기존 차수 목록 (중복 방지용)
+  const usedSequences = activeVendor
     ? jobsForDay
         .filter((j) => j.vendor === activeVendor)
-        .reduce((a, b) => (a && a.sequence > b.sequence ? a : b), null)
-    : null;
-  const blockedBySequence = !!lastSeqJob && !lastSeqJob.completed;
+        .map((j) => j.sequence)
+    : [];
+  const lastSeq = usedSequences.length ? Math.max(...usedSequences) : 0;
+  const defaultSequence = Math.min(99, lastSeq + 1);
 
-  const newJobDisabled =
-    creating || !vendors?.length || !activeVendor || blockedBySequence;
+  const newJobDisabled = creating || !vendors?.length || !activeVendor;
   const newJobTitle = !vendors?.length
     ? '먼저 벤더를 추가하세요'
     : !activeVendor
     ? '헤더에서 벤더를 선택하세요'
-    : blockedBySequence
-    ? `이전 차수(${lastSeqJob.sequence}차)가 완료되지 않았습니다. 먼저 완료 처리하세요.`
     : `${selectedDate} · ${activeVendor} 새 작업 생성`;
 
   return (
@@ -310,7 +309,8 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
         <NewJobModal
           date={selectedDate}
           vendor={activeVendor}
-          nextSequence={(lastSeqJob?.sequence || 0) + 1}
+          usedSequences={usedSequences}
+          defaultSequence={defaultSequence}
           onCancel={() => setShowNewJobModal(false)}
           onCoupang={handleCoupangMode}
           onFile={handleFileMode}
