@@ -3,13 +3,14 @@
  *
  * 역할:
  *   - settings.section scope 에 "플러그인 상태" 버튼 추가
- *     (클릭 시 로드된 플러그인 카운트 alert)
+ *   - job.created 훅 핸들러 → 콘솔에 작업 메타 찍음 (훅 동작 증명)
  *   - 아무 entitlement 요구 없음 → 항상 로드
  *
  * 실제 배포에서는 이 플러그인이 기본 비활성화되게 조정할 예정.
  */
 
 import { __internal } from '../../core/plugin-registry';
+import { KNOWN_HOOKS } from '../../core/plugin-api';
 
 /** @type {import('../../core/plugin-api').PluginManifest} */
 const manifest = {
@@ -42,6 +43,19 @@ const manifest = {
             `entitlements: [${ctx.entitlements.join(', ') || '(비어있음)'}]`,
           );
         },
+      }),
+    );
+
+    // job.created 훅 — 라이프사이클 훅이므로 next() 호출해 체인 계속.
+    disposables.push(
+      ctx.registerHook(KNOWN_HOOKS.JOB_CREATED, (payload, hookCtx, next) => {
+        // eslint-disable-next-line no-console
+        console.log('[hello] job.created:', {
+          vendor: payload?.job?.vendor,
+          date: payload?.job?.date,
+          sequence: payload?.job?.sequence,
+        });
+        return next();
       }),
     );
 

@@ -47,7 +47,7 @@ export default function App() {
 
   // ── 플러그인 로드 ─────────────────────────────────────────
   // 현재는 entitlements 하드코딩 (라이선스 서버 미연결). 출시 단계에 교체.
-  const entitlements = useMemo(() => ['core', 'hello'], []);
+  const entitlements = useMemo(() => ['core', 'hello', 'tbnws.plugin'], []);
   useEffect(() => {
     bootstrapPlugins({
       entitlements,

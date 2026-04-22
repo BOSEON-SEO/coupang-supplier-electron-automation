@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import JobCard from './JobCard';
 import NewJobModal from './NewJobModal';
+import { useRunHook } from '../core/plugin-host';
+import { KNOWN_HOOKS } from '../core/plugin-api';
 
 /**
  * 달력 메뉴 — 월 네비 + 작업 있는 날짜 점 표시 + 선택 시 그날의 작업 카드 리스트.
@@ -23,6 +25,7 @@ function todayStr() {
 }
 
 export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
+  const runHook = useRunHook();
   const today = todayStr();
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
@@ -109,8 +112,11 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
       alert(res?.error || '작업 생성 실패');
       return null;
     }
+    // 플러그인에게 작업 생성 사실 브로드캐스트 (실패해도 작업 생성 자체는 계속)
+    try { await runHook(KNOWN_HOOKS.JOB_CREATED, { job: res.manifest }); }
+    catch (err) { console.warn('[job.created hook]', err); }
     return res.manifest;
-  }, [vendors, activeVendor, selectedDate]);
+  }, [vendors, activeVendor, selectedDate, runHook]);
 
   // 쿠팡 자동 다운로드 모드
   const handleCoupangMode = useCallback(async (sequence) => {

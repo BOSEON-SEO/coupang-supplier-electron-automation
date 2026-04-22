@@ -10,8 +10,10 @@
  */
 
 import helloManifest from './hello';
+import tbnwsManifest from './tbnws';
 
 /** @type {import('../core/plugin-api').PluginManifest[]} */
 export const MANIFESTS = [
   helloManifest,
+  tbnwsManifest,
 ];

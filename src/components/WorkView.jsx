@@ -5,6 +5,8 @@ import CountdownModal from './CountdownModal';
 import { sheetsToXlsx } from '../lib/excelFormats';
 import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
+import { SlotRenderer } from '../core/plugin-host';
+import { KNOWN_SCOPES } from '../core/plugin-api';
 import { nextPhase } from './PhaseStepper';
 import { buildConfirmationArrayBuffer, applyDateRule } from '../core/confirmationBuilder';
 import { parsePoSheets, parsePoBuffer } from '../core/poParser';
@@ -1600,6 +1602,12 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
         )}
 
         <div className="workview-actions-bar__spacer" />
+
+        <SlotRenderer
+          scope={KNOWN_SCOPES.WORK_TOOLBAR}
+          ctx={{ job, phase: job?.phase, activeTab }}
+          args={{ job, activeTab }}
+        />
 
         {activeTab !== 'result' && (
           <>
