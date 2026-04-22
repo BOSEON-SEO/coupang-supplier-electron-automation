@@ -1815,6 +1815,27 @@ button.session-badge:disabled {
   color: var(--color-text);
   font-weight: 600;
 }
+.result-view__section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.result-view__section-header .result-view__section-title {
+  margin: 0;
+}
+.result-view__section-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.result-view__empty--inline {
+  padding: 12px;
+  font-size: 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
 
 .result-table {
   width: 100%;
@@ -1845,12 +1866,33 @@ button.session-badge:disabled {
 .result-table tbody tr:hover td {
   background: #f5faff;
 }
-.result-table__col-label { width: 60px; }
-.result-table__col-type  { width: 96px; }
-.result-table__col-size  { width: 100px; font-variant-numeric: tabular-nums; text-align: right; }
-.result-table__col-mtime { width: 160px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.result-table__col-label    { width: 60px; }
+.result-table__col-type     { width: 96px; }
+.result-table__col-filetype { width: 120px; white-space: nowrap; }
+.result-table__col-size     { width: 100px; font-variant-numeric: tabular-nums; text-align: right; }
+.result-table__col-mtime    { width: 160px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
 
 .result-view__dim { color: var(--color-text-muted); }
+
+.result-view__folder {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.result-download-files {
+  margin: 4px 0 8px;
+  padding: 8px 12px 8px 32px;
+  list-style: disc;
+  background: #f8fafd;
+  border-left: 3px solid var(--color-phase-milkrun, #3b82f6);
+  font-size: 12px;
+}
+.result-download-files--shipment {
+  border-left-color: var(--color-phase-shipment, #8b5cf6);
+}
+.result-download-files li { padding: 2px 0; }
+.result-download-files code { font-size: 12px; }
 
 /* ── 찾기 바 (Ctrl+F) — Chrome 네이티브 find bar 따라함 ──── */
 .find-bar {
@@ -2143,6 +2185,13 @@ button.session-badge:disabled {
   overflow: hidden;
   position: relative;
 }
+/* 결과 탭은 여러 섹션을 세로로 쌓으므로 부모 flex 영역을 모두 쓴다.
+ * ResultView 자체가 overflow: auto 라 내부에서 스크롤된다. */
+.workview-table-section--result {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
 
 /* ── SpreadsheetView (FortuneSheet) ─────────────────────── */
 .spreadsheet-container {
@@ -2398,24 +2447,30 @@ button.session-badge:disabled {
 
 /* 업로드 완료 확인 오버레이 — 작업 패널 영역만 dim */
 .workview-main { position: relative; }
+/* 오버레이는 작업 패널(workview-main) 내부 중앙에 배치된다.
+ *   - position: absolute + inset: 0 → work-panel 영역에만 걸침 (웹뷰 침범 X)
+ *   - dim 없음 + pointer-events 투과 → 카드 외 영역은 패널 조작 가능
+ *   - 작업 패널이 접혀있으면(height 36px) 안 보이므로, 펼친 상태에서만 사용.
+ *     handleXxxRegister 에서 onCloseWork 를 호출하지 않아 실행 중엔 항상 열림. */
 .workview-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(17, 24, 39, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
   padding: 20px;
-  backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 .workview-overlay__card {
+  pointer-events: auto;
   background: var(--color-surface);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-  max-width: 480px;
-  width: 100%;
-  padding: 22px 24px;
+  border: 1px solid var(--color-border);
+  max-width: 380px;
+  width: 380px;
+  padding: 16px 18px;
 }
 .workview-overlay__title {
   margin: 0 0 10px;

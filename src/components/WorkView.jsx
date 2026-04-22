@@ -85,6 +85,9 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   // 센터 단위로 처리되므로 직전 처리한 센터명을 같이 보관.
   const [askShipmentConfirm, setAskShipmentConfirm] = useState(null); // null | { center }
 
+  // 오버레이는 toast 스타일(position: fixed, 우상단) 이라 패널 상태와 무관하게
+  // 항상 뷰포트 위에 떠 있다. 웹뷰를 가리지 않으려 dim 없음 + 카드만 pointer-events.
+
   // ── Refs ──
   const cleanupRef = useRef([]);
   const autoLoginTriggeredRef = useRef(false);
@@ -93,6 +96,8 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   const jobRef = useRef(job);
   const latestSheetsRef = useRef(null);
   const lastShipmentResultRef = useRef(null); // 마지막 쉽먼트 스크립트의 result payload
+  const lastMilkrunDocsResultRef = useRef(null); // 마지막 밀크런 서류 다운 스크립트의 result payload
+  const lastShipmentDocsResultRef = useRef(null); // 마지막 쉽먼트 서류 다운 스크립트의 result payload
 
   useEffect(() => { vendorRef.current = vendor; }, [vendor]);
   useEffect(() => { loadedPathRef.current = loadedPath; }, [loadedPath]);
@@ -384,6 +389,11 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             } else if (sn.endsWith('shipment_register.py')) {
               // done 이벤트가 오버레이 띄울 때 center 쓰도록 ref 에 보관
               lastShipmentResultRef.current = result;
+            } else if (sn.endsWith('milkrun_docs_download.py')) {
+              // done 이벤트가 manifest.downloadHistory 쌓을 때 사용하도록 ref 에 보관
+              lastMilkrunDocsResultRef.current = result;
+            } else if (sn.endsWith('shipment_docs_download.py')) {
+              lastShipmentDocsResultRef.current = result;
             }
           }
         } catch { /* 무시 */ }
@@ -444,35 +454,77 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
         }
       }
 
-      // 업로드 준비 스크립트가 성공적으로 끝나면 "업로드하셨나요?" 오버레이 띄움
-      if (
-        (data.scriptName === 'scripts/po_upload.py' || data.scriptName === 'po_upload.py') &&
-        data.exitCode === 0 && !data.killed
-      ) {
-        setAskUploadConfirm(true);
+      // 오버레이는 실행 시작 시점(handleXxxRegister)에 이미 띄워뒀다.
+      // 여기서는 결과 메타(쉽먼트 center/boxCount/sku 등)만 덮어쓰고,
+      // 스크립트가 실패(exit!=0)하거나 kill 됐으면 오버레이 자동 dismiss.
+      const isUploadScript = data.scriptName === 'scripts/po_upload.py' || data.scriptName === 'po_upload.py';
+      const isMilkrunScript = data.scriptName === 'scripts/milkrun_register.py' || data.scriptName === 'milkrun_register.py';
+      const isShipmentScript = data.scriptName === 'scripts/shipment_register.py' || data.scriptName === 'shipment_register.py';
+
+      if (isUploadScript || isMilkrunScript || isShipmentScript) {
+        if (data.killed || data.exitCode !== 0) {
+          if (isUploadScript) setAskUploadConfirm(false);
+          if (isMilkrunScript) setAskMilkrunConfirm(false);
+          if (isShipmentScript) setAskShipmentConfirm(null);
+        } else if (isShipmentScript) {
+          // 쉽먼트: 결과 메타로 오버레이 내용 보강
+          const r = lastShipmentResultRef.current;
+          lastShipmentResultRef.current = null;
+          if (r) {
+            setAskShipmentConfirm((prev) => (prev ? {
+              ...prev,
+              center: r.center ?? prev.center ?? null,
+              boxCount: r.boxCount ?? prev.boxCount ?? null,
+              skuFilled: r.skuFilled ?? prev.skuFilled ?? null,
+              skuTotal: r.skuTotal ?? prev.skuTotal ?? null,
+            } : {
+              center: r.center ?? null,
+              boxCount: r.boxCount ?? null,
+              skuFilled: r.skuFilled ?? null,
+              skuTotal: r.skuTotal ?? null,
+            }));
+          }
+        }
       }
 
-      // 밀크런 등록 스크립트가 성공적으로 끝나면 "저장하셨나요?" 오버레이 띄움
-      if (
-        (data.scriptName === 'scripts/milkrun_register.py' || data.scriptName === 'milkrun_register.py') &&
-        data.exitCode === 0 && !data.killed
-      ) {
-        setAskMilkrunConfirm(true);
-      }
-
-      // 쉽먼트 등록 스크립트가 성공적으로 끝나면 "생성하셨나요?" 오버레이 띄움
-      if (
-        (data.scriptName === 'scripts/shipment_register.py' || data.scriptName === 'shipment_register.py') &&
-        data.exitCode === 0 && !data.killed
-      ) {
-        const r = lastShipmentResultRef.current;
-        setAskShipmentConfirm({
-          center: r?.center || null,
-          boxCount: r?.boxCount ?? null,
-          skuFilled: r?.skuFilled ?? null,
-          skuTotal: r?.skuTotal ?? null,
-        });
-        lastShipmentResultRef.current = null;
+      // 밀크런/쉽먼트 서류 일괄 다운로드가 성공하면 manifest.downloadHistory 에 기록
+      const docsDoneMap = [
+        { suffix: 'milkrun_docs_download.py',  type: 'milkrun-docs',  ref: lastMilkrunDocsResultRef,  label: '밀크런 서류' },
+        { suffix: 'shipment_docs_download.py', type: 'shipment-docs', ref: lastShipmentDocsResultRef, label: '쉽먼트 서류' },
+      ];
+      const docsDone = docsDoneMap.find((e) =>
+        data.scriptName === `scripts/${e.suffix}` || data.scriptName === e.suffix,
+      );
+      if (docsDone && data.exitCode === 0 && !data.killed) {
+        const r = docsDone.ref.current;
+        docsDone.ref.current = null;
+        const j = jobRef.current;
+        const api = window.electronAPI;
+        if (j && api?.jobs?.loadManifest && api?.jobs?.updateManifest && r?.folder) {
+          (async () => {
+            try {
+              const mres = await api.jobs.loadManifest(j.date, j.vendor, j.sequence);
+              const manifest = mres?.success ? (mres.manifest || {}) : {};
+              const prev = Array.isArray(manifest.downloadHistory) ? manifest.downloadHistory : [];
+              const entry = {
+                timestamp: new Date().toISOString(),
+                type: docsDone.type,
+                folder: r.folder,
+                files: Array.isArray(r.files) ? r.files : [],
+              };
+              const patch = { downloadHistory: [...prev, entry] };
+              const resU = await api.jobs.updateManifest(j.date, j.vendor, j.sequence, patch);
+              if (!resU?.success) {
+                appendLog('error', `다운로드 이력 기록 실패: ${resU?.error ?? 'unknown'}`);
+                return;
+              }
+              appendLog('event', `[📥 ${docsDone.label} 다운] ${entry.files.length}개 파일 · ${r.folder}`);
+              if (resU.manifest) onJobUpdated?.(resU.manifest);
+            } catch (err) {
+              appendLog('error', `다운로드 이력 기록 실패: ${err.message}`);
+            }
+          })();
+        }
       }
     });
 
@@ -976,12 +1028,13 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     ]);
     if (res.success) {
       setPythonRunning(true);
-      // 웹뷰에 쿠팡 업로드 폼을 보여주기 위해 작업 패널 닫음
-      onCloseWork?.();
+      // 스크립트가 폼 채움을 완료하기 전에 사용자가 다음 단계를 예상할 수 있도록
+      // 실행 시작 시점(카운트다운 직후)에 바로 오버레이를 띄움.
+      setAskUploadConfirm(true);
     } else {
       appendLog('error', `업로드 준비 실행 실패: ${res.error}`);
     }
-  }, [job, dirty, appendLog, onCloseWork]);
+  }, [job, dirty, appendLog]);
 
   // ── 업로드 준비 버튼 onClick — 이력 있으면 카운트다운 전에 확인 ──
   const handleUploadClickStart = useCallback(async () => {
@@ -1029,11 +1082,13 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     ]);
     if (res.success) {
       setPythonRunning(true);
-      onCloseWork?.();
+      // 실행 시작과 동시에 오버레이 — 스크립트가 폼을 채우는 동안
+      // 사용자는 웹뷰 확인 준비 + 저장 후 '예, 기록합니다'.
+      setAskMilkrunConfirm(true);
     } else {
       appendLog('error', `밀크런 접수 실행 실패: ${res.error}`);
     }
-  }, [job, appendLog, onCloseWork]);
+  }, [job, appendLog]);
 
   // ── 밀크런 등록 버튼 onClick — 이력 있으면 카운트다운 전에 확인 ──
   // 재등록 불가 + 사이트 리스트에서 사라지는 특성이라 이중 등록 방지 용도.
@@ -1084,11 +1139,15 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     ]);
     if (res.success) {
       setPythonRunning(true);
-      onCloseWork?.();
+      // 실행 시작과 동시에 오버레이 — 스크립트 종료 시 center/skuFilled 등
+      // 결과 메타가 오면 done 이벤트에서 덮어씌워짐.
+      setAskShipmentConfirm({
+        center: null, boxCount: null, skuFilled: null, skuTotal: null,
+      });
     } else {
       appendLog('error', `쉽먼트 접수 실행 실패: ${res.error}`);
     }
-  }, [job, appendLog, onCloseWork]);
+  }, [job, appendLog]);
 
   // ── 쉽먼트 등록 버튼 onClick — 이력 있으면 카운트다운 전에 확인 ──
   // 쉽먼트는 센터 단위로 여러 번 실행될 수 있음 — 경고는 띄우되 반복 허용.
@@ -1165,6 +1224,46 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       appendLog('error', `밀크런 기록 실패: ${err.message}`);
     }
   }, [job, appendLog, onJobUpdated]);
+
+  // ── 밀크런 서류 일괄 다운로드 ──
+  // /milkrun/milkrunList 에서 날짜 조회 → 각 행의 프린트/팔레트 부착 리스트 버튼 연속 클릭.
+  // 파일은 job/downloads/milkrun-{ts}/ 에 저장되고, manifest.downloadHistory 에 기록됨.
+  const handleMilkrunDocsDownload = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+    appendLog('info', `밀크런 서류 일괄 다운로드 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
+    const res = await api.runPython('scripts/milkrun_docs_download.py', [
+      '--vendor', job.vendor,
+      '--date', job.date,
+      '--sequence', String(job.sequence),
+    ]);
+    if (res.success) {
+      setPythonRunning(true);
+    } else {
+      appendLog('error', `밀크런 서류 다운로드 실행 실패: ${res.error}`);
+    }
+  }, [job, appendLog]);
+
+  // ── 쉽먼트 서류 일괄 다운로드 ──
+  // /ibs/asn/active 에서 입고예정일(edd) 필터 → 각 행의 Label/내역서 버튼 순차 클릭.
+  // 파일은 job/downloads/shipment-{ts}/ 에 저장되고, manifest.downloadHistory 에 기록됨.
+  const handleShipmentDocsDownload = useCallback(async () => {
+    if (!job) return;
+    const api = window.electronAPI;
+    if (!api) return;
+    appendLog('info', `쉽먼트 서류 일괄 다운로드 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
+    const res = await api.runPython('scripts/shipment_docs_download.py', [
+      '--vendor', job.vendor,
+      '--date', job.date,
+      '--sequence', String(job.sequence),
+    ]);
+    if (res.success) {
+      setPythonRunning(true);
+    } else {
+      appendLog('error', `쉽먼트 서류 다운로드 실행 실패: ${res.error}`);
+    }
+  }, [job, appendLog]);
 
   // ── 업로드 기록 (쿠팡 업로드 완료 후 수동 체크) ──
   const handleRecordUpload = useCallback(async () => {
@@ -1420,8 +1519,16 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       )}
 
       {activeTab === 'result' ? (
-        <div className="workview-table-section">
-          <ResultView job={job} appendLog={appendLog} onJobUpdated={onJobUpdated} />
+        <div className="workview-table-section workview-table-section--result">
+          <ResultView
+            job={job}
+            appendLog={appendLog}
+            onJobUpdated={onJobUpdated}
+            pythonRunning={pythonRunning}
+            jobLocked={jobLocked}
+            onDownloadMilkrunDocs={handleMilkrunDocsDownload}
+            onDownloadShipmentDocs={handleShipmentDocsDownload}
+          />
         </div>
       ) : (
         <div className="workview-table-section">

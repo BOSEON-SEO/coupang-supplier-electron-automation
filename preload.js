@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   writeFile: (filePath, buffer) => ipcRenderer.invoke('file:write', filePath, buffer),
   saveFileAs: (srcPath, defaultName) => ipcRenderer.invoke('file:saveAs', srcPath, defaultName),
+  showItemInFolder: (targetPath) => ipcRenderer.invoke('file:showInFolder', targetPath),
+  openPath: (targetPath) => ipcRenderer.invoke('file:openPath', targetPath),
   listVendorFiles: (vendorId) => ipcRenderer.invoke('file:listVendorFiles', vendorId),
   resolveVendorPath: (fileName) => ipcRenderer.invoke('file:resolveVendorPath', fileName),
   resolveJobPath: (date, vendor, sequence, fileName) =>

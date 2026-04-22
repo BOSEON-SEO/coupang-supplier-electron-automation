@@ -83,6 +83,12 @@ const broadcastStockAdjustLocks = broadcastLocks;
 let pendingDownloadTarget = null;
 function setPendingDownloadTarget(absPath) { pendingDownloadTarget = absPath; }
 
+// 폴더 모드 — 해당 경로가 설정돼 있는 동안의 모든 다운로드는 이 폴더에
+// suggested_filename 그대로 저장된다 (여러 파일 연속 수신용, 예: 밀크런 서류 일괄).
+// setPendingDownloadTarget(단일 파일) 이 우선순위 높음.
+let pendingDownloadDir = null;
+function setPendingDownloadDir(absDir) { pendingDownloadDir = absDir; }
+
 /**
  * Ctrl+F 찾기 — 포커스된 webContents 의 accelerator 를 가로채서 renderer 에 알림.
  * found-in-page 결과도 renderer 로 forwarding.
@@ -165,15 +171,38 @@ function ensureWebView(vendorId) {
   // OS 저장 대화상자를 우회한다. Python 쪽은 expect_download 를 쓰지 않고
   // 이 경로에 파일이 나타날 때까지 polling 한다 (경합 방지).
   wcv.webContents.session.on('will-download', (_event, item) => {
-    const target = pendingDownloadTarget;
-    if (!target) return; // 타겟 없으면 기본 동작 (OS 대화상자)
-    try {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      item.setSavePath(target);
-      pendingDownloadTarget = null; // 한 번만 소비
-    } catch (err) {
-      console.error('[will-download] setSavePath failed:', err.message);
+    // 1) 단일 파일 타겟 (po_download 등) — 한 번만 소비
+    if (pendingDownloadTarget) {
+      const target = pendingDownloadTarget;
+      try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        item.setSavePath(target);
+        pendingDownloadTarget = null;
+      } catch (err) {
+        console.error('[will-download] setSavePath failed:', err.message);
+      }
+      return;
     }
+    // 2) 폴더 모드 (밀크런 서류 일괄) — 소비하지 않고 여러 파일 계속 받음
+    if (pendingDownloadDir) {
+      try {
+        fs.mkdirSync(pendingDownloadDir, { recursive: true });
+        const suggested = item.getFilename() || `download-${Date.now()}`;
+        let finalName = suggested;
+        let i = 1;
+        while (fs.existsSync(path.join(pendingDownloadDir, finalName))) {
+          const ext = path.extname(suggested);
+          const base = path.basename(suggested, ext);
+          finalName = `${base} (${i})${ext}`;
+          i += 1;
+        }
+        item.setSavePath(path.join(pendingDownloadDir, finalName));
+      } catch (err) {
+        console.error('[will-download] dir setSavePath failed:', err.message);
+      }
+      return;
+    }
+    // 둘 다 없으면 기본 동작 (OS 대화상자)
   });
 
   // URL 변경 이벤트를 Renderer 의 주소창에 전달
@@ -315,6 +344,7 @@ app.whenReady().then(() => {
     dataDir: DATA_DIR,
     cdpPort: CDP_PORT,
     setPendingDownloadTarget,
+    setPendingDownloadDir,
     openStockAdjustWindow,
     openTransportWindow,
     isJobLocked: (date, vendor, seq) => {

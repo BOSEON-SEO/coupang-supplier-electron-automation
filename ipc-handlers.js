@@ -10,7 +10,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
-const { safeStorage, dialog } = require('electron');
+const { safeStorage, dialog, shell } = require('electron');
 const XLSX = require('xlsx');
 const ExcelJS = require('exceljs');
 
@@ -229,7 +229,7 @@ function findConfirmedQtyColIndex(headerRow) {
 }
 
 function registerIpcHandlers({
-  ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget,
+  ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget, setPendingDownloadDir,
   openStockAdjustWindow, openTransportWindow,
   isJobLocked, getLockedJobKeys, getLockedJobsByType, closeStockAdjustWindow,
 }) {
@@ -707,6 +707,49 @@ function registerIpcHandlers({
     }
   });
 
+  // ── OS 탐색기에서 파일/폴더 보기 (dataDir 내부만 허용) ──
+  ipcMain.handle('file:showInFolder', async (_e, targetPath) => {
+    try {
+      if (typeof targetPath !== 'string' || !targetPath) {
+        return { success: false, error: 'invalid path' };
+      }
+      const resolved = path.resolve(targetPath);
+      const base = path.resolve(dataDir);
+      if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+        return { success: false, error: 'path outside data dir' };
+      }
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: '경로가 존재하지 않습니다.' };
+      }
+      shell.showItemInFolder(resolved);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── OS 기본 앱으로 파일/폴더 열기 (dataDir 내부만 허용) ──
+  ipcMain.handle('file:openPath', async (_e, targetPath) => {
+    try {
+      if (typeof targetPath !== 'string' || !targetPath) {
+        return { success: false, error: 'invalid path' };
+      }
+      const resolved = path.resolve(targetPath);
+      const base = path.resolve(dataDir);
+      if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+        return { success: false, error: 'path outside data dir' };
+      }
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: '경로가 존재하지 않습니다.' };
+      }
+      const err = await shell.openPath(resolved);
+      if (err) return { success: false, error: err };
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('file:listVendorFiles', async (_e, vendorId) => {
     try {
       if (!fs.existsSync(dataDir)) return { success: true, files: [] };
@@ -856,6 +899,39 @@ function registerIpcHandlers({
       }
     }
 
+    // ── 밀크런 / 쉽먼트 서류 일괄 다운로드 경로 지정 (폴더 모드) ──
+    // 호출 시 job 폴더 하위 downloads/{kind}-{ts}/ 로 저장.
+    // {KIND}_DOWNLOAD_DIR 환경변수로 스크립트에도 전달.
+    const docsDownloadMap = [
+      { match: 'milkrun_docs_download',  kind: 'milkrun',  envKey: 'MILKRUN_DOWNLOAD_DIR' },
+      { match: 'shipment_docs_download', kind: 'shipment', envKey: 'SHIPMENT_DOWNLOAD_DIR' },
+    ];
+    const docsEntry = docsDownloadMap.find((e) => baseName.includes(e.match));
+    if (docsEntry && typeof setPendingDownloadDir === 'function') {
+      const vIdx = safeArgs.indexOf('--vendor');
+      const dIdx = safeArgs.indexOf('--date');
+      const sIdx = safeArgs.indexOf('--sequence');
+      if (vIdx !== -1 && dIdx !== -1 && sIdx !== -1) {
+        const v = safeArgs[vIdx + 1];
+        const d = safeArgs[dIdx + 1];
+        const s = parseInt(safeArgs[sIdx + 1], 10);
+        if (isValidVendor(v) && isValidDate(d) && isValidSeq(s)) {
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const folderName = `${docsEntry.kind}-${ts}`;
+          const absDir = path.join(
+            dataDir, d, v, String(s).padStart(2, '0'), 'downloads', folderName,
+          );
+          try {
+            fs.mkdirSync(absDir, { recursive: true });
+            setPendingDownloadDir(absDir);
+            vendorEnv[docsEntry.envKey] = absDir;
+          } catch (err) {
+            sendToRenderer('python:error', { line: `[system] download dir 생성 실패: ${err.message}` });
+          }
+        }
+      }
+    }
+
     // ── subprocess 실행 ──
     const runId = ++activeProcessId;
 
@@ -965,6 +1041,11 @@ function registerIpcHandlers({
         if (activeProcessId === runId) {
           activeProcess = null;
           activeScriptName = null;
+        }
+
+        // 폴더 모드 다운로드 해제 (밀크런 서류 일괄 등)
+        if (typeof setPendingDownloadDir === 'function') {
+          setPendingDownloadDir(null);
         }
 
         const wasKilled = signal === 'SIGTERM' || signal === 'SIGKILL';
