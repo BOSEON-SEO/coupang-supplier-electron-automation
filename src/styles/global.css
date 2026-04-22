@@ -1262,6 +1262,12 @@ body {
   background: var(--color-surface);
   width: 100%;
 }
+.settings-input--textarea {
+  font-family: var(--font-mono, Consolas, Menlo, monospace);
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 80px;
+}
 
 .settings-input:focus {
   outline: none;

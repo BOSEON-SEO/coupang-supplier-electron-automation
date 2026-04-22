@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { SHORTAGE_REASONS } from '../core/confirmationBuilder';
+import { DELIVERY_COMPANIES } from '../core/deliveryCompanies';
 import ListManagerModal from './ListManagerModal';
 
 /**
@@ -20,6 +21,18 @@ const DATE_RULE_OPTIONS = [
   { value: '-1y',          label: '1년 전' },
   { value: '-6m',          label: '6개월 전' },
   { value: '+6m',          label: '6개월 후' },
+];
+
+// 쉽먼트 발송일 — 입고일 기준 n일 전/당일 선택. 월·년 단위는 의미 없어 제외.
+const SHIPMENT_SEND_DATE_OPTIONS = [
+  { value: '',       label: '(미지정)' },
+  { value: 'today',  label: '입고일 당일' },
+  { value: '-1d',    label: '1일 전' },
+  { value: '-2d',    label: '2일 전' },
+  { value: '-3d',    label: '3일 전' },
+  { value: '-4d',    label: '4일 전' },
+  { value: '-5d',    label: '5일 전' },
+  { value: '-7d',    label: '7일 전' },
 ];
 
 const TRANSPORT_OPTIONS = [
@@ -72,6 +85,13 @@ const FIELDS = [
   { section: '운송 분배 기본값', key: 'transportPalletWidth',   label: '팔레트 가로(cm)',   type: 'text' },
   { section: '운송 분배 기본값', key: 'transportPalletHeight',  label: '팔레트 세로(cm)',   type: 'text' },
   { section: '운송 분배 기본값', key: 'transportPalletDepth',   label: '팔레트 높이(cm)',   type: 'text' },
+  { section: '운송 분배 기본값', key: 'milkrunProductType',    label: '밀크런 상품종류',    type: 'text' },
+
+  // ── 쉽먼트 생성 기본값 ──
+  { section: '쉽먼트 생성 기본값', key: 'shipmentDeliveryCompany', label: '택배사',         type: 'select', options: DELIVERY_COMPANIES },
+  { section: '쉽먼트 생성 기본값', key: 'shipmentSendDateRule',    label: '발송일 (입고일 기준)', type: 'select', options: SHIPMENT_SEND_DATE_OPTIONS },
+  { section: '쉽먼트 생성 기본값', key: 'shipmentSendTime',        label: '발송 시각 (HH:MM, 5분 단위)', type: 'text',  placeholder: '예: 14:30' },
+  { section: '쉽먼트 생성 기본값', key: 'shipmentFakeInvoices',    label: '가송장번호 (박스별 1줄, 최대 9줄)', type: 'textarea', rows: 9, placeholder: '1박스 송장번호\n2박스 송장번호\n...' },
 ];
 
 export default function SettingsView({ activeVendor }) {
@@ -198,10 +218,22 @@ export default function SettingsView({ activeVendor }) {
         </div>
       );
     }
+    if (field.type === 'textarea') {
+      return (
+        <textarea
+          className="settings-input settings-input--textarea"
+          rows={field.rows || 5}
+          placeholder={field.placeholder || ''}
+          value={value ?? ''}
+          onChange={(e) => onChange(field.key, e.target.value)}
+        />
+      );
+    }
     return (
       <input
         type="text"
         className="settings-input"
+        placeholder={field.placeholder || ''}
         value={value ?? ''}
         onChange={(e) => onChange(field.key, e.target.value)}
       />

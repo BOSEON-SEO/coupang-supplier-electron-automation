@@ -78,19 +78,28 @@ function toYYYYMMDD(v) {
 /**
  * 날짜 규칙 → YYYYMMDD 문자열
  * rule: '', 'today', '-1y', '-1m', '-6m', '+6m', '-Ny', '-Nm', '+Nm' 등
+ *
+ * @param {string} rule
+ * @param {string|Date} [baseDate]  기준일 — 'YYYY-MM-DD' 또는 Date.
+ *   미지정 시 오늘(new Date()) 사용. 확정서 생성 시 job.date(=입고예정일)
+ *   를 넘겨서 "입고일 기준 -1y" 같은 오프셋을 구함.
  */
-export function applyDateRule(rule) {
+export function applyDateRule(rule, baseDate) {
   if (!rule) return '';
-  const now = new Date();
+  const base = baseDate ? new Date(baseDate) : new Date();
+  if (Number.isNaN(base.getTime())) return '';
   if (rule === 'today') {
-    return toYYYYMMDD(now.toISOString().slice(0, 10));
+    const yyyy = base.getFullYear();
+    const mm = String(base.getMonth() + 1).padStart(2, '0');
+    const dd = String(base.getDate()).padStart(2, '0');
+    return `${yyyy}${mm}${dd}`;
   }
   const m = /^([+-])(\d+)([ymd])$/.exec(rule);
   if (!m) return '';
   const sign = m[1] === '-' ? -1 : 1;
   const n = parseInt(m[2], 10) * sign;
   const unit = m[3];
-  const d = new Date(now);
+  const d = new Date(base);
   if (unit === 'y') d.setFullYear(d.getFullYear() + n);
   else if (unit === 'm') d.setMonth(d.getMonth() + n);
   else if (unit === 'd') d.setDate(d.getDate() + n);
@@ -101,8 +110,8 @@ export function applyDateRule(rule) {
 }
 
 /** 생산연도 규칙 — 날짜 규칙의 YYYY 부분만 */
-export function applyYearRule(rule) {
-  const ymd = applyDateRule(rule);
+export function applyYearRule(rule, baseDate) {
+  const ymd = applyDateRule(rule, baseDate);
   return ymd ? ymd.slice(0, 4) : '';
 }
 
@@ -133,11 +142,13 @@ export async function buildConfirmationArrayBuffer(masterData, options = {}) {
     manufactureDateRule = '',
     expirationDateRule = '',
     productionYearRule = '',
+    // 입고일(job.date) — 날짜 규칙의 기준일. 미지정 시 오늘.
+    baseDate,
   } = options;
 
-  const manufactureDate = applyDateRule(manufactureDateRule);
-  const expirationDate = applyDateRule(expirationDateRule);
-  const productionYear = applyYearRule(productionYearRule);
+  const manufactureDate = applyDateRule(manufactureDateRule, baseDate);
+  const expirationDate = applyDateRule(expirationDateRule, baseDate);
+  const productionYear = applyYearRule(productionYearRule, baseDate);
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('상품목록');

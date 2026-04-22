@@ -367,23 +367,30 @@ def _fill_one_row(page, *, index: int, entry: dict, weight: int,
         )
 
         # 5) 팔레트 — 사이즈별로 1 row 씩 추가, 값 채움
+        #
+        # transport.json 의 pallet 필드와 UI placeholder 매핑이 어긋나 있음에 주의:
+        #   transport.json key → UI placeholder → 쿠팡 사이트 input name
+        #   pallet.width       → "가로"         → input[name="length"]
+        #   pallet.height      → "세로"         → input[name="width"]    (!)
+        #   pallet.depth       → "높이"         → input[name="height"]   (!)
+        # TransportView UI 저장 구조가 이렇게 저장하고 있어서, 여기서는
+        # 사용자의 '가로-세로-높이' 순서를 지키기 위해 key 이름이 아닌 '의미' 로 매핑.
         rental_for_row = rental_company
         for pallet in entry["pallets"]:
             page.locator(f"#addPallet_{index}").click(timeout=BUTTON_TIMEOUT_MS)
             time.sleep(0.3)
             pallet_body = page.locator(f"#palletBody_{index}")
             last_row = pallet_body.locator("tr").last
-            # width → length, depth → width, height → height, count → count
-            pw = str(pallet.get("width") or "").strip()
-            pd = str(pallet.get("depth") or "").strip()
-            ph = str(pallet.get("height") or "").strip()
+            horizontal = str(pallet.get("width")  or "").strip()  # '가로'
+            vertical   = str(pallet.get("height") or "").strip()  # '세로' (key='height')
+            tall       = str(pallet.get("depth")  or "").strip()  # '높이' (key='depth')
             pc = str(pallet.get("count") or "").strip() or "1"
-            if pw:
-                last_row.locator('input[name="length"]').fill(pw, timeout=BUTTON_TIMEOUT_MS)
-            if pd:
-                last_row.locator('input[name="width"]').fill(pd, timeout=BUTTON_TIMEOUT_MS)
-            if ph:
-                last_row.locator('input[name="height"]').fill(ph, timeout=BUTTON_TIMEOUT_MS)
+            if horizontal:
+                last_row.locator('input[name="length"]').fill(horizontal, timeout=BUTTON_TIMEOUT_MS)
+            if vertical:
+                last_row.locator('input[name="width"]').fill(vertical, timeout=BUTTON_TIMEOUT_MS)
+            if tall:
+                last_row.locator('input[name="height"]').fill(tall, timeout=BUTTON_TIMEOUT_MS)
             last_row.locator('input[name="count"]').fill(pc, timeout=BUTTON_TIMEOUT_MS)
             # 첫 팔레트의 rentalId 를 row 의 렌탈사 select 값으로 채택
             pallet_rental = str(pallet.get("rentalId") or "").strip()

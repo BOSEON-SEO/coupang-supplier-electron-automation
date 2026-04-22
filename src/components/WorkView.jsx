@@ -6,7 +6,7 @@ import { sheetsToXlsx } from '../lib/excelFormats';
 import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
 import { nextPhase } from './PhaseStepper';
-import { buildConfirmationArrayBuffer } from '../core/confirmationBuilder';
+import { buildConfirmationArrayBuffer, applyDateRule } from '../core/confirmationBuilder';
 import { parsePoSheets, parsePoBuffer } from '../core/poParser';
 import { applyPoStyle } from '../core/poStyler';
 import ResultView from './ResultView';
@@ -748,6 +748,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
           manufactureDateRule: pick('manufactureDateRule'),
           expirationDateRule: pick('expirationDateRule'),
           productionYearRule: pick('productionYearRule'),
+          baseDate: job.date, // 입고예정일 기준으로 날짜 규칙 적용
         });
 
         const resolved = await api.resolveJobPath(
@@ -821,44 +822,63 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     }
   }, [job, appendLog]);
 
-  // ── 발주확정서 제작/부분갱신 ──
-  //   없을 때: PO 에서 전체 생성 (초기 1회)
-  //   있을 때: I(확정수량) · M(납품부족사유) 만 in-place 패치 — 다른 편집 전부 보존
-  // PO 편집 중이었다면 먼저 저장한 뒤 진행.
-  const handleBuildConfirmation = useCallback(async () => {
+  // ── PO 편집 중이면 먼저 디스크에 저장 ──
+  const saveDirtyPoIfAny = useCallback(async () => {
+    if (!dirty) return true;
+    if (!loadedPathRef.current?.endsWith('po.xlsx') || !latestSheetsRef.current) return true;
+    const api = window.electronAPI;
+    try {
+      const buf = sheetsToXlsx(latestSheetsRef.current);
+      const w = await api.writeFile(loadedPathRef.current, buf);
+      if (!w?.success) {
+        appendLog('error', `PO 저장 실패: ${w?.error ?? 'unknown'}`);
+        return false;
+      }
+      setDirty(false);
+      appendLog('info', '[확정서] 편집된 PO 먼저 저장');
+      return true;
+    } catch (err) {
+      appendLog('error', `PO 저장 실패: ${err.message}`);
+      return false;
+    }
+  }, [dirty, appendLog]);
+
+  // ── 발주확정서: 확정수량 반영 (I/M 컬럼만 in-place 패치) ──
+  // 다른 편집(입고유형 C 등) 은 전부 보존.
+  const handlePatchConfirmation = useCallback(async () => {
+    if (!job) return;
+    if (!(await saveDirtyPoIfAny())) return;
+    const res = await patchConfirmationFromPo();
+    if (res?.skipped) return;
+    if (!res?.success) {
+      appendLog('error', `확정수량 반영 실패: ${res?.error ?? 'unknown'}`);
+      return;
+    }
+    appendLog('info', `[확정수량 반영] ${res.patched}행 갱신${res.unmatched?.length ? ` (미매칭 ${res.unmatched.length}행)` : ''}`);
+    setActiveTab('confirmation');
+  }, [job, saveDirtyPoIfAny, patchConfirmationFromPo, appendLog]);
+
+  // ── 발주확정서: 전체 생성 / 재생성 ──
+  // 없을 때: 초기 생성.
+  // 있을 때: 기존 확정서를 완전히 덮어씀 — 수동 편집(입고유형 · 납품부족사유 등) 전부 소실.
+  // PO 행 구성 자체가 바뀐 경우(SKU 추가/삭제) 에만 사용.
+  const handleRegenerateConfirmation = useCallback(async () => {
     if (!job) return;
     const api = window.electronAPI;
     if (!api) return;
 
-    // 현재 보고 있는 게 PO 이고 변경사항 있으면 먼저 저장
-    if (dirty && loadedPathRef.current?.endsWith('po.xlsx') && latestSheetsRef.current) {
-      try {
-        const buf = sheetsToXlsx(latestSheetsRef.current);
-        const w = await api.writeFile(loadedPathRef.current, buf);
-        if (!w?.success) {
-          appendLog('error', `PO 저장 실패: ${w?.error ?? 'unknown'}`);
-          return;
-        }
-        setDirty(false);
-        appendLog('info', '[확정서] 편집된 PO 먼저 저장');
-      } catch (err) {
-        appendLog('error', `PO 저장 실패: ${err.message}`);
-        return;
-      }
+    if (confirmationExists) {
+      const ok = window.confirm(
+        `기존 확정서를 완전히 새로 만듭니다.\n`
+        + `수동 편집한 내용(입고유형·납품부족사유 등) 이 모두 사라지고\n`
+        + `PO + 기본 설정으로 재구성됩니다.\n\n`
+        + `운송 분배(transport.json) 와 업로드/등록 이력은 영향 없습니다.\n\n`
+        + `계속하시겠습니까?`
+      );
+      if (!ok) return;
     }
 
-    // confirmation.xlsx 가 이미 있으면 부분 갱신 경로
-    if (confirmationExists) {
-      const res = await patchConfirmationFromPo();
-      if (res?.skipped) return;
-      if (!res?.success) {
-        appendLog('error', `확정수량 반영 실패: ${res?.error ?? 'unknown'}`);
-        return;
-      }
-      appendLog('info', `[확정수량 반영] ${res.patched}행 갱신${res.unmatched?.length ? ` (미매칭 ${res.unmatched.length}행)` : ''}`);
-      setActiveTab('confirmation');
-      return;
-    }
+    if (!(await saveDirtyPoIfAny())) return;
 
     try {
       const poPath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx');
@@ -905,6 +925,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
         manufactureDateRule: pick('manufactureDateRule'),
         expirationDateRule: pick('expirationDateRule'),
         productionYearRule: pick('productionYearRule'),
+        baseDate: job.date, // 입고예정일 기준으로 날짜 규칙 적용
       });
 
       const confirmPath = await api.resolveJobPath(
@@ -936,7 +957,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     } catch (err) {
       appendLog('error', `확정서 생성 실패: ${err.message}`);
     }
-  }, [job, dirty, confirmationExists, patchConfirmationFromPo, appendLog]);
+  }, [job, confirmationExists, saveDirtyPoIfAny, appendLog]);
 
   // ── 현재 탭 파일을 사용자 지정 위치로 다운로드 ──
   const handleDownload = useCallback(async (kind) => {
@@ -1074,12 +1095,29 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       return;
     }
 
-    appendLog('info', `밀크런 접수 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
-    const res = await api.runPython('scripts/milkrun_register.py', [
+    // 벤더 override + 전역 기본값 병합 → 밀크런 상품종류
+    let productType = '';
+    try {
+      const [vendorList, settingsRes] = await Promise.all([
+        api.loadVendors(),
+        api.loadSettings(),
+      ]);
+      const defaults = settingsRes?.settings || {};
+      const vendorMeta = vendorList?.vendors?.find?.((v) => v.id === job.vendor) || {};
+      const override = vendorMeta.settings || {};
+      const pick = (k) =>
+        (override[k] !== undefined && override[k] !== '') ? override[k] : (defaults[k] ?? '');
+      productType = String(pick('milkrunProductType') || '').trim();
+    } catch { /* pick 실패하면 스크립트 기본값(DEFAULT_PRODUCT_TYPE) 사용 */ }
+
+    appendLog('info', `밀크런 접수 시작: ${job.vendor} · ${job.date} · ${job.sequence}차${productType ? ` · 상품종류='${productType}'` : ''}`);
+    const args = [
       '--vendor', job.vendor,
       '--date', job.date,
       '--sequence', String(job.sequence),
-    ]);
+    ];
+    if (productType) args.push('--product-type', productType);
+    const res = await api.runPython('scripts/milkrun_register.py', args);
     if (res.success) {
       setPythonRunning(true);
       // 실행 시작과 동시에 오버레이 — 스크립트가 폼을 채우는 동안
@@ -1131,12 +1169,53 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       return;
     }
 
-    appendLog('info', `쉽먼트 접수 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`);
-    const res = await api.runPython('scripts/shipment_register.py', [
+    // ── 쉽먼트 생성 기본값 pick (전역 settings + 벤더 override) ──
+    // 발송일 규칙 → 입고일(job.date) 기준 오프셋을 계산해 YYYY-MM-DD 로 변환
+    let deliveryCompany = '';
+    let sendDate = '';
+    let sendTime = '';
+    let invoices = '';
+    try {
+      const [vendorList, settingsRes] = await Promise.all([
+        api.loadVendors(),
+        api.loadSettings(),
+      ]);
+      const defaults = settingsRes?.settings || {};
+      const vendorMeta = vendorList?.vendors?.find?.((v) => v.id === job.vendor) || {};
+      const override = vendorMeta.settings || {};
+      const pick = (k) =>
+        (override[k] !== undefined && override[k] !== '') ? override[k] : (defaults[k] ?? '');
+      deliveryCompany = String(pick('shipmentDeliveryCompany') || '').trim();
+      const sendDateRule = String(pick('shipmentSendDateRule') || '').trim();
+      if (sendDateRule) {
+        const ymd = applyDateRule(sendDateRule, job.date); // "20260426"
+        if (ymd && ymd.length >= 8) {
+          sendDate = `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
+        }
+      }
+      sendTime = String(pick('shipmentSendTime') || '').trim();
+      invoices = String(pick('shipmentFakeInvoices') || '');
+    } catch { /* pick 실패하면 STEP5 생략 */ }
+
+    appendLog(
+      'info',
+      `쉽먼트 접수 시작: ${job.vendor} · ${job.date} · ${job.sequence}차`
+      + (deliveryCompany ? ` · 택배사=${deliveryCompany}` : '')
+      + (sendDate ? ` · 발송일=${sendDate}` : '')
+      + (sendTime ? ` · 발송시각=${sendTime}` : '')
+      + (invoices ? ` · 송장${invoices.split(/[\n,]/).filter((s) => s.trim()).length}건` : '')
+    );
+    const argsList = [
       '--vendor', job.vendor,
       '--date', job.date,
       '--sequence', String(job.sequence),
-    ]);
+    ];
+    if (deliveryCompany) argsList.push('--delivery-company', deliveryCompany);
+    if (sendDate)        argsList.push('--send-date', sendDate);
+    if (sendTime)        argsList.push('--send-time', sendTime);
+    if (invoices)        argsList.push('--invoices', invoices);
+
+    const res = await api.runPython('scripts/shipment_register.py', argsList);
     if (res.success) {
       setPythonRunning(true);
       // 실행 시작과 동시에 오버레이 — 스크립트 종료 시 center/skuFilled 등
@@ -1416,21 +1495,50 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             >
               📦 재고조정
             </button>
-            <button
-              type="button"
-              className="btn btn--primary btn--sm"
-              onClick={handleBuildConfirmation}
-              disabled={!job || !poExists || pythonRunning || jobLocked}
-              title={
-                !poExists ? 'po.xlsx 가 아직 없습니다'
-                  : jobLocked ? '플러그인 창이 열려있습니다'
-                  : confirmationExists
-                    ? 'PO 의 확정수량·부족사유만 확정서에 반영 (입고유형·사용자 편집 보존)'
+            {confirmationExists ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={handlePatchConfirmation}
+                  disabled={!job || !poExists || pythonRunning || jobLocked}
+                  title={
+                    !poExists ? 'po.xlsx 가 아직 없습니다'
+                      : jobLocked ? '플러그인 창이 열려있습니다'
+                      : 'PO 의 확정수량·부족사유(I·M) 만 확정서에 반영 — 입고유형·사용자 편집 보존'
+                  }
+                >
+                  🔄 확정수량 반영
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={handleRegenerateConfirmation}
+                  disabled={!job || !poExists || pythonRunning || jobLocked}
+                  title={
+                    !poExists ? 'po.xlsx 가 아직 없습니다'
+                      : jobLocked ? '플러그인 창이 열려있습니다'
+                      : '기존 확정서를 완전히 새로 생성 — SKU 추가/삭제 같은 행 변경 시 사용 (수동 편집 소실)'
+                  }
+                >
+                  📋 확정서 재생성
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={handleRegenerateConfirmation}
+                disabled={!job || !poExists || pythonRunning || jobLocked}
+                title={
+                  !poExists ? 'po.xlsx 가 아직 없습니다'
+                    : jobLocked ? '플러그인 창이 열려있습니다'
                     : 'PO 로부터 발주확정서 최초 생성'
-              }
-            >
-              {confirmationExists ? '🔄 확정수량 반영' : '📋 확정서 생성'}
-            </button>
+                }
+              >
+                📋 확정서 생성
+              </button>
+            )}
           </>
         )}
         {activeTab === 'confirmation' && (
