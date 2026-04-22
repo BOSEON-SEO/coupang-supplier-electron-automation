@@ -45,7 +45,7 @@ export default function JobCard({ job, vendorName, onClick, onDelete }) {
           </button>
         </span>
       </div>
-      <PhaseStepper phase={job.phase} completed={job.completed} />
+      <PhaseStepper job={job} />
       {updated && <div className="job-card__updated">최근 수정 {updated}</div>}
     </div>
   );

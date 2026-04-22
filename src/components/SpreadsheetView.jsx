@@ -12,7 +12,7 @@ import LuckyExcel from 'luckyexcel';
  *   - onChange: (sheets: Sheet[]) => void — 편집 시 호출
  *   - readOnly: boolean
  */
-export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOnly }) {
+export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, onReady, readOnly }) {
   const [sheets, setSheets] = useState(null);
   const [error, setError] = useState(null);
   const [key, setKey] = useState(0);
@@ -55,6 +55,8 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, readOn
           setKey((k) => k + 1);
           // 마운트 직후 1초간 FortuneSheet 가 쏘는 onChange 무시
           ignoreUntilRef.current = Date.now() + 1000;
+          // 편집 전에도 sheets 참조 가능하도록 부모에 즉시 전달
+          onReady?.(prepared);
         } else {
           setError('시트 데이터를 추출할 수 없습니다.');
         }

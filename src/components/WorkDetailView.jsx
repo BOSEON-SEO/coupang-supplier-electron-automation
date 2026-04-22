@@ -19,7 +19,7 @@ import PhaseStepper from './PhaseStepper';
  * pixel 값 transition 이라 양방향 모두 부드럽게.
  */
 export default function WorkDetailView({
-  job, vendor, workOpen, onToggleWork,
+  job, vendor, workOpen, onToggleWork, onCloseWork,
   onJobUpdated, onBackToCalendar,
 }) {
   const [busy, setBusy] = useState(false);
@@ -71,7 +71,7 @@ export default function WorkDetailView({
 
   const handleComplete = useCallback(async () => {
     if (!job) return;
-    if (!window.confirm(`${job.vendor} ${job.sequence}차 작업을 완료 처리하시겠습니까?\n완료 후에는 이 차수에 더 작업할 수 없습니다.`)) return;
+    if (!window.confirm(`${job.vendor} ${job.sequence}차 작업을 완료 처리하시겠습니까?`)) return;
     setBusy(true);
     setError('');
     const api = window.electronAPI;
@@ -115,7 +115,7 @@ export default function WorkDetailView({
           {job.completed && <span className="work-detail-header__completed">✓ 완료</span>}
         </div>
         <div className="work-detail-header__stepper">
-          <PhaseStepper phase={job.phase} completed={job.completed} />
+          <PhaseStepper job={job} />
         </div>
         <button
           type="button"
@@ -148,7 +148,7 @@ export default function WorkDetailView({
         <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
       </button>
         <div className="work-panel__inner">
-          <WorkView vendor={vendor} job={job} />
+          <WorkView vendor={vendor} job={job} onCloseWork={onCloseWork} onJobUpdated={onJobUpdated} />
         </div>
       </section>
     </div>

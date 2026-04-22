@@ -9,13 +9,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 벤더 관리 ──
   loadVendors: () => ipcRenderer.invoke('vendors:load'),
   saveVendors: (data) => ipcRenderer.invoke('vendors:save', data),
+  loadSettings: () => ipcRenderer.invoke('settings:load'),
+  saveSettings: (data) => ipcRenderer.invoke('settings:save', data),
 
   // ── 작업(Job) 관리 ──
   jobs: {
-    list: (date) => ipcRenderer.invoke('jobs:list', date),
-    listMonth: (year, month) => ipcRenderer.invoke('jobs:listMonth', year, month),
+    list: (date, vendor) => ipcRenderer.invoke('jobs:list', date, vendor),
+    listMonth: (year, month, vendor) => ipcRenderer.invoke('jobs:listMonth', year, month, vendor),
+    listFiles: (date, vendor, sequence) => ipcRenderer.invoke('jobs:listFiles', date, vendor, sequence),
+    recordUpload: (date, vendor, sequence) => ipcRenderer.invoke('jobs:recordUpload', date, vendor, sequence),
+    deleteUploadHistory: (date, vendor, sequence, timestamp) =>
+      ipcRenderer.invoke('jobs:deleteUploadHistory', date, vendor, sequence, timestamp),
     loadManifest: (date, vendor, sequence) => ipcRenderer.invoke('jobs:loadManifest', date, vendor, sequence),
-    create: (date, vendor) => ipcRenderer.invoke('jobs:create', date, vendor),
+    create: (date, vendor, opts) => ipcRenderer.invoke('jobs:create', date, vendor, opts),
     updateManifest: (date, vendor, sequence, patch) => ipcRenderer.invoke('jobs:updateManifest', date, vendor, sequence, patch),
     complete: (date, vendor, sequence) => ipcRenderer.invoke('jobs:complete', date, vendor, sequence),
     delete: (date, vendor, sequence) => ipcRenderer.invoke('jobs:delete', date, vendor, sequence),
@@ -26,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fileExists: (filePath) => ipcRenderer.invoke('file:exists', filePath),
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   writeFile: (filePath, buffer) => ipcRenderer.invoke('file:write', filePath, buffer),
+  saveFileAs: (srcPath, defaultName) => ipcRenderer.invoke('file:saveAs', srcPath, defaultName),
+  showItemInFolder: (targetPath) => ipcRenderer.invoke('file:showInFolder', targetPath),
+  openPath: (targetPath) => ipcRenderer.invoke('file:openPath', targetPath),
   listVendorFiles: (vendorId) => ipcRenderer.invoke('file:listVendorFiles', vendorId),
   resolveVendorPath: (fileName) => ipcRenderer.invoke('file:resolveVendorPath', fileName),
   resolveJobPath: (date, vendor, sequence, fileName) =>
@@ -44,6 +53,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCredentials: (vendorId) => ipcRenderer.invoke('credentials:delete', vendorId),
   checkSession: () => ipcRenderer.invoke('session:check'),
 
+  // ── 재고조정 서브 창 ──
+  stockAdjust: {
+    open: (date, vendor, sequence) => ipcRenderer.invoke('stockAdjust:open', date, vendor, sequence),
+    close: () => ipcRenderer.invoke('stockAdjust:close'),
+    load: (date, vendor, sequence) => ipcRenderer.invoke('stockAdjust:load', date, vendor, sequence),
+    save: (date, vendor, sequence, patches) =>
+      ipcRenderer.invoke('stockAdjust:save', date, vendor, sequence, patches),
+    getLocks: () => ipcRenderer.invoke('stockAdjust:getLocks'),
+    onLocksChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('stock-adjust:locks-changed', handler);
+      return () => ipcRenderer.removeListener('stock-adjust:locks-changed', handler);
+    },
+  },
+
+  // ── 발주확정서 부분 패치 ──
+  confirmation: {
+    patchQuantities: (date, vendor, sequence, patches) =>
+      ipcRenderer.invoke('confirmation:patchQuantities', date, vendor, sequence, patches),
+  },
+
+  // ── 운송 분배 서브 창 ──
+  transport: {
+    open: (date, vendor, sequence) => ipcRenderer.invoke('transport:open', date, vendor, sequence),
+    close: () => ipcRenderer.invoke('transport:close'),
+    load: (date, vendor, sequence) => ipcRenderer.invoke('transport:load', date, vendor, sequence),
+    save: (date, vendor, sequence, assignments) =>
+      ipcRenderer.invoke('transport:save', date, vendor, sequence, assignments),
+  },
+
   // ── 웹 뷰 (WebContentsView) ──
   webview: {
     setVendor: (vendorId) => ipcRenderer.invoke('webview:setVendor', vendorId),
@@ -56,6 +95,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_e, data) => callback(data);
       ipcRenderer.on('webview:url-changed', handler);
       return () => ipcRenderer.removeListener('webview:url-changed', handler);
+    },
+  },
+
+  // ── 찾기 (Ctrl+F) ──
+  find: {
+    query: (target, text, options) =>
+      ipcRenderer.invoke('find:query', { target, text, options }),
+    close: (target) =>
+      ipcRenderer.invoke('find:close', { target }),
+    onOpen: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('find:open', handler);
+      return () => ipcRenderer.removeListener('find:open', handler);
+    },
+    onResult: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('find:result', handler);
+      return () => ipcRenderer.removeListener('find:result', handler);
     },
   },
 

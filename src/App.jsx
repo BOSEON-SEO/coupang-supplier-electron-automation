@@ -4,6 +4,8 @@ import CalendarView from './components/CalendarView';
 import WorkDetailView from './components/WorkDetailView';
 import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
+import SettingsView from './components/SettingsView';
+import FindBar from './components/FindBar';
 
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
@@ -30,6 +32,8 @@ export default function App() {
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [workOpen, view]);
+
+  // Ctrl+F 는 FindBar 가 직접 window keydown 으로 처리. App 에서는 별도 작업 없음.
 
   // 벤더 목록 (자식 컴포넌트가 사용)
   const [vendors, setVendors] = useState([]);
@@ -121,24 +125,19 @@ export default function App() {
               vendor={vendor}
               workOpen={workOpen}
               onToggleWork={() => setWorkOpen((o) => !o)}
+              onCloseWork={() => setWorkOpen(false)}
               onJobUpdated={(updated) => setActiveJob(updated)}
               onBackToCalendar={() => setView('calendar')}
             />
           </div>
 
           {/* 설정 view */}
-          {view === 'settings' && (
-            <div className="settings-view">
-              <h2>설정</h2>
-              <p className="placeholder-sub">
-                벤더 / 자격증명은 상단 헤더의 [⚙ 관리] 에서 처리됩니다.
-              </p>
-            </div>
-          )}
+          {view === 'settings' && <SettingsView activeVendor={vendor} />}
         </main>
       </div>
 
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <FindBar />
     </div>
   );
 }
