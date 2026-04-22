@@ -16,14 +16,14 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
-// settings.json 경로 — ipc-handlers 가 쓰는 것과 동일 위치.
-function settingsPath(userDataPath) {
-  return path.join(userDataPath, 'settings.json');
+// settings.json 경로 — ipc-handlers 가 쓰는 것과 동일 위치 (registrar.dataDir).
+function settingsPath(dataDir) {
+  return path.join(dataDir, 'settings.json');
 }
 
-function readTbnwsSettings(userDataPath) {
+function readTbnwsSettings(dataDir) {
   try {
-    const p = settingsPath(userDataPath);
+    const p = settingsPath(dataDir);
     if (!fs.existsSync(p)) return {};
     const raw = fs.readFileSync(p, 'utf-8');
     const parsed = JSON.parse(raw);
@@ -122,7 +122,7 @@ module.exports = {
      */
     disposables.push(
       registrar.handle('po.checkForm', async (_event, payload) => {
-        const settings = readTbnwsSettings(registrar.userDataPath);
+        const settings = readTbnwsSettings(registrar.dataDir);
         if (!settings.apiBaseUrl) {
           return { success: false, error: 'TBNWS API Base URL 이 설정되지 않았습니다.' };
         }

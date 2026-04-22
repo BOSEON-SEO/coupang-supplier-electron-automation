@@ -16,10 +16,10 @@ const path = require('path');
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,29}$/;
 
 /**
- * @param {{ ipcMain: import('electron').IpcMain, app: import('electron').App }} opts
+ * @param {{ ipcMain: import('electron').IpcMain, app: import('electron').App, dataDir: string }} opts
  * @returns {{ loaded: string[], dispose: () => void }}
  */
-function loadPluginMainHalves({ ipcMain, app }) {
+function loadPluginMainHalves({ ipcMain, app, dataDir }) {
   const pluginsDir = path.join(__dirname, 'src', 'plugins');
   const loaded = [];
   const disposers = [];
@@ -41,7 +41,8 @@ function loadPluginMainHalves({ ipcMain, app }) {
     const handlerChannels = [];
     const registrar = {
       pluginId,
-      userDataPath,
+      userDataPath,   // Electron 기본 userData — 앱 세션/쿠키 등
+      dataDir,        // 프로젝트 데이터 루트 — settings.json / 작업 폴더 저장소
       /**
        * @param {string} channel  'eflexs.submit' 형태. 'plugin:<id>:' 프리픽스 자동 부여.
        * @param {(event: any, ...args: any[]) => any} handler

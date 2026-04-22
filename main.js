@@ -557,7 +557,7 @@ app.whenReady().then(() => {
   });
 
   // 플러그인 main-half 로드 — src/plugins/*/main.js 자동 스캔
-  loadPluginMainHalves({ ipcMain, app });
+  loadPluginMainHalves({ ipcMain, app, dataDir: DATA_DIR });
 
   // ── WebContentsView 제어 IPC ────────────────────────────
   ipcMain.handle('webview:setVendor', (_e, vendorId) => {

@@ -119,6 +119,10 @@
  *   ipcMain.handle('plugin:<id>:<channel>', handler) 에 해당.
  * @property {string} pluginId
  * @property {string} userDataPath
+ *   Electron 기본 userData 경로 (app.getPath('userData')) — 세션·쿠키·캐시 용도.
+ * @property {string} dataDir
+ *   프로젝트 데이터 루트 (C:\Users\{user}\AppData\Local\CoupangAutomation) —
+ *   settings.json / 작업(job) 폴더가 저장되는 곳. ipc-handlers 와 공유.
  */
 
 // ═══════════════════════════════════════════════════════════════════
