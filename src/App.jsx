@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import CalendarView from './components/CalendarView';
 import WorkDetailView from './components/WorkDetailView';
@@ -6,6 +6,8 @@ import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
 import SettingsView from './components/SettingsView';
 import FindBar from './components/FindBar';
+import { PluginProvider } from './core/plugin-host';
+import { bootstrapPlugins } from './core/plugin-loader';
 
 export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
@@ -42,6 +44,17 @@ export default function App() {
     setVendors(data?.vendors ?? []);
   }, []);
   useEffect(() => { reloadVendors(); }, [reloadVendors]);
+
+  // ── 플러그인 로드 ─────────────────────────────────────────
+  // 현재는 entitlements 하드코딩 (라이선스 서버 미연결). 출시 단계에 교체.
+  const entitlements = useMemo(() => ['core', 'hello'], []);
+  useEffect(() => {
+    bootstrapPlugins({
+      entitlements,
+      currentVendor: vendor || null,
+      electronAPI: window.electronAPI,
+    });
+  }, [entitlements, vendor]);
 
   // ── Toast 알림 ─────────────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -87,6 +100,7 @@ export default function App() {
   };
 
   return (
+    <PluginProvider entitlements={entitlements} currentVendor={vendor || null}>
     <div className="app-container">
       <header className="app-header">
         <h1 className="app-title">쿠팡 서플라이어 자동화</h1>
@@ -139,5 +153,6 @@ export default function App() {
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       <FindBar />
     </div>
+    </PluginProvider>
   );
 }

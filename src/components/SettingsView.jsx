@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { SHORTAGE_REASONS } from '../core/confirmationBuilder';
 import { DELIVERY_COMPANIES } from '../core/deliveryCompanies';
 import ListManagerModal from './ListManagerModal';
+import { SlotRenderer } from '../core/plugin-host';
+import { KNOWN_SCOPES } from '../core/plugin-api';
 
 /**
  * 설정 뷰 — 왼쪽 "기본값"(settings.json), 오른쪽 "선택 벤더"(vendors.json 의 vendor)
@@ -250,6 +252,7 @@ export default function SettingsView({ activeVendor }) {
       <div className="settings-view__header">
         <h2>설정</h2>
         <div className="settings-view__spacer" />
+        <SlotRenderer scope={KNOWN_SCOPES.SETTINGS_SECTION} />
         <button
           type="button"
           className="btn btn--primary btn--sm"
