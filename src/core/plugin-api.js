@@ -222,6 +222,7 @@ export const KNOWN_VIEW_ROLES = Object.freeze({
   JOB_CARD: 'job.card',                      // 달력 셀 내 작업 카드
   STOCK_ADJUST_MAIN: 'stock-adjust.main',    // 재고조정 모달 내부 메인 뷰
   NEWJOB_OPTIONS: 'newjob.options',          // 새 작업 모달의 플러그인 옵션 영역. props: { options, onChange(key,value) }
+  APP_OVERLAY: 'app.overlay',                // 전역 모달/오버레이 호스트. 항상 렌더, 내부에서 window event listen.
 });
 
 // ═══════════════════════════════════════════════════════════════════

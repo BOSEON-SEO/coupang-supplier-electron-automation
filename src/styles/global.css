@@ -1605,6 +1605,107 @@ body {
   flex: 1 1 auto;
 }
 
+/* 이플렉스 출고 모달 */
+.eflex-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+.eflex-overlay__card {
+  background: var(--color-surface);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 980px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.eflex-overlay__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+.eflex-overlay__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.eflex-overlay__count {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.eflex-overlay__close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 6px;
+}
+.eflex-overlay__close:hover { color: var(--color-text); }
+.eflex-overlay__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 14px 20px;
+}
+.eflex-overlay__empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 40px 0;
+  margin: 0;
+}
+.eflex-overlay__footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+}
+.eflex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.eflex-table th,
+.eflex-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+}
+.eflex-table th {
+  background: var(--color-bg);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.eflex-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.eflex-table__export {
+  color: #2e7d32;
+  font-weight: 700;
+}
+.eflex-table code {
+  font-size: 11px;
+  background: var(--color-bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
 /* 플러그인별 설정 폼 */
 .plugin-settings {
   padding: 16px;

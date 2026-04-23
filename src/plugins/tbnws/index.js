@@ -11,11 +11,12 @@
  * 백엔드 HTTP 는 main-half(main.js) 에서 처리. renderer 는 ctx.ipcInvoke 로 호출.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { KNOWN_SCOPES, KNOWN_HOOKS, KNOWN_VIEW_ROLES } from '../../core/plugin-api';
 import { applyPoStyle } from '../../core/poStyler';
 import TbnwsStockAdjustView from './StockAdjustView';
+import EflexOutboundModal from './EflexOutboundModal';
 
 // ═══════════════════════════════════════════════════════════════════
 // 17컬럼 정의 — 어드민 프론트의 CoupangCheckModal 과 동일 순서·라벨
@@ -131,6 +132,25 @@ function TbnwsNewJobOptions({ options, onChange, disabled }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// 전역 오버레이 호스트 — window event 로 모달 on/off
+// ═══════════════════════════════════════════════════════════════════
+
+const EFLEX_OPEN_EVENT = 'tbnws:open-eflex-modal';
+
+function TbnwsOverlayHost() {
+  const [eflexJob, setEflexJob] = useState(null);
+  useEffect(() => {
+    const open = (e) => setEflexJob(e?.detail?.job || null);
+    window.addEventListener(EFLEX_OPEN_EVENT, open);
+    return () => window.removeEventListener(EFLEX_OPEN_EVENT, open);
+  }, []);
+  if (eflexJob) {
+    return <EflexOutboundModal job={eflexJob} onClose={() => setEflexJob(null)} />;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // 플러그인 manifest
 // ═══════════════════════════════════════════════════════════════════
 
@@ -176,6 +196,35 @@ const manifest = {
         component: TbnwsStockAdjustView,
         priority: 10,
         when: (whenCtx) => whenCtx.variant === 'tbnws',
+      }),
+    );
+
+    // 전역 오버레이 호스트 — 이플렉스 출고 모달 등 tbnws 관련 전역 모달을 이 안에서 렌더.
+    disposables.push(
+      ctx.registerView(KNOWN_VIEW_ROLES.APP_OVERLAY, {
+        component: TbnwsOverlayHost,
+        priority: 10,
+      }),
+    );
+
+    // 이플렉스 출고 버튼 — 투비 재고조정 탭에서만 노출 (scope 가 tabVariant 기반).
+    disposables.push(
+      ctx.registerCommand({
+        id: 'tbnws.eflex.outbound',
+        title: '이플렉스 출고',
+        icon: '🚚',
+        variant: 'primary',
+        scope: 'work.tab.tbnws.actions',
+        order: 50,
+        handler: (args) => {
+          if (!args?.job) {
+            alert('활성 작업이 없습니다.');
+            return;
+          }
+          window.dispatchEvent(new CustomEvent(EFLEX_OPEN_EVENT, {
+            detail: { job: args.job },
+          }));
+        },
       }),
     );
 

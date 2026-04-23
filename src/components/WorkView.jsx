@@ -1641,6 +1641,14 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             </button>
           </>
         )}
+        {/* 플러그인 탭 전용 액션 — work.tab.<tabVariant>.actions scope 에 기여된 커맨드 */}
+        {activePluginTab?.tabVariant && (
+          <SlotRenderer
+            scope={`work.tab.${activePluginTab.tabVariant}.actions`}
+            ctx={{ job, phase: job?.phase }}
+            args={{ job }}
+          />
+        )}
         {activeTab === 'confirmation' && (
           <>
             <button

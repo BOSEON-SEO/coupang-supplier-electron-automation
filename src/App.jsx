@@ -7,9 +7,10 @@ import ToastContainer from './components/Toast';
 import SettingsView from './components/SettingsView';
 import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
-import { PluginProvider } from './core/plugin-host';
+import { PluginProvider, ViewOutlet } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
 import { resolveEntitlements } from './core/entitlements';
+import { KNOWN_VIEW_ROLES } from './core/plugin-api';
 import { runHook } from './core/plugin-registry';
 import { KNOWN_HOOKS } from './core/plugin-api';
 
@@ -220,6 +221,8 @@ export default function App() {
 
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       <FindBar />
+      {/* 플러그인이 기여하는 전역 모달/오버레이 호스트 */}
+      <ViewOutlet role={KNOWN_VIEW_ROLES.APP_OVERLAY} />
     </div>
     </PluginProvider>
   );

@@ -238,10 +238,55 @@ module.exports = {
       }),
     );
 
+    /**
+     * 이플렉스 출고 요청 — POST /api/coupang/coupangList/inbound/eflexOutbound
+     *
+     * payload: { workSeq: number, items: Array<{ coupangOrderSeq, productCode,
+     *   skuId, skuName, skuBarcode, logisticsCenter, orderQuantity,
+     *   fulfillmentStock, exportQuantity }> }
+     */
+    disposables.push(
+      registrar.handle('eflex.submitOutbound', async (_event, payload) => {
+        const settings = readTbnwsSettings(registrar.dataDir);
+        if (!settings.apiBaseUrl) {
+          return { success: false, error: 'TBNWS API Base URL 이 설정되지 않았습니다.' };
+        }
+        if (payload?.workSeq == null) {
+          return { success: false, error: 'workSeq 가 비어있습니다.' };
+        }
+        if (!Array.isArray(payload?.items) || payload.items.length === 0) {
+          return { success: false, error: 'items 가 비어있습니다.' };
+        }
+        const url = apiUrl(settings, '/coupang/coupangList/inbound/eflexOutbound');
+        const body = Buffer.from(JSON.stringify(payload), 'utf-8');
+        try {
+          const res = await request(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': body.length,
+              ...authHeaders(settings),
+            },
+            body,
+            timeoutMs: 60000,
+          });
+          if (res.status >= 200 && res.status < 300) {
+            return { success: true, data: res.data ?? res.raw };
+          }
+          return {
+            success: false,
+            status: res.status,
+            error: res.data?.message || res.raw?.slice(0, 300) || `HTTP ${res.status}`,
+          };
+        } catch (err) {
+          return { success: false, error: err.message || String(err) };
+        }
+      }),
+    );
+
     // TODO: po.confirmSubmit (발주확정 업로드)
-    // TODO: inbound.startWork / saveStep1 / saveStep2 / saveStep3
+    // TODO: inbound.saveStep1 / saveStep2 / saveStep3
     // TODO: inbound.registerTempSchedule (출고예정)
-    // TODO: inbound.eflexOutbound (eFlexs 반출)
 
     return () => { disposables.forEach((d) => d()); };
   },
