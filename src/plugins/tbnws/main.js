@@ -182,7 +182,7 @@ module.exports = {
         if (!settings.apiBaseUrl) {
           return { success: false, error: 'TBNWS API Base URL 이 설정되지 않았습니다.' };
         }
-        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/fulfillment/product/refetch`;
+        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/v1/fulfillment/product/refetch`;
         try {
           const res = await request(url, {
             method: 'POST',
