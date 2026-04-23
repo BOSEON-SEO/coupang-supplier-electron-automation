@@ -110,6 +110,18 @@ export default function EflexOutboundModal({ job, onClose }) {
         'tbnws', 'eflex.submitOutbound',
         { workSeq, items, jobMeta: { date: job.date, vendor: job.vendor } },
       );
+      if (res?.testMode) {
+        // eslint-disable-next-line no-console
+        console.info('[tbnws/eflexOutbound TEST MODE] url:', res.url, '\nbody:', res.body);
+        alert(
+          `[테스트 모드] 실제 전송 안 함 — 요청 body 는 DevTools Console 에 로그됨.\n\n`
+          + `URL: ${res.url}\n`
+          + `items: ${items.length}건\n\n`
+          + `설정에서 '이플렉스 출고 테스트 모드' 체크 해제하면 실전송으로 전환됩니다.`,
+        );
+        onClose();
+        return;
+      }
       if (res?.success) {
         const count = res.data?.count ?? rows.length;
         alert(`이플렉스 출고 요청 완료 — ${count}건`);

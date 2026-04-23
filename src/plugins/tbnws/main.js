@@ -287,6 +287,23 @@ module.exports = {
         };
 
         const url = apiUrl(settings, '/coupang/coupangList/inbound/eflexOutbound');
+
+        // 테스트 모드 — 실요청 skip, body 만 반환. 기본값 true (설정에서 해제 시 실전송).
+        // settings 에 명시적으로 false 가 저장돼야 실요청 활성.
+        const testMode = settings.eflexTestMode !== false;
+        if (testMode) {
+          // eslint-disable-next-line no-console
+          console.info('[tbnws/eflexOutbound TEST MODE] would POST', url, '\n',
+            JSON.stringify(reqBody, null, 2));
+          return {
+            success: true,
+            testMode: true,
+            url,
+            body: reqBody,
+            message: '테스트 모드 — 실제 전송하지 않았습니다.',
+          };
+        }
+
         const body = Buffer.from(JSON.stringify(reqBody), 'utf-8');
         try {
           const res = await request(url, {

@@ -182,6 +182,13 @@ const manifest = {
     { key: 'eflexZipCode',      label: '이플렉스 반출 우편번호', type: 'text', default: '17040' },
     { key: 'eflexAddress',      label: '이플렉스 반출 주소',     type: 'text', default: '경기 용인시 처인구 포곡읍 성산로 434' },
     { key: 'eflexRemark',       label: '이플렉스 반출 비고',     type: 'text', default: '쿠팡 입고 반출' },
+    {
+      key: 'eflexTestMode',
+      label: '이플렉스 출고 테스트 모드',
+      type: 'boolean',
+      default: true,
+      description: '체크 시 실제 백엔드로 전송하지 않고 요청 body 만 로그. 검증 후 체크 해제하여 실요청으로 전환하세요.',
+    },
   ],
 
   activate(ctx) {
