@@ -4,10 +4,7 @@ import * as XLSX from 'xlsx';
 /**
  * 이플렉스 출고 모달 — po-tbnws.xlsx 에서 풀필 반출 대상 행만 필터해 표시.
  *
- * 필터 조건:
- *   - 발주수량 > 0
- *   - 풀필재고 > 0
- *   - 반출수량 > 0
+ * 필터 조건: 반출수량 > 0 (풀필재고 여부는 보지 않음 — 백엔드가 이미 할당해둠)
  *
  * submit: POST /api/coupang/coupangList/inbound/eflexOutbound
  *   body (백엔드 CoupangEflexOutboundRequest DTO 에 맞춤):
@@ -61,22 +58,18 @@ export default function EflexOutboundModal({ job, onClose }) {
         const filtered = [];
         for (let i = 1; i < aoa.length; i += 1) {
           const r = aoa[i];
-          const orderQty     = Number(r[idx.orderQty])      || 0;
-          const fulfillStock = Number(r[idx.fulfillStock])  || 0;
-          const exportQty    = Number(r[idx.fulfillExport]) || 0;
-          if (orderQty > 0 && fulfillStock > 0 && exportQty > 0) {
-            filtered.push({
-              coupangOrderSeq:   String(r[idx.orderSeq] ?? '').trim(),
-              productCode:       String(r[idx.productCode] ?? '').trim(),
-              skuId:             String(r[idx.skuId] ?? '').trim(),
-              skuName:           String(r[idx.skuName] ?? '').trim(),
-              skuBarcode:        String(r[idx.skuBarcode] ?? '').trim(),
-              logisticsCenter:   String(r[idx.warehouse] ?? '').trim(),
-              orderQuantity:     orderQty,
-              fulfillmentStock:  fulfillStock,
-              exportQuantity:    exportQty,
-            });
-          }
+          const exportQty = Number(r[idx.fulfillExport]) || 0;
+          if (exportQty <= 0) continue;
+          filtered.push({
+            coupangOrderSeq:   String(r[idx.orderSeq] ?? '').trim(),
+            productCode:       String(r[idx.productCode] ?? '').trim(),
+            skuId:             String(r[idx.skuId] ?? '').trim(),
+            skuName:           String(r[idx.skuName] ?? '').trim(),
+            skuBarcode:        String(r[idx.skuBarcode] ?? '').trim(),
+            logisticsCenter:   String(r[idx.warehouse] ?? '').trim(),
+            orderQuantity:     Number(r[idx.orderQty]) || 0,
+            exportQuantity:    exportQty,
+          });
         }
         if (!cancelled) setRows(filtered);
       } catch (err) {
@@ -169,7 +162,7 @@ export default function EflexOutboundModal({ job, onClose }) {
             <p className="eflex-overlay__empty">불러오는 중…</p>
           ) : rows.length === 0 ? (
             <p className="eflex-overlay__empty">
-              풀필 반출 대상이 없습니다. (발주수량·풀필재고·반출수량 &gt; 0 인 행 없음)
+              반출수량 &gt; 0 인 행이 없습니다.
             </p>
           ) : (
             <table className="eflex-table">
@@ -181,7 +174,6 @@ export default function EflexOutboundModal({ job, onClose }) {
                   <th>SKU Barcode</th>
                   <th>물류센터</th>
                   <th className="num">주문수량</th>
-                  <th className="num">풀필재고</th>
                   <th className="num">반출수량</th>
                 </tr>
               </thead>
@@ -194,7 +186,6 @@ export default function EflexOutboundModal({ job, onClose }) {
                     <td>{r.skuBarcode}</td>
                     <td>{r.logisticsCenter}</td>
                     <td className="num">{r.orderQuantity}</td>
-                    <td className="num">{r.fulfillmentStock}</td>
                     <td className="num eflex-table__export">{r.exportQuantity}</td>
                   </tr>
                 ))}
