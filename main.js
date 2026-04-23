@@ -477,7 +477,7 @@ function createWindow() {
  * kind: 'stock-adjust' | 'transport'
  * 같은 kind + 같은 jobKey 이면 기존 창을 focus.
  */
-function openPluginWindow(kind, { date, vendor, sequence }) {
+function openPluginWindow(kind, { date, vendor, sequence, variant }) {
   const map = kind === 'transport' ? transportWindows : stockAdjustWindows;
   const titlePrefix = kind === 'transport' ? '운송 분배' : '재고조정';
   const key = jobKeyOf(date, vendor, sequence);
@@ -503,7 +503,8 @@ function openPluginWindow(kind, { date, vendor, sequence }) {
     },
   });
 
-  const hash = `#/${kind}?date=${encodeURIComponent(date)}&vendor=${encodeURIComponent(vendor)}&sequence=${sequence}`;
+  const variantSeg = variant ? `&variant=${encodeURIComponent(variant)}` : '';
+  const hash = `#/${kind}?date=${encodeURIComponent(date)}&vendor=${encodeURIComponent(vendor)}&sequence=${sequence}${variantSeg}`;
   const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
   if (isDev) {
     win.loadURL(`http://localhost:3000/${hash}`);

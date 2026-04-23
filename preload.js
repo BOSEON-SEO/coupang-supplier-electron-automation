@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 재고조정 서브 창 ──
   stockAdjust: {
-    open: (date, vendor, sequence) => ipcRenderer.invoke('stockAdjust:open', date, vendor, sequence),
+    open: (date, vendor, sequence, options) => ipcRenderer.invoke('stockAdjust:open', date, vendor, sequence, options),
     close: () => ipcRenderer.invoke('stockAdjust:close'),
     load: (date, vendor, sequence) => ipcRenderer.invoke('stockAdjust:load', date, vendor, sequence),
     save: (date, vendor, sequence, patches) =>

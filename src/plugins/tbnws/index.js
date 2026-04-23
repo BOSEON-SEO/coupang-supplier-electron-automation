@@ -166,11 +166,13 @@ const manifest = {
       }),
     );
 
-    // 재고조정 모달을 tobe_product_code 그룹핑된 admin 스타일 뷰로 치환.
+    // 재고조정 모달 — variant='tbnws' 로 열린 경우에만 admin 스타일 그룹 뷰로 치환.
+    // PO 원본 탭에서 여는 기본 variant 는 코어 StockAdjustView 유지.
     disposables.push(
       ctx.registerView(KNOWN_VIEW_ROLES.STOCK_ADJUST_MAIN, {
         component: TbnwsStockAdjustView,
         priority: 10,
+        when: (whenCtx) => whenCtx.variant === 'tbnws',
       }),
     );
 
@@ -208,6 +210,8 @@ const manifest = {
         fileName: 'po-tbnws.xlsx',
         after: 'po',
         readOnly: false,
+        hasPoActions: true,
+        tabVariant: 'tbnws',
         handler: () => {},
         onSave: async (buffer, { job, electronAPI }) => {
           const wb = XLSX.read(buffer, { type: 'array' });

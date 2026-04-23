@@ -925,42 +925,13 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     }
   }, [dirty, appendLog]);
 
-  // ── 발주확정서: 확정수량 반영 (I/M 컬럼만 in-place 패치) ──
-  // 다른 편집(입고유형 C 등) 은 전부 보존.
-  const handlePatchConfirmation = useCallback(async () => {
-    if (!job) return;
-    if (!(await saveDirtyPoIfAny())) return;
-    const res = await patchConfirmationFromPo();
-    if (res?.skipped) return;
-    if (!res?.success) {
-      appendLog('error', `확정수량 반영 실패: ${res?.error ?? 'unknown'}`);
-      return;
-    }
-    appendLog('info', `[확정수량 반영] ${res.patched}행 갱신${res.unmatched?.length ? ` (미매칭 ${res.unmatched.length}행)` : ''}`);
-    setActiveTab('confirmation');
-  }, [job, saveDirtyPoIfAny, patchConfirmationFromPo, appendLog]);
-
-  // ── 발주확정서: 전체 생성 / 재생성 ──
-  // 없을 때: 초기 생성.
-  // 있을 때: 기존 확정서를 완전히 덮어씀 — 수동 편집(입고유형 · 납품부족사유 등) 전부 소실.
-  // PO 행 구성 자체가 바뀐 경우(SKU 추가/삭제) 에만 사용.
-  const handleRegenerateConfirmation = useCallback(async () => {
+  // ── 발주확정서 생성 (PO + 설정으로 새 파일 빌드) ──
+  // confirm UI 없음. 기존 파일이 있으면 덮어씀.
+  // handleApplyConfirmation 이 "없을 때만" 호출. 있을 때는 patch 로 I/M 만 갱신.
+  const generateConfirmationFresh = useCallback(async () => {
     if (!job) return;
     const api = window.electronAPI;
     if (!api) return;
-
-    if (confirmationExists) {
-      const ok = window.confirm(
-        `기존 확정서를 완전히 새로 만듭니다.\n`
-        + `수동 편집한 내용(입고유형·납품부족사유 등) 이 모두 사라지고\n`
-        + `PO + 기본 설정으로 재구성됩니다.\n\n`
-        + `운송 분배(transport.json) 와 업로드/등록 이력은 영향 없습니다.\n\n`
-        + `계속하시겠습니까?`
-      );
-      if (!ok) return;
-    }
-
-    if (!(await saveDirtyPoIfAny())) return;
 
     try {
       const poPath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx');
@@ -1039,7 +1010,29 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     } catch (err) {
       appendLog('error', `확정서 생성 실패: ${err.message}`);
     }
-  }, [job, confirmationExists, saveDirtyPoIfAny, appendLog]);
+  }, [job, appendLog]);
+
+  // ── 발주확정서 반영/생성 (통합) ──
+  // 기존 "확정수량 반영" + "확정서 생성/재생성" 3갈래를 하나로. 복합키 기반 patch.
+  //   - confirmation 없으면 → generateConfirmationFresh (신규 생성)
+  //   - 있으면 → patchConfirmationFromPo (I·M 만 patch, 다른 편집 보존)
+  //   - 복합키: 발주번호|물류센터|상품바코드 (patchConfirmationFromPo 내부)
+  const handleApplyConfirmation = useCallback(async () => {
+    if (!job) return;
+    if (!(await saveDirtyPoIfAny())) return;
+    if (!confirmationExists) {
+      await generateConfirmationFresh();
+      return;
+    }
+    const res = await patchConfirmationFromPo();
+    if (res?.skipped) return;
+    if (!res?.success) {
+      appendLog('error', `확정서 반영 실패: ${res?.error ?? 'unknown'}`);
+      return;
+    }
+    appendLog('info', `[확정서 반영] ${res.patched}행 갱신${res.unmatched?.length ? ` (미매칭 ${res.unmatched.length}행)` : ''}`);
+    setActiveTab('confirmation');
+  }, [job, saveDirtyPoIfAny, confirmationExists, generateConfirmationFresh, patchConfirmationFromPo, appendLog]);
 
   // ── 현재 탭 파일을 사용자 지정 위치로 다운로드 ──
   const handleDownload = useCallback(async (kind) => {
@@ -1593,12 +1586,15 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       {/* Row 2: 탭 컨텍스트 액션 (왼쪽) + 다운로드/저장 (오른쪽) — 결과 탭에서는 생략 */}
       {activeTab !== 'result' && (
       <div className="workview-actions-bar">
-        {activeTab === 'po' && (
+        {(activeTab === 'po' || activePluginTab?.hasPoActions) && (
           <>
             <button
               type="button"
               className="btn btn--phase-adjust btn--sm"
-              onClick={() => job && window.electronAPI?.stockAdjust?.open(job.date, job.vendor, job.sequence)}
+              onClick={() => job && window.electronAPI?.stockAdjust?.open(
+                job.date, job.vendor, job.sequence,
+                { variant: activePluginTab?.tabVariant || null },
+              )}
               disabled={!job || !poExists || pythonRunning || jobLocked}
               title={
                 !poExists ? 'po.xlsx 가 아직 없습니다'
@@ -1609,50 +1605,21 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             >
               📦 재고조정
             </button>
-            {confirmationExists ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn--primary btn--sm"
-                  onClick={handlePatchConfirmation}
-                  disabled={!job || !poExists || pythonRunning || jobLocked}
-                  title={
-                    !poExists ? 'po.xlsx 가 아직 없습니다'
-                      : jobLocked ? '플러그인 창이 열려있습니다'
-                      : 'PO 의 확정수량·부족사유(I·M) 만 확정서에 반영 — 입고유형·사용자 편집 보존'
-                  }
-                >
-                  🔄 확정수량 반영
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--phase-regenerate btn--sm"
-                  onClick={handleRegenerateConfirmation}
-                  disabled={!job || !poExists || pythonRunning || jobLocked}
-                  title={
-                    !poExists ? 'po.xlsx 가 아직 없습니다'
-                      : jobLocked ? '플러그인 창이 열려있습니다'
-                      : '기존 확정서를 완전히 새로 생성 — SKU 추가/삭제 같은 행 변경 시 사용 (수동 편집 소실)'
-                  }
-                >
-                  📋 확정서 재생성
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="btn btn--primary btn--sm"
-                onClick={handleRegenerateConfirmation}
-                disabled={!job || !poExists || pythonRunning || jobLocked}
-                title={
-                  !poExists ? 'po.xlsx 가 아직 없습니다'
-                    : jobLocked ? '플러그인 창이 열려있습니다'
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={handleApplyConfirmation}
+              disabled={!job || !poExists || pythonRunning || jobLocked}
+              title={
+                !poExists ? 'po.xlsx 가 아직 없습니다'
+                  : jobLocked ? '플러그인 창이 열려있습니다'
+                  : confirmationExists
+                    ? 'PO 의 확정수량·부족사유(I·M) 를 복합키(발주번호·물류센터·상품바코드) 로 매칭해 확정서에 반영'
                     : 'PO 로부터 발주확정서 최초 생성'
-                }
-              >
-                📋 확정서 생성
-              </button>
-            )}
+              }
+            >
+              📋 {confirmationExists ? '확정서 반영' : '확정서 생성'}
+            </button>
           </>
         )}
         {activeTab === 'confirmation' && (

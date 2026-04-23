@@ -156,6 +156,13 @@
  * @property {'po' | 'confirmation' | 'result'} [after]  탭 렌더 위치 (기본: 끝)
  * @property {(buffer: ArrayBuffer, ctx: { job: object, electronAPI: object }) => Promise<void>} [onSave]
  *   저장 버튼 눌렸을 때 호출. 주어지면 기본 파일 덮어쓰기 대신 이걸 실행.
+ * @property {boolean} [hasPoActions]
+ *   이 탭도 PO 원본 탭과 같은 context action(재고조정·확정서 생성/반영) 버튼을
+ *   노출. 단 액션 동작은 tabVariant 값에 따라 분기 (예: 재고조정 popup 을 variant
+ *   로 열어 plugin 뷰 치환). PO 원본 탭과 공존.
+ * @property {string} [tabVariant]
+ *   이 탭에서 버튼을 누를 때 stockAdjust.open({ variant }) 등에 전달되는 값.
+ *   예: 'tbnws'.
  */
 
 /**

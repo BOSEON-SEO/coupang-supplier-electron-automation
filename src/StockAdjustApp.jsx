@@ -13,7 +13,7 @@ import { KNOWN_VIEW_ROLES } from './core/plugin-api';
  * 창이 열려있는 동안 메인창의 해당 job PO / 발주확정서 탭은 read-only.
  */
 export default function StockAdjustApp({ params }) {
-  const { date, vendor } = params;
+  const { date, vendor, variant } = params;
   const sequence = Number(params.sequence);
 
   const [loading, setLoading] = useState(true);
@@ -88,10 +88,10 @@ export default function StockAdjustApp({ params }) {
       {!loading && !error && (
         <ViewOutlet
           role={KNOWN_VIEW_ROLES.STOCK_ADJUST_MAIN}
-          ctx={{ date, vendor, sequence }}
+          ctx={{ date, vendor, sequence, variant }}
           viewProps={{
             groups, saving, onSave: handleSave, onCancel: handleCancel,
-            date, vendor, sequence,
+            date, vendor, sequence, variant,
           }}
           fallback={(
             <StockAdjustView

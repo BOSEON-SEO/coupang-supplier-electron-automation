@@ -1319,14 +1319,16 @@ function registerIpcHandlers({
   });
 
   // ── 재고조정 서브 창 제어 ──────────────────────────────────
-  ipcMain.handle('stockAdjust:open', async (_e, date, vendor, sequence) => {
+  ipcMain.handle('stockAdjust:open', async (_e, date, vendor, sequence, options) => {
     if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
       return { success: false, error: 'invalid args' };
     }
     if (typeof openStockAdjustWindow !== 'function') {
       return { success: false, error: 'openStockAdjustWindow not wired' };
     }
-    openStockAdjustWindow({ date, vendor, sequence });
+    const variant = typeof options?.variant === 'string' && /^[a-z0-9-]{1,30}$/.test(options.variant)
+      ? options.variant : null;
+    openStockAdjustWindow({ date, vendor, sequence, variant });
     return { success: true };
   });
 
