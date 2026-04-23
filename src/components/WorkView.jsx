@@ -98,6 +98,18 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     return pluginTabs.find((c) => c.id === id) || null;
   }, [activeTab, pluginTabs]);
 
+  // 플러그인 비활성화로 탭이 사라졌는데 activeTab 이 dangling 이면 PO 로 폴백.
+  // (반대로 플러그인이 켜져도 탭만 등장, 자동 전환하진 않음)
+  useEffect(() => {
+    if (!activeTab.startsWith('plugin:')) return;
+    const id = activeTab.slice('plugin:'.length);
+    const exists = pluginTabs.some((c) => c.id === id);
+    if (!exists && job) {
+      setActiveTab('po');
+      if (!loadedPath?.endsWith('po.xlsx')) loadJobPoFile(job);
+    }
+  }, [activeTab, pluginTabs, job, loadedPath, loadJobPoFile]);
+
   // 플러그인 탭을 after='po' 와 나머지로 분리 (나머지는 끝에)
   const pluginTabsAfterPo = useMemo(
     () => pluginTabs.filter((c) => c.after === 'po'),
