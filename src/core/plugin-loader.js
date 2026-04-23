@@ -21,7 +21,9 @@ export function listInstalledManifests() {
     id: m.id,
     name: m.name,
     version: m.version,
+    description: m.description || '',
     entitlement: m.entitlement || null,
+    settingsSchema: Array.isArray(m.settingsSchema) ? m.settingsSchema : [],
     hasSettings: Array.isArray(m.settingsSchema) && m.settingsSchema.length > 0,
   }));
 }

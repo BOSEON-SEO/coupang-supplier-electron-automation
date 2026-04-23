@@ -16,6 +16,7 @@ const manifest = {
   id: 'hello',
   name: 'Hello (dev)',
   version: '0.1.0',
+  description: '플러그인 시스템 스모크 테스트용 개발 플러그인. job.created 훅에 로그를 찍어 플러그인 런타임이 제대로 동작하는지 확인. 배포 단계에서는 비활성화 예정.',
   // entitlement 없음 — 모든 환경에서 로드
 
   activate(ctx) {

@@ -139,6 +139,7 @@ const manifest = {
   id: 'tbnws',
   name: 'TBNWS',
   version: '0.1.0',
+  description: '투비네트웍스 전용 커스터마이즈. 작업 생성 시 풀필먼트 재고 동기화, PO → 자사 확장 파일(po-tbnws.xlsx) 생성, tobe_product_code 기준 재고조정 그룹 뷰, 확정수량 cross-sync 등을 제공. API Base URL 과 Bearer 토큰을 설정해야 동작합니다.',
   entitlement: 'tbnws.plugin',
 
   settingsSchema: [

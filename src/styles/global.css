@@ -1494,6 +1494,117 @@ body {
   cursor: not-allowed;
 }
 
+/* 플러그인 상세 모달 */
+.plugin-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+.plugin-detail-overlay__card {
+  background: var(--color-surface);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.plugin-detail-overlay__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.plugin-detail-overlay__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.plugin-detail-overlay__id code {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 400;
+}
+.plugin-detail-overlay__version {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+.plugin-detail-overlay__ent {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+.plugin-detail-overlay__ent code {
+  background: var(--color-bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.plugin-detail-overlay__close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 6px;
+}
+.plugin-detail-overlay__close:hover {
+  color: var(--color-text);
+}
+.plugin-detail-overlay__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.plugin-detail-overlay__desc {
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.plugin-detail-overlay__section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+.plugin-detail-overlay__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+}
+.plugin-detail-overlay__footer-spacer {
+  flex: 1 1 auto;
+}
+
 /* 플러그인별 설정 폼 */
 .plugin-settings {
   padding: 16px;

@@ -4,15 +4,9 @@ import { listLoadedPlugins } from '../core/plugin-registry';
 import { listInstalledManifests } from '../core/plugin-loader';
 
 /**
- * 플러그인 메뉴 — 설치된 플러그인 전체 목록 + 시스템 현황 + 플러그인별 설정.
+ * 플러그인 메뉴 — 설치된 플러그인 전체 목록 + 시스템 현황.
  *
- * 플러그인 상태:
- *   - 로드됨   (activated)      : manifest 발견 + entitlement 통과 + 사용자 on
- *   - 비활성   (user-disabled)   : 사용자가 개별 토글로 off
- *   - 권한부족 (entitlement)     : entitlement 없음 (라이선스 미보유)
- *
- * 개별 on/off 는 settings.plugins.<id>.enabled 에 저장됨 (기본 true).
- * 토글 즉시 settings-changed 이벤트 → App/popup 이 plugins 재부트스트랩.
+ * 각 플러그인의 개별 설정은 '상세' 버튼 → 모달에서 편집.
  */
 export default function PluginsView() {
   const counts = useRegistrySnapshot();
@@ -20,9 +14,9 @@ export default function PluginsView() {
   const loaded = listLoadedPlugins();
   const installed = useMemo(() => listInstalledManifests(), []);
 
-  // settings.plugins 전체 맵 (각 플러그인 설정 + enabled 플래그)
   const [pluginsSettings, setPluginsSettings] = useState({});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [detailOf, setDetailOf] = useState(null); // plugin.id | null
 
   const reload = useCallback(async () => {
     const res = await window.electronAPI?.loadSettings();
@@ -38,16 +32,15 @@ export default function PluginsView() {
     return () => window.removeEventListener('settings-changed', onChanged);
   }, [reload]);
 
-  // 플러그인 상태 계산
   const rowsByState = useMemo(() => {
     const loadedIds = new Set(loaded.map((p) => p.id));
     return installed.map((m) => {
-      const userEnabled = pluginsSettings?.[m.id]?.enabled !== false; // 기본 true
+      const userEnabled = pluginsSettings?.[m.id]?.enabled !== false;
       const isLoaded = loadedIds.has(m.id);
       let state;
       if (isLoaded) state = 'loaded';
       else if (!userEnabled) state = 'user-disabled';
-      else state = 'entitlement';  // entitlement 없음 (또는 에러)
+      else state = 'entitlement';
       return { ...m, userEnabled, state };
     });
   }, [installed, loaded, pluginsSettings]);
@@ -70,6 +63,8 @@ export default function PluginsView() {
       window.dispatchEvent(new Event('settings-changed'));
     }
   }, []);
+
+  const detailPlugin = detailOf ? installed.find((p) => p.id === detailOf) : null;
 
   return (
     <div className="plugins-view">
@@ -121,6 +116,7 @@ export default function PluginsView() {
                   <th>권한</th>
                   <th>상태</th>
                   <th>활성화</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -150,18 +146,29 @@ export default function PluginsView() {
                         <span className="plugins-toggle__slider" />
                       </label>
                     </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--xs"
+                        onClick={() => setDetailOf(p.id)}
+                      >
+                        상세
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
         </section>
-
-        {/* 플러그인별 고유 설정 — 로드된 플러그인 중 settingsSchema 있는 것만 */}
-        {loaded.filter((p) => p.settingsSchema && p.settingsSchema.length > 0).map((p) => (
-          <PluginSettingsSection key={p.id} plugin={p} />
-        ))}
       </div>
+
+      {detailPlugin && (
+        <PluginDetailModal
+          plugin={detailPlugin}
+          onClose={() => setDetailOf(null)}
+        />
+      )}
     </div>
   );
 }
@@ -175,7 +182,11 @@ function Stat({ label, value }) {
   );
 }
 
-function PluginSettingsSection({ plugin }) {
+/**
+ * 플러그인 상세 모달 — 설명 + 개별 설정 폼 + 저장/닫기.
+ * 설정 폼은 manifest.settingsSchema 기반 자동 렌더.
+ */
+function PluginDetailModal({ plugin, onClose }) {
   const [values, setValues] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -188,7 +199,7 @@ function PluginSettingsSection({ plugin }) {
       if (cancelled) return;
       const all = res?.settings || {};
       const mine = (all.plugins && all.plugins[plugin.id]) || {};
-      // 'enabled' 는 토글이 관리하므로 폼 값에서 제외
+      // 'enabled' 은 목록의 스위치로 관리하므로 폼에서 제외
       const { enabled, ...rest } = mine;
       setValues(rest);
       setLoaded(true);
@@ -210,7 +221,6 @@ function PluginSettingsSection({ plugin }) {
       const curSettings = cur?.settings || {};
       const curPlugins = curSettings.plugins || {};
       const existing = curPlugins[plugin.id] || {};
-      // 기존 enabled 보존 + 나머지 필드 갱신
       const nextForPlugin = { ...existing, ...values };
       const res = await api.saveSettings({
         schemaVersion: cur?.schemaVersion || 1,
@@ -223,37 +233,83 @@ function PluginSettingsSection({ plugin }) {
       setStatus(`저장 실패: ${err.message}`);
     } finally {
       setSaving(false);
-      setTimeout(() => setStatus(''), 3000);
+      setTimeout(() => setStatus(''), 2500);
     }
   }, [plugin.id, values]);
 
-  if (!loaded) return null;
+  const schema = Array.isArray(plugin.settingsSchema) ? plugin.settingsSchema : [];
 
   return (
-    <section className="plugins-view__section">
-      <h3 className="plugins-view__section-title">{plugin.name} 설정</h3>
-      <div className="plugin-settings">
-        {plugin.settingsSchema.map((field) => (
-          <PluginSettingField
-            key={field.key}
-            field={field}
-            value={values[field.key]}
-            onChange={handleChange}
-          />
-        ))}
-        <div className="plugin-settings__actions">
+    <div className="plugin-detail-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="plugin-detail-overlay__card" onClick={(e) => e.stopPropagation()}>
+        <header className="plugin-detail-overlay__header">
+          <div>
+            <h3 className="plugin-detail-overlay__title">
+              {plugin.name}
+              <span className="plugin-detail-overlay__id"><code>{plugin.id}</code></span>
+              <span className="plugin-detail-overlay__version">v{plugin.version}</span>
+            </h3>
+            {plugin.entitlement && (
+              <div className="plugin-detail-overlay__ent">
+                권한: <code>{plugin.entitlement}</code>
+              </div>
+            )}
+          </div>
+          <button type="button" className="plugin-detail-overlay__close" onClick={onClose}>×</button>
+        </header>
+
+        <div className="plugin-detail-overlay__body">
+          {plugin.description && (
+            <section className="plugin-detail-overlay__desc">
+              {plugin.description}
+            </section>
+          )}
+
+          <section className="plugin-detail-overlay__settings">
+            <div className="plugin-detail-overlay__section-title">설정</div>
+            {schema.length === 0 ? (
+              <p className="plugins-muted">이 플러그인은 설정 항목이 없습니다.</p>
+            ) : !loaded ? (
+              <p className="plugins-muted">불러오는 중…</p>
+            ) : (
+              <div className="plugin-settings">
+                {schema.map((field) => (
+                  <PluginSettingField
+                    key={field.key}
+                    field={field}
+                    value={values[field.key]}
+                    onChange={handleChange}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <footer className="plugin-detail-overlay__footer">
+          {status && <span className="plugin-settings__status">{status}</span>}
+          <div className="plugin-detail-overlay__footer-spacer" />
           <button
             type="button"
-            className="btn btn--primary btn--sm"
-            onClick={handleSave}
+            className="btn btn--secondary btn--sm"
+            onClick={onClose}
             disabled={saving}
           >
-            💾 {saving ? '저장 중...' : '저장'}
+            닫기
           </button>
-          {status && <span className="plugin-settings__status">{status}</span>}
-        </div>
+          {schema.length > 0 && (
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={handleSave}
+              disabled={saving || !loaded}
+            >
+              💾 {saving ? '저장 중...' : '저장'}
+            </button>
+          )}
+        </footer>
       </div>
-    </section>
+    </div>
   );
 }
 

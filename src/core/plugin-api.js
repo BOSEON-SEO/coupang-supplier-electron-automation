@@ -82,6 +82,8 @@
  *   UI 표시용 이름. 예: 'TBNWS'.
  * @property {string} version
  *   SemVer. 예: '1.0.0'.
+ * @property {string} [description]
+ *   플러그인 상세 설명. 🔌 플러그인 메뉴의 상세 모달에 표시.
  * @property {string} [entitlement]
  *   로딩에 필요한 entitlement 플래그. 없으면 entitlements 무관하게 로드.
  *   예: 'tbnws.plugin'. 라이선스 서버 미연결 시 (개발 모드) 는 무시.
