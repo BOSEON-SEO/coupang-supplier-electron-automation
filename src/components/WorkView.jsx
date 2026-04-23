@@ -48,6 +48,50 @@ const SESSION_STATUS = {
   ERROR: 'error',
 };
 
+// transport.json + manifest.shipmentHistory 를 합쳐 쉽먼트 진행 상태를 계산.
+// shipment_register.py 의 _load_shipment_entries 와 동일 필터 (skuBoxes 에 유효 박스 1개 이상).
+async function loadShipmentProgress(api, job) {
+  if (!api || !job) return null;
+  try {
+    const tres = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'transport.json');
+    if (!tres?.success) return null;
+    if (!(await api.fileExists(tres.path))) return null;
+    const tread = await api.readFile(tres.path);
+    if (!tread?.success) return null;
+    const transport = JSON.parse(new TextDecoder('utf-8').decode(tread.data));
+
+    const all = [];
+    const assignments = transport?.assignments || {};
+    for (const [center, a] of Object.entries(assignments)) {
+      if (!a || a.transportType !== '쉽먼트') continue;
+      const skuBoxes = a.skuBoxes || {};
+      let hasValid = false;
+      for (const boxAssigns of Object.values(skuBoxes)) {
+        if (!Array.isArray(boxAssigns) || !boxAssigns.length) continue;
+        for (const b of boxAssigns) {
+          const boxNum = parseInt(String(b?.boxNo ?? '').trim() || '0', 10);
+          const qty = parseInt(b?.qty ?? 0, 10);
+          if (boxNum > 0 && qty > 0) { hasValid = true; break; }
+        }
+        if (hasValid) break;
+      }
+      if (hasValid) all.push(center);
+    }
+
+    const mres = await api.jobs?.loadManifest?.(job.date, job.vendor, job.sequence);
+    const manifest = mres?.success ? (mres.manifest || {}) : {};
+    const hist = Array.isArray(manifest.shipmentHistory) ? manifest.shipmentHistory : [];
+    const done = new Set(
+      hist.map((h) => String(h?.center || '').trim()).filter(Boolean)
+    );
+    const pending = all.filter((c) => !done.has(c));
+    return { allCenters: all, doneCenters: Array.from(done), pendingCenters: pending };
+  } catch (err) {
+    console.warn('[shipment-progress] 계산 실패:', err);
+    return null;
+  }
+}
+
 export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   // ── 스프레드시트 데이터 ──
   const [xlsxBuffer, setXlsxBuffer] = useState(null);
@@ -1317,13 +1361,23 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     if (sendTime)        argsList.push('--send-time', sendTime);
     if (invoices)        argsList.push('--invoices', invoices);
 
+    // 진행 상태 계산 — 모달의 "n/N · 다음: X" 표기에 사용
+    const progress = await loadShipmentProgress(api, job);
+    const total = progress ? progress.allCenters.length : null;
+    const remaining = progress ? progress.pendingCenters.length : null;
+    // 이번에 처리할 센터 = pendingCenters[0], 그 다음 = pendingCenters[1]
+    const currentIndex = (total != null && remaining != null) ? (total - remaining + 1) : null;
+    const nextCenter = (progress && progress.pendingCenters.length > 1)
+      ? progress.pendingCenters[1] : null;
+
     const res = await api.runPython('scripts/shipment_register.py', argsList);
     if (res.success) {
       setPythonRunning(true);
       // 실행 시작과 동시에 오버레이 — 스크립트 종료 시 center/skuFilled 등
-      // 결과 메타가 오면 done 이벤트에서 덮어씌워짐.
+      // 결과 메타가 오면 done 이벤트에서 덮어씌워짐. progress 필드는 보존.
       setAskShipmentConfirm({
         center: null, boxCount: null, skuFilled: null, skuTotal: null,
+        progressIndex: currentIndex, progressTotal: total, nextCenter,
       });
     } else {
       appendLog('error', `쉽먼트 접수 실행 실패: ${res.error}`);
@@ -1856,12 +1910,26 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
                 <>
                   <br />
                   대상 센터: <b>{askShipmentConfirm.center}</b>
+                  {askShipmentConfirm.progressIndex && askShipmentConfirm.progressTotal && (
+                    <> · 진행 {askShipmentConfirm.progressIndex}/{askShipmentConfirm.progressTotal}</>
+                  )}
                   {askShipmentConfirm.boxCount != null && <> · 박스 {askShipmentConfirm.boxCount}</>}
                   {askShipmentConfirm.skuFilled != null && askShipmentConfirm.skuTotal != null && (
                     <> · SKU {askShipmentConfirm.skuFilled}/{askShipmentConfirm.skuTotal}</>
                   )}
                 </>
               )}
+              {askShipmentConfirm.nextCenter ? (
+                <>
+                  <br />
+                  ▶ 다음 센터: <b>{askShipmentConfirm.nextCenter}</b> (기록 후 자동 시작)
+                </>
+              ) : (askShipmentConfirm.progressTotal != null && askShipmentConfirm.progressTotal > 1) ? (
+                <>
+                  <br />
+                  🎉 마지막 센터입니다.
+                </>
+              ) : null}
               <br />
               쉽먼트는 센터마다 1회 — 기록은 <code>manifest.shipmentHistory</code> 에 timestamp·center 로 누적됩니다.
             </p>
@@ -1877,8 +1945,20 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
                 type="button"
                 className="btn btn--primary"
                 onClick={async () => {
-                  await handleRecordShipment(askShipmentConfirm?.center || null);
+                  const recordedCenter = askShipmentConfirm?.center || null;
+                  await handleRecordShipment(recordedCenter);
                   setAskShipmentConfirm(null);
+                  // 다음 pending 이 있으면 자동으로 다음 센터 처리.
+                  // 사람의 "예" 클릭이 다음 게이트의 트리거 — 자동 순회 아님.
+                  const next = await loadShipmentProgress(window.electronAPI, job);
+                  if (next && next.pendingCenters.length > 0) {
+                    appendLog(
+                      'info',
+                      `[쉽먼트 자동 진행] 다음 센터: ${next.pendingCenters[0]} `
+                      + `(남은 ${next.pendingCenters.length}개)`,
+                    );
+                    handleShipmentRegister();
+                  }
                 }}
               >
                 ✅ 예, 기록합니다
