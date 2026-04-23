@@ -108,9 +108,12 @@ function SlotButton({ cmd, args, ctx, className }) {
     }
   };
   const variant = cmd.variant || 'secondary';
+  // 기본 사이즈 sm (툴바·탭 액션 대부분). command 에 size: 'md' 로 오버라이드 가능.
+  const size = cmd.size || 'sm';
   const classes = [
     'btn',
     `btn--${variant}`,
+    size ? `btn--${size}` : '',
     'slot-btn',
     busy ? 'is-busy' : '',
     className || '',

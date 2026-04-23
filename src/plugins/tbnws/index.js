@@ -176,6 +176,12 @@ const manifest = {
       type: 'password',
       description: 'Bearer 토큰 또는 세션 쿠키 값. 백엔드 관리자에게 문의.',
     },
+    // 이플렉스 반출 수령 정보 (admin 프론트와 동일 default)
+    { key: 'eflexReceiverName', label: '이플렉스 반출 수령자명', type: 'text', default: '투비네트웍스글로벌' },
+    { key: 'eflexPhone',        label: '이플렉스 반출 연락처',   type: 'text', default: '010-5011-1337' },
+    { key: 'eflexZipCode',      label: '이플렉스 반출 우편번호', type: 'text', default: '17040' },
+    { key: 'eflexAddress',      label: '이플렉스 반출 주소',     type: 'text', default: '경기 용인시 처인구 포곡읍 성산로 434' },
+    { key: 'eflexRemark',       label: '이플렉스 반출 비고',     type: 'text', default: '쿠팡 입고 반출' },
   ],
 
   activate(ctx) {

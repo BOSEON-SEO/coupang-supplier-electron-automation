@@ -241,9 +241,16 @@ module.exports = {
     /**
      * 이플렉스 출고 요청 — POST /api/coupang/coupangList/inbound/eflexOutbound
      *
-     * payload: { workSeq: number, items: Array<{ coupangOrderSeq, productCode,
-     *   skuId, skuName, skuBarcode, logisticsCenter, orderQuantity,
-     *   fulfillmentStock, exportQuantity }> }
+     * 백엔드 CoupangEflexOutboundRequest DTO:
+     *   { work_seq: int, orders: [Order...] }
+     *   Order { receiverName, phone, zipCode, address, remark, refOrdNo?, items: [Item...] }
+     *   Item  { productCode, eflexProductCode, ea }
+     *
+     * 현재는 1개 order 로 모든 items 묶음. receiver 정보는 설정값 사용
+     * (default 는 admin 프론트와 동일). refOrdNo 미전송 → 백엔드가 yyMMdd-NNNN 자동 채번.
+     *
+     * 렌더러 payload: { workSeq, items: Array<{productCode, eflexProductCode, ea}>,
+     *                   jobMeta?: { date, vendor } }
      */
     disposables.push(
       registrar.handle('eflex.submitOutbound', async (_event, payload) => {
@@ -257,8 +264,30 @@ module.exports = {
         if (!Array.isArray(payload?.items) || payload.items.length === 0) {
           return { success: false, error: 'items 가 비어있습니다.' };
         }
+
+        const receiver = {
+          receiverName: settings.eflexReceiverName || '투비네트웍스글로벌',
+          phone:        settings.eflexPhone        || '010-5011-1337',
+          zipCode:      settings.eflexZipCode      || '17040',
+          address:      settings.eflexAddress      || '경기 용인시 처인구 포곡읍 성산로 434',
+          remark:       settings.eflexRemark       || '쿠팡 입고 반출',
+        };
+
+        const reqBody = {
+          work_seq: Number(payload.workSeq),
+          orders: [{
+            ...receiver,
+            // refOrdNo 는 보내지 않음 — 백엔드가 yyMMdd-NNNN 자동 채번
+            items: payload.items.map((it) => ({
+              productCode:      String(it.productCode ?? '').trim(),
+              eflexProductCode: String(it.eflexProductCode ?? '').trim(),
+              ea:               Number(it.ea) || 0,
+            })),
+          }],
+        };
+
         const url = apiUrl(settings, '/coupang/coupangList/inbound/eflexOutbound');
-        const body = Buffer.from(JSON.stringify(payload), 'utf-8');
+        const body = Buffer.from(JSON.stringify(reqBody), 'utf-8');
         try {
           const res = await request(url, {
             method: 'POST',

@@ -10,9 +10,15 @@ import * as XLSX from 'xlsx';
  *   - 반출수량 > 0
  *
  * submit: POST /api/coupang/coupangList/inbound/eflexOutbound
- *   body: { workSeq, items: [{ coupangOrderSeq, productCode, skuId, skuName,
- *                             skuBarcode, logisticsCenter, orderQuantity,
- *                             fulfillmentStock, exportQuantity }] }
+ *   body (백엔드 CoupangEflexOutboundRequest DTO 에 맞춤):
+ *   {
+ *     work_seq: number,
+ *     orders: [{
+ *       receiverName, phone, zipCode, address, remark,
+ *       refOrdNo?,                        // null 이면 백엔드가 yyMMdd-NNNN 자동 채번
+ *       items: [{ productCode, eflexProductCode, ea }]
+ *     }]
+ *   }
  */
 export default function EflexOutboundModal({ job, onClose }) {
   const [rows, setRows] = useState(null);   // null=loading, [] or array
@@ -89,11 +95,24 @@ export default function EflexOutboundModal({ job, onClose }) {
     }
     setSending(true);
     try {
+      // 백엔드 CoupangEflexOutboundRequest.Item 스키마:
+      //   productCode     : 제조사 상품코드 (내부 추적용)
+      //   eflexProductCode: eFlexs 상품코드 (G-XXXXX 또는 cj_code)
+      //   ea              : 수량
+      // po-tbnws 에는 제조사 상품코드 별도 필드가 없어 둘 다 tobe_product_code 로 전송.
+      // 백엔드가 G-코드로 일괄 조회하여 CJ 코드 매핑 수행.
+      const items = rows.map((r) => ({
+        productCode: r.productCode,
+        eflexProductCode: r.productCode,
+        ea: r.exportQuantity,
+      }));
       const res = await window.electronAPI.invokePluginChannel(
-        'tbnws', 'eflex.submitOutbound', { workSeq, items: rows },
+        'tbnws', 'eflex.submitOutbound',
+        { workSeq, items, jobMeta: { date: job.date, vendor: job.vendor } },
       );
       if (res?.success) {
-        alert(`이플렉스 출고 요청 완료 — ${rows.length}건`);
+        const count = res.data?.count ?? rows.length;
+        alert(`이플렉스 출고 요청 완료 — ${count}건`);
         onClose();
       } else {
         alert(`실패: ${res?.error || 'unknown'}`);
