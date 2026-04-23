@@ -279,12 +279,22 @@ const manifest = {
         tabVariant: 'tbnws',
         handler: () => {},
         onSave: async (buffer, { job, electronAPI }) => {
-          // 1) 편집된 po-tbnws.xlsx 자체를 먼저 디스크에 저장 (탭 닫아도 편집 보존)
+          // 1) 편집된 po-tbnws.xlsx 저장 전에 applyPoStyle 로 스타일 재적용.
+          //    FortuneSheet ↔ xlsx 왕복 시 스타일 정보가 유실되는 것을 방어.
+          let styledBuffer = buffer;
+          try {
+            const ab = buffer instanceof ArrayBuffer
+              ? buffer
+              : (buffer?.buffer ? buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) : buffer);
+            styledBuffer = await applyPoStyle(ab);
+          } catch (err) {
+            console.warn('[tbnws] applyPoStyle 실패 — 원본 buffer 로 저장', err);
+          }
           const tbnwsResolved = await electronAPI.resolveJobPath(
             job.date, job.vendor, job.sequence, 'po-tbnws.xlsx',
           );
           if (tbnwsResolved?.success) {
-            await electronAPI.writeFile(tbnwsResolved.path, buffer);
+            await electronAPI.writeFile(tbnwsResolved.path, styledBuffer);
           }
 
           // 2) 편집된 buffer 에서 patches 추출
@@ -333,9 +343,11 @@ const manifest = {
             });
           }
 
-          // 3) 세 파일 동시 sync (po.xlsx / po-tbnws.xlsx / confirmation.xlsx)
+          // 3) 세 파일 동시 sync. 단 po-tbnws.xlsx 는 방금 우리가 직접 썼으므로 제외
+          //    (이중 write 로 인한 스타일 손실/구조 손상 방지).
           const res = await electronAPI.confirmedQty.sync(
             job.date, job.vendor, job.sequence, patches,
+            { excludeFiles: ['po-tbnws.xlsx'] },
           );
           if (!res?.success) {
             throw new Error(res?.error || '확정수량 sync 실패');

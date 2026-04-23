@@ -242,19 +242,46 @@ export default function TbnwsStockAdjustView({
     return grouped.filter((g) => activeFilters.has(g.status));
   }, [grouped, activeFilters]);
 
-  const handleSave = () => {
-    const patches = [];
+  const handleSave = async () => {
+    const patches = [];          // 출고수량 (confirmed_qty) — 기존 stockAdjust.save 경로
+    const fulfillPatches = [];   // 반출수량 (fulfillment_export_qty) — po-tbnws 만 patch
     for (const g of grouped) {
       for (const r of g.rows) {
         if (r.rowIndex == null) continue;
+        // 출고수량
         const cur = getQty(r.rowIndex);
         const n = Number(cur);
-        if (!Number.isFinite(n) || n < 0) continue;
-        if (String(n) !== String(r.requested_qty)) {
+        if (Number.isFinite(n) && n >= 0 && String(n) !== String(r.requested_qty)) {
           patches.push({ rowIndex: r.rowIndex, confirmed_qty: n });
+        }
+        // 반출수량 — 변경분만 po-tbnws.xlsx 에 반영
+        const fulfill = getFulfill(r.rowIndex);
+        const fn = Number(fulfill);
+        if (Number.isFinite(fn) && fn >= 0 && String(fn) !== String(r.fulfillment_export_qty ?? 0)) {
+          fulfillPatches.push({
+            key: `${r.coupang_order_seq}|${r.departure_warehouse}|${r.sku_barcode}`,
+            value: fn,
+          });
         }
       }
     }
+
+    // 반출수량 patch 먼저 (po-tbnws 만 영향). 실패해도 출고수량 경로는 계속.
+    if (fulfillPatches.length > 0) {
+      try {
+        const api = window.electronAPI;
+        if (api?.poTbnws?.patchFulfillExport) {
+          const res = await api.poTbnws.patchFulfillExport(date, vendor, sequence, fulfillPatches);
+          if (!res?.success && !res?.skipped) {
+            console.warn('[tbnws] 반출수량 patch 실패:', res?.error);
+          }
+        }
+      } catch (err) {
+        console.warn('[tbnws] 반출수량 patch 예외', err);
+      }
+    }
+
+    // 출고수량은 기존 경로로 (상위 StockAdjustApp → stockAdjust.save → sync)
     onSave?.(patches);
   };
 

@@ -1834,9 +1834,13 @@ function registerIpcHandlers({
   /**
    * 세 파일(po.xlsx / po-tbnws.xlsx / confirmation.xlsx) 에 동시에 확정수량 patch.
    * 파일 없으면 skip, 있으면 patch + 이벤트 broadcast.
+   *
+   * opts.excludeFiles: 특정 파일을 skip. "방금 직접 쓴 파일" 은 제외해서
+   * sheetJS ↔ ExcelJS 이중 write 로 인한 스타일 손실·구조 손상을 방지.
    */
-  async function syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches) {
+  async function syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches, opts = {}) {
     const dir = jobDir(dataDir, date, vendor, sequence);
+    const exclude = new Set(Array.isArray(opts.excludeFiles) ? opts.excludeFiles : []);
     const targets = [
       { file: 'po.xlsx',           path: path.join(dir, 'po.xlsx'),           sheetName: null },
       { file: 'po-tbnws.xlsx',     path: path.join(dir, 'po-tbnws.xlsx'),     sheetName: null },
@@ -1844,6 +1848,10 @@ function registerIpcHandlers({
     ];
     const results = {};
     for (const t of targets) {
+      if (exclude.has(t.file)) {
+        results[t.file] = { success: true, skipped: true, excluded: true, patched: 0 };
+        continue;
+      }
       try {
         const r = await patchConfirmedQtyInFile(t.path, patches, { sheetName: t.sheetName });
         results[t.file] = r;
@@ -1916,14 +1924,86 @@ function registerIpcHandlers({
    * 한 저장 경로에서 한 번만 호출하면 나머지 파일들이 동기화됨.
    * 각 파일마다 'job:file-updated' 이벤트를 발송 → 렌더러가 자동 재로드.
    */
-  ipcMain.handle('confirmedQty:sync', async (_e, date, vendor, sequence, patches) => {
+  ipcMain.handle('confirmedQty:sync', async (_e, date, vendor, sequence, patches, opts) => {
     if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
       return { success: false, error: 'invalid args' };
     }
     if (!Array.isArray(patches)) {
       return { success: false, error: 'patches must be array' };
     }
-    return await syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches);
+    return await syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches, opts || {});
+  });
+
+  /**
+   * po-tbnws.xlsx 의 '반출수량' 컬럼만 복합키(발주번호|물류센터|SKU바코드) 로 patch.
+   * confirmedQty 와 별도 필드라 sync 에 포함되지 않음.
+   *
+   * patches: Array<{ key: string, value: number }>
+   */
+  async function patchFulfillExportInFile(filePath, patches) {
+    if (!fs.existsSync(filePath)) {
+      return { success: true, skipped: true, patched: 0 };
+    }
+    const byKey = new Map();
+    for (const p of patches) {
+      if (p && typeof p.key === 'string') byKey.set(p.key, p);
+    }
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(filePath);
+    const ws = wb.worksheets[0];
+    if (!ws) return { success: false, error: `시트 없음: ${path.basename(filePath)}` };
+
+    let iOrder = null;
+    let iWh = null;
+    let iBarcode = null;
+    let iExport = null;
+    ws.getRow(1).eachCell((cell, col) => {
+      const v = String(cell.value ?? '').trim();
+      if (v === '발주번호' || v === '주문번호') iOrder = col;
+      else if (v === '물류센터') iWh = col;
+      else if (v === '상품바코드' || v === 'SKU Barcode' || v === 'SKU Barcode ' || v === 'SKU 바코드') iBarcode = col;
+      else if (v === '반출수량') iExport = col;
+    });
+    if (!iOrder || !iWh || !iBarcode || !iExport) {
+      return { success: false, error: `반출수량 관련 컬럼 못 찾음: ${path.basename(filePath)}` };
+    }
+
+    const last = ws.actualRowCount || ws.rowCount;
+    let patched = 0;
+    for (let r = 2; r <= last; r += 1) {
+      const order = String(ws.getCell(r, iOrder).value ?? '').trim();
+      const wh = String(ws.getCell(r, iWh).value ?? '').trim();
+      const barcode = String(ws.getCell(r, iBarcode).value ?? '').trim();
+      if (!order || !wh || !barcode) continue;
+      const key = `${order}|${wh}|${barcode}`;
+      const p = byKey.get(key);
+      if (!p) continue;
+      ws.getCell(r, iExport).value = Number(p.value) || 0;
+      patched += 1;
+    }
+    if (patched > 0) await wb.xlsx.writeFile(filePath);
+    return { success: true, patched };
+  }
+
+  ipcMain.handle('poTbnws:patchFulfillExport', async (_e, date, vendor, sequence, patches) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!Array.isArray(patches)) {
+      return { success: false, error: 'patches must be array' };
+    }
+    const target = path.join(jobDir(dataDir, date, vendor, sequence), 'po-tbnws.xlsx');
+    try {
+      const res = await patchFulfillExportInFile(target, patches);
+      if (res.success && !res.skipped && (res.patched || 0) > 0) {
+        broadcastFileUpdated({
+          date, vendor, sequence, file: 'po-tbnws.xlsx', patched: res.patched,
+        });
+      }
+      return res;
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 }
 

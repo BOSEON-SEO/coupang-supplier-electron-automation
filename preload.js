@@ -76,10 +76,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 확정수량 Cross-Sync (po.xlsx / po-tbnws.xlsx / confirmation.xlsx 동기화) ──
   //   patches: [{ key: '발주번호|물류센터|SKU바코드', confirmedQty, shortageReason? }]
+  //   opts.excludeFiles: 특정 파일 skip ("방금 직접 쓴 파일" 이중 write 회피)
   //   각 파일 존재 시에만 patch. 성공 시 'job:file-updated' 이벤트 자동 broadcast.
   confirmedQty: {
-    sync: (date, vendor, sequence, patches) =>
-      ipcRenderer.invoke('confirmedQty:sync', date, vendor, sequence, patches),
+    sync: (date, vendor, sequence, patches, opts) =>
+      ipcRenderer.invoke('confirmedQty:sync', date, vendor, sequence, patches, opts),
+  },
+
+  // ── po-tbnws.xlsx 의 반출수량 컬럼 patch (복합키 기반) ──
+  poTbnws: {
+    patchFulfillExport: (date, vendor, sequence, patches) =>
+      ipcRenderer.invoke('poTbnws:patchFulfillExport', date, vendor, sequence, patches),
   },
 
   // ── 작업 파일 갱신 이벤트 (confirmation/po/po-tbnws 등 자동 재로드용) ──
