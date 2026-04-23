@@ -14,6 +14,7 @@
 import React from 'react';
 import * as XLSX from 'xlsx';
 import { KNOWN_SCOPES, KNOWN_HOOKS, KNOWN_VIEW_ROLES } from '../../core/plugin-api';
+import { applyPoStyle } from '../../core/poStyler';
 
 // ═══════════════════════════════════════════════════════════════════
 // 17컬럼 정의 — 어드민 프론트의 CoupangCheckModal 과 동일 순서·라벨
@@ -309,9 +310,14 @@ const manifest = {
             }
           }
 
-          // 응답 → 17컬럼 엑셀 빌드 + 저장
+          // 응답 → 18컬럼 엑셀 빌드 → PO 원본과 동일 스타일 적용
           const aoa = buildAoa(data);
-          const outBuffer = buildWorkbookBuffer(aoa);
+          const raw = buildWorkbookBuffer(aoa);
+          // XLSX.write('array') → Uint8Array | ArrayBuffer. applyPoStyle 은 ArrayBuffer 전제.
+          const ab = raw.buffer
+            ? raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
+            : raw;
+          const outBuffer = await applyPoStyle(ab);
           const resolved = await ctx.electronAPI.resolveJobPath(
             job.date, job.vendor, job.sequence, 'po-tbnws.xlsx',
           );
