@@ -89,6 +89,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('poTbnws:patchFulfillExport', date, vendor, sequence, patches),
   },
 
+  // ── 이플렉스 반출신청 엑셀 저장 + manifest.eflexHistory 기록 ──
+  eflex: {
+    recordOutbound: (date, vendor, sequence, payload) =>
+      ipcRenderer.invoke('eflex:recordOutbound', date, vendor, sequence, payload),
+  },
+
   // ── 작업 파일 갱신 이벤트 (confirmation/po/po-tbnws 등 자동 재로드용) ──
   //   renderer 가 해당 job·파일명 매칭되는 이벤트 받으면 현재 열린 탭 갱신.
   onJobFileUpdated: (callback) => {

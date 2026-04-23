@@ -269,7 +269,7 @@ export default function ResultView({
     else onDownloadShipmentDocs?.();
   }, [job, milkrunDocs, shipmentDocs, onDownloadMilkrunDocs, onDownloadShipmentDocs]);
 
-  // ── 업로드·밀크런·쉽먼트 이력을 단일 타임라인으로 병합 ──
+  // ── 업로드·밀크런·쉽먼트·이플렉스 이력을 단일 타임라인으로 병합 ──
   const mergedHistory = useMemo(() => {
     const items = [];
     if (Array.isArray(job?.uploadHistory)) {
@@ -281,6 +281,9 @@ export default function ResultView({
     if (Array.isArray(job?.shipmentHistory)) {
       for (const h of job.shipmentHistory) items.push({ type: '쉽먼트', ...h });
     }
+    if (Array.isArray(job?.eflexHistory)) {
+      for (const h of job.eflexHistory) items.push({ type: '이플렉스', ...h });
+    }
     items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     return items;
   }, [job]);
@@ -289,6 +292,7 @@ export default function ResultView({
     if (t === '발주확정') return 'result-type-badge result-type-badge--upload';
     if (t === '밀크런')   return 'result-type-badge result-type-badge--milkrun';
     if (t === '쉽먼트')   return 'result-type-badge result-type-badge--shipment';
+    if (t === '이플렉스') return 'result-type-badge result-type-badge--eflex';
     return 'result-type-badge';
   };
 

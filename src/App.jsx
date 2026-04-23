@@ -26,6 +26,19 @@ export default function App() {
   const activeJobRef = useRef(null);
   useEffect(() => { activeJobRef.current = activeJob; }, [activeJob]);
 
+  // 외부에서 manifest 가 갱신됐을 때 (예: 플러그인이 history 추가) 재로드 요청
+  useEffect(() => {
+    const onReload = async () => {
+      const j = activeJobRef.current;
+      if (!j) return;
+      const api = window.electronAPI;
+      const res = await api?.jobs?.loadManifest?.(j.date, j.vendor, j.sequence);
+      if (res?.success && res.manifest) setActiveJob(res.manifest);
+    };
+    window.addEventListener('job:reload', onReload);
+    return () => window.removeEventListener('job:reload', onReload);
+  }, []);
+
   // 작업 패널 토글 — 항상 닫힌 채로 시작
   const [workOpen, setWorkOpen] = useState(false);
 

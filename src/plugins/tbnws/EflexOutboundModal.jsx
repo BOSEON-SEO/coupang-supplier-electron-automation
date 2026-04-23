@@ -94,22 +94,27 @@ export default function EflexOutboundModal({ job, onClose }) {
       //   ea              : 수량
       // admin 프론트와 동일하게 productCode 별 그룹핑 + ea 합산.
       // 같은 상품이 여러 발주·물류센터에 걸쳐 있어도 한 item 으로 합쳐짐.
-      const itemsByCode = new Map();
+      const groupMap = new Map();
       for (const r of rows) {
         const code = r.productCode;
         if (!code) continue;
-        const prev = itemsByCode.get(code);
+        const prev = groupMap.get(code);
         if (prev) {
           prev.ea += r.exportQuantity;
         } else {
-          itemsByCode.set(code, {
+          groupMap.set(code, {
             productCode: code,
             eflexProductCode: code,
+            productName: r.skuName || '',
             ea: r.exportQuantity,
           });
         }
       }
-      const items = Array.from(itemsByCode.values());
+      const items = Array.from(groupMap.values()).map((g) => ({
+        productCode: g.productCode,
+        eflexProductCode: g.eflexProductCode,
+        ea: g.ea,
+      }));
       const res = await window.electronAPI.invokePluginChannel(
         'tbnws', 'eflex.submitOutbound',
         {
@@ -118,13 +123,42 @@ export default function EflexOutboundModal({ job, onClose }) {
           jobMeta: { date: job.date, vendor: job.vendor, sequence: job.sequence },
         },
       );
+      // refOrdNo 재계산 (서버 응답의 body 에서 추출 또는 동일 로직으로 계산)
+      const ymd = String(job.date || '').replace(/-/g, '').slice(0, 8);
+      const v = String(job.vendor || '').toLowerCase();
+      const vendorCode = v === 'coupang' ? '001' : v === 'canon' ? '002' : '000';
+      const roundPart = String(job.sequence ?? 1).padStart(2, '0');
+      const refOrdNo = ymd ? `${ymd}${vendorCode}${roundPart}` : null;
+
+      // 엑셀 파일 생성 + 이력 기록 — 테스트/실전송 관계없이 항상 수행
+      const excelRows = Array.from(groupMap.values());
+      try {
+        const rec = await window.electronAPI.eflex.recordOutbound(
+          job.date, job.vendor, job.sequence,
+          {
+            rows: excelRows,
+            refOrdNo,
+            testMode: !!res?.testMode,
+          },
+        );
+        if (!rec?.success) {
+          console.warn('[tbnws] 이플렉스 엑셀 기록 실패:', rec?.error);
+        } else if (rec?.entry) {
+          console.info('[tbnws] 이플렉스 이력 추가됨:', rec.entry.fileName);
+          // WorkView / ResultView 가 activeJob.eflexHistory 재로드하도록 알림
+          window.dispatchEvent(new Event('job:reload'));
+        }
+      } catch (err) {
+        console.warn('[tbnws] 이플렉스 엑셀 기록 예외', err);
+      }
+
       if (res?.testMode) {
-        // eslint-disable-next-line no-console
         console.info('[tbnws/eflexOutbound TEST MODE] url:', res.url, '\nbody:', res.body);
         alert(
           `[테스트 모드] 실제 전송 안 함 — 요청 body 는 DevTools Console 에 로그됨.\n\n`
           + `URL: ${res.url}\n`
-          + `items: ${items.length}건\n\n`
+          + `items: ${items.length}건\n`
+          + `엑셀 파일은 job 폴더 history/ 에 저장됨.\n\n`
           + `설정에서 '이플렉스 출고 테스트 모드' 체크 해제하면 실전송으로 전환됩니다.`,
         );
         onClose();
@@ -132,7 +166,7 @@ export default function EflexOutboundModal({ job, onClose }) {
       }
       if (res?.success) {
         const count = res.data?.count ?? rows.length;
-        alert(`이플렉스 출고 요청 완료 — ${count}건`);
+        alert(`이플렉스 출고 요청 완료 — ${count}건 (엑셀 산출물 저장됨)`);
         onClose();
       } else {
         alert(`실패: ${res?.error || 'unknown'}`);

@@ -2761,6 +2761,7 @@ button.session-badge:disabled {
 .result-type-badge--upload   { background: #fb8c00; } /* 발주확정 — 오렌지 (phase-upload 와 톤 맞춤) */
 .result-type-badge--milkrun  { background: #1976d2; } /* 밀크런 — 파랑 */
 .result-type-badge--shipment { background: #5e35b1; } /* 쉽먼트 — 보라 */
+.result-type-badge--eflex    { background: #2e7d32; } /* 이플렉스 — 녹색 */
 .result-table__col-actions {
   width: 200px;
   text-align: right;

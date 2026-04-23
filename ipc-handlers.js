@@ -1985,6 +1985,180 @@ function registerIpcHandlers({
     return { success: true, patched };
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 이플렉스 반출신청 엑셀 — admin 프론트의 exportEflexOutboundExcel 포맷 그대로
+  // ═══════════════════════════════════════════════════════════════════
+
+  const EFLEX_COLUMNS = [
+    { value: 'F/C', width: 14.25 },
+    { value: '주문유형\nB2C - 7\nB2B - 4\n반출 - 8\n기타출고 - 9', width: 14.25, wrap: true,
+      note: 'B2C - CJ대한통운\nB2B - CJ대한통운, 화물\n반출 - 화물\n기타출고 - 화물' },
+    { value: '배송처\nCJ대한통운 - 17\n화물 - 24', width: 21.375, wrap: true,
+      note: 'B2C - CJ대한통운\nB2B - CJ대한통운, 화물\n반출 - 화물\n기타출고 - 화물' },
+    { value: '고객ID', width: 14.25 },
+    { value: '판매채널', width: 14.25 },
+    { value: '묶음배송번호', width: 14.25, note: '반출 데이터시 불필요' },
+    { value: '품목코드', width: 16.75 },
+    { value: '품목명', width: 105.875 },
+    { value: '옵션', width: 14.25 },
+    { value: '가격', width: 14.25 },
+    { value: '품목수량', width: 14.25 },
+    { value: '주문자', width: 14.25 },
+    { value: '받는사람명', width: 17.25 },
+    { value: '주문자 전화번호', width: 14.25 },
+    { value: '받는사람 전화번호', width: 21.375 },
+    { value: '받는사람 우편번호', width: 17.125 },
+    { value: '받는사람 주소', width: 29.75 },
+    { value: '배송메세지', width: 25 },
+    { value: '주문일자', width: 21.375 },
+    { value: '상품주문번호', width: 14.25, note: '주문중개채널 NFA, SBN일 때 필수' },
+    { value: '주문번호(참조)', width: 14.25 },
+    { value: '주문중개채널(상세)', width: 18.625 },
+    { value: '박스구분\n1:극소\n2:소\n3:중\n4:대1\n5:이형\n6:이형2\n7:대2', width: 14.25, wrap: true },
+    { value: '상세배송유형\n익일 - 01\n새벽 - 02\n당일 - 03', width: 14.25, wrap: true },
+    { value: '새벽배송 SMS 전송\n07시 일괄발송 - 1\n배송완료 - 2\n미발송 - 3', width: 20, wrap: true,
+      note: '상세배송유형 새벽일 때 필수' },
+    { value: '새벽배송 현관비밀번호', width: 22.125, note: '상세배송유형 새벽일 때 필수' },
+    { value: '위험물 구분\nY - Y\nN - N', width: 14.25, wrap: true },
+    { value: '주문중개채널\nSELF - 수기\nEXCEL - EXCEL등록\nNFA - 네이버\nSBN - 사방넷', width: 20.125, wrap: true },
+    { value: 'API 연동용 판매자ID', width: 20, note: '주문중개채널 NFA, SBN일 때 필수' },
+    { value: '주문시간', width: 14.25 },
+    { value: '받는사람 핸드폰', width: 21.375 },
+  ];
+  const EFLEX_REQUIRED_DATA_COLS = new Set([1, 2, 3, 4, 6, 7, 11, 13, 15, 16, 17, 19, 28, 30]);
+  const EFLEX_FONT = { name: '맑은 고딕', family: 3, charset: 129, scheme: 'minor' };
+  const EFLEX_HEADER_FILL = {
+    type: 'pattern', pattern: 'solid',
+    fgColor: { theme: 8, tint: 0.7999816888943144 },
+    bgColor: { indexed: 64 },
+  };
+  const EFLEX_BORDER = {
+    left:   { style: 'thin', color: { argb: 'FF000000' } },
+    right:  { style: 'thin', color: { argb: 'FF000000' } },
+    top:    { style: 'thin', color: { argb: 'FF000000' } },
+    bottom: { style: 'thin', color: { argb: 'FF000000' } },
+  };
+  const EFLEX_HEADER_ALIGN      = { horizontal: 'center', vertical: 'middle' };
+  const EFLEX_HEADER_ALIGN_WRAP = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  const EFLEX_REQUIRED_FILL     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4EC' } };
+
+  async function createEflexOutboundWorkbook({ rows, bundleId, receiver }) {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('주문등록');
+
+    for (let i = 0; i < EFLEX_COLUMNS.length; i += 1) {
+      ws.getColumn(i + 1).width = EFLEX_COLUMNS[i].width;
+    }
+
+    const headerRow = ws.getRow(1);
+    headerRow.height = 137.25;
+    for (let i = 0; i < EFLEX_COLUMNS.length; i += 1) {
+      const col = EFLEX_COLUMNS[i];
+      const cell = headerRow.getCell(i + 1);
+      cell.value = col.value;
+      cell.fill = EFLEX_HEADER_FILL;
+      cell.font = { ...EFLEX_FONT, size: 10, color: { theme: 1 } };
+      cell.alignment = col.wrap ? EFLEX_HEADER_ALIGN_WRAP : EFLEX_HEADER_ALIGN;
+      cell.border = EFLEX_BORDER;
+      if (col.note) cell.note = col.note;
+    }
+
+    const dataFont = { ...EFLEX_FONT, size: 10, color: { theme: 1 } };
+    const dataAlign = { horizontal: 'center', vertical: 'middle' };
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (const item of rows) {
+      const itemCode = item.eflexProductCode || item.productCode || '';
+      const itemName = item.productName || '';
+      const vals = [
+        'GJZ01', '7', '17', '90002863', '재고조정',
+        bundleId, itemCode, itemName, null, null,
+        Number(item.qty) || 0, null, receiver.name, null, receiver.phone,
+        receiver.zipCode, receiver.address, null, today, null,
+        null, null, null, null, null,
+        null, null, 'SELF', null, '00:00:01',
+        null,
+      ];
+      const r = ws.addRow(vals);
+      r.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.font = dataFont;
+        cell.alignment = dataAlign;
+        cell.border = EFLEX_BORDER;
+        if (EFLEX_REQUIRED_DATA_COLS.has(colNumber) && cell.value != null) {
+          cell.fill = EFLEX_REQUIRED_FILL;
+        }
+      });
+    }
+
+    return await wb.xlsx.writeBuffer();
+  }
+
+  /**
+   * eflex:recordOutbound — 이플렉스 반출 엑셀을 job/history/ 에 저장 + manifest.eflexHistory 에 엔트리.
+   *
+   * payload: { rows: [{productCode, eflexProductCode?, productName?, qty}],
+   *            refOrdNo: string,
+   *            receiver: { name, phone, zipCode, address },
+   *            testMode?: boolean }
+   */
+  ipcMain.handle('eflex:recordOutbound', async (_e, date, vendor, sequence, payload) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!Array.isArray(payload?.rows) || payload.rows.length === 0) {
+      return { success: false, error: 'rows 비어있음' };
+    }
+    try {
+      const dir = jobDir(dataDir, date, vendor, sequence);
+      const histDir = path.join(dir, 'history');
+      fs.mkdirSync(histDir, { recursive: true });
+
+      const now = new Date();
+      const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const fileName = `${ts}-eflex-outbound.xlsx`;
+      const dest = path.join(histDir, fileName);
+
+      const bundleId = payload.refOrdNo || String(Date.now()).slice(0, 11);
+      const receiver = {
+        name:    payload.receiver?.name    || '투비네트웍스글로벌',
+        phone:   payload.receiver?.phone   || '010-5011-1337',
+        zipCode: payload.receiver?.zipCode || '17040',
+        address: payload.receiver?.address || '경기 용인시 처인구 포곡읍 성산로 434',
+      };
+
+      const buf = await createEflexOutboundWorkbook({
+        rows: payload.rows, bundleId, receiver,
+      });
+      fs.writeFileSync(dest, Buffer.from(buf));
+      const size = fs.statSync(dest).size;
+
+      const cur = readManifest(dataDir, date, vendor, sequence) || {
+        schemaVersion: 1, vendor, date, sequence,
+        phase: 'po_downloaded', completed: false,
+        createdAt: now.toISOString(), stats: {},
+      };
+      const history = Array.isArray(cur.eflexHistory) ? cur.eflexHistory : [];
+      const entry = {
+        timestamp: now.toISOString(),
+        refOrdNo: payload.refOrdNo || null,
+        fileName,
+        path: dest,
+        size,
+        itemCount: payload.rows.length,
+        testMode: !!payload.testMode,
+      };
+      cur.eflexHistory = [...history, entry];
+      cur.vendor = vendor;
+      cur.date = date;
+      cur.sequence = sequence;
+      writeManifest(dataDir, cur);
+
+      return { success: true, entry, manifest: cur };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('poTbnws:patchFulfillExport', async (_e, date, vendor, sequence, patches) => {
     if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
       return { success: false, error: 'invalid args' };
