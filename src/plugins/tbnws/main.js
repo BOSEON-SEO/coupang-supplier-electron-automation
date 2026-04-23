@@ -141,7 +141,9 @@ module.exports = {
             contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           },
         ]);
-        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/api/coupang/coupangList/coupangCheckForm`;
+        // apiBaseUrl 은 설정에서 /api 까지 포함해서 입력받는다 (예: https://api.tbnws.co.kr/api).
+        // 컨트롤러 매핑은 @RequestMapping('/api/coupang') 이지만 /api 부분은 baseUrl 에 흡수.
+        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/coupang/coupangList/coupangCheckForm`;
         try {
           const res = await request(url, {
             method: 'POST',
@@ -180,7 +182,7 @@ module.exports = {
         if (!settings.apiBaseUrl) {
           return { success: false, error: 'TBNWS API Base URL 이 설정되지 않았습니다.' };
         }
-        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/api/fulfillment/product/refetch`;
+        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/fulfillment/product/refetch`;
         try {
           const res = await request(url, {
             method: 'POST',
