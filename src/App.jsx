@@ -67,16 +67,25 @@ export default function App() {
 
   // ── 플러그인 로드 ─────────────────────────────────────────
   // entitlements 는 글로벌 설정(pluginsMenuEnabled) 으로 on/off.
-  // 설정 변경 시 settings-changed 이벤트 → globalSettings 갱신 → entitlements 재계산
-  //   → bootstrapPlugins useEffect 재실행 → 플러그인 unload + load.
+  // perPluginEnabled 는 개별 플러그인 on/off (settings.plugins.<id>.enabled).
+  // 설정 변경 → globalSettings 갱신 → 재계산 → useEffect 재실행 → unload + load.
   const entitlements = useMemo(() => resolveEntitlements(globalSettings), [globalSettings]);
+  const perPluginEnabled = useMemo(() => {
+    const out = {};
+    const ps = globalSettings?.plugins || {};
+    for (const [id, conf] of Object.entries(ps)) {
+      if (conf && conf.enabled === false) out[id] = false;
+    }
+    return out;
+  }, [globalSettings]);
   useEffect(() => {
     bootstrapPlugins({
       entitlements,
       currentVendor: vendor || null,
       electronAPI: window.electronAPI,
+      perPluginEnabled,
     });
-  }, [entitlements, vendor]);
+  }, [entitlements, vendor, perPluginEnabled]);
 
   // ── Toast 알림 ─────────────────────────────────────────
   const [toasts, setToasts] = useState([]);

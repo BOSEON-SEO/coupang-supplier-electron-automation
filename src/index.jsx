@@ -37,12 +37,19 @@ function PopupShell({ children, vendor }) {
     const reload = async () => {
       const res = await window.electronAPI?.loadSettings();
       if (cancelled) return;
-      const ents = resolveEntitlements(res?.settings || {});
+      const settings = res?.settings || {};
+      const ents = resolveEntitlements(settings);
       setEntitlements(ents);
+      const perPluginEnabled = {};
+      const ps = settings?.plugins || {};
+      for (const [id, conf] of Object.entries(ps)) {
+        if (conf && conf.enabled === false) perPluginEnabled[id] = false;
+      }
       bootstrapPlugins({
         entitlements: ents,
         currentVendor: vendor || null,
         electronAPI: window.electronAPI,
+        perPluginEnabled,
       });
       setReady(true);
     };

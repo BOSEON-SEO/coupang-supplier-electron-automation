@@ -1,23 +1,75 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRegistrySnapshot, usePluginRuntime } from '../core/plugin-host';
 import { listLoadedPlugins } from '../core/plugin-registry';
+import { listInstalledManifests } from '../core/plugin-loader';
 
 /**
- * 플러그인 메뉴 — 현재 로드된 플러그인·등록된 확장 포인트 현황.
+ * 플러그인 메뉴 — 설치된 플러그인 전체 목록 + 시스템 현황 + 플러그인별 설정.
  *
- * 현재 제공:
- *   - 시스템 현황 (카운트 5종)
- *   - 런타임 컨텍스트 (벤더·entitlements)
- *   - 로드된 플러그인 목록
- *   - 플러그인별 고유 설정 (manifest.settingsSchema 기반 자동 폼)
+ * 플러그인 상태:
+ *   - 로드됨   (activated)      : manifest 발견 + entitlement 통과 + 사용자 on
+ *   - 비활성   (user-disabled)   : 사용자가 개별 토글로 off
+ *   - 권한부족 (entitlement)     : entitlement 없음 (라이선스 미보유)
  *
- * 플러그인 설정은 글로벌 settings.json 의 `plugins.<id>.<key>` 에 저장.
- * 저장 시 'settings-changed' 이벤트 dispatch 로 앱 전체 재로드.
+ * 개별 on/off 는 settings.plugins.<id>.enabled 에 저장됨 (기본 true).
+ * 토글 즉시 settings-changed 이벤트 → App/popup 이 plugins 재부트스트랩.
  */
 export default function PluginsView() {
   const counts = useRegistrySnapshot();
   const runtime = usePluginRuntime();
   const loaded = listLoadedPlugins();
+  const installed = useMemo(() => listInstalledManifests(), []);
+
+  // settings.plugins 전체 맵 (각 플러그인 설정 + enabled 플래그)
+  const [pluginsSettings, setPluginsSettings] = useState({});
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  const reload = useCallback(async () => {
+    const res = await window.electronAPI?.loadSettings();
+    const all = res?.settings || {};
+    setPluginsSettings(all.plugins || {});
+    setSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    reload();
+    const onChanged = () => reload();
+    window.addEventListener('settings-changed', onChanged);
+    return () => window.removeEventListener('settings-changed', onChanged);
+  }, [reload]);
+
+  // 플러그인 상태 계산
+  const rowsByState = useMemo(() => {
+    const loadedIds = new Set(loaded.map((p) => p.id));
+    return installed.map((m) => {
+      const userEnabled = pluginsSettings?.[m.id]?.enabled !== false; // 기본 true
+      const isLoaded = loadedIds.has(m.id);
+      let state;
+      if (isLoaded) state = 'loaded';
+      else if (!userEnabled) state = 'user-disabled';
+      else state = 'entitlement';  // entitlement 없음 (또는 에러)
+      return { ...m, userEnabled, state };
+    });
+  }, [installed, loaded, pluginsSettings]);
+
+  const handleToggle = useCallback(async (pluginId, nextEnabled) => {
+    const api = window.electronAPI;
+    if (!api) return;
+    const cur = await api.loadSettings();
+    const curSettings = cur?.settings || {};
+    const curPlugins = curSettings.plugins || {};
+    const nextPlugins = {
+      ...curPlugins,
+      [pluginId]: { ...(curPlugins[pluginId] || {}), enabled: nextEnabled },
+    };
+    const res = await api.saveSettings({
+      schemaVersion: cur?.schemaVersion || 1,
+      settings: { ...curSettings, plugins: nextPlugins },
+    });
+    if (res?.success) {
+      window.dispatchEvent(new Event('settings-changed'));
+    }
+  }, []);
 
   return (
     <div className="plugins-view">
@@ -49,16 +101,16 @@ export default function PluginsView() {
               <code className="plugins-kv__value">
                 {runtime.entitlements.length
                   ? runtime.entitlements.join(', ')
-                  : '(비어있음)'}
+                  : '(비어있음 — 마스터 토글 OFF)'}
               </code>
             </div>
           </div>
         </section>
 
         <section className="plugins-view__section">
-          <h3 className="plugins-view__section-title">로드된 플러그인</h3>
-          {loaded.length === 0 ? (
-            <p className="plugins-view__empty">활성화된 플러그인이 없습니다.</p>
+          <h3 className="plugins-view__section-title">설치된 플러그인</h3>
+          {rowsByState.length === 0 ? (
+            <p className="plugins-view__empty">설치된 플러그인이 없습니다.</p>
           ) : (
             <table className="plugins-table">
               <thead>
@@ -66,16 +118,38 @@ export default function PluginsView() {
                   <th>ID</th>
                   <th>이름</th>
                   <th>버전</th>
+                  <th>권한</th>
                   <th>상태</th>
+                  <th>활성화</th>
                 </tr>
               </thead>
               <tbody>
-                {loaded.map((p) => (
+                {rowsByState.map((p) => (
                   <tr key={p.id}>
                     <td><code>{p.id}</code></td>
                     <td>{p.name}</td>
                     <td>{p.version}</td>
-                    <td><span className="plugins-badge plugins-badge--active">활성</span></td>
+                    <td>
+                      {p.entitlement
+                        ? <code className="plugins-badge plugins-badge--ent">{p.entitlement}</code>
+                        : <span className="plugins-muted">–</span>}
+                    </td>
+                    <td>
+                      {p.state === 'loaded' && <span className="plugins-badge plugins-badge--active">로드됨</span>}
+                      {p.state === 'user-disabled' && <span className="plugins-badge plugins-badge--off">비활성</span>}
+                      {p.state === 'entitlement' && <span className="plugins-badge plugins-badge--locked">권한 부족</span>}
+                    </td>
+                    <td>
+                      <label className="plugins-toggle" title={p.userEnabled ? '클릭하여 비활성화' : '클릭하여 활성화'}>
+                        <input
+                          type="checkbox"
+                          checked={p.userEnabled}
+                          disabled={!settingsLoaded}
+                          onChange={(e) => handleToggle(p.id, e.target.checked)}
+                        />
+                        <span className="plugins-toggle__slider" />
+                      </label>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -83,19 +157,10 @@ export default function PluginsView() {
           )}
         </section>
 
-        {/* 플러그인별 고유 설정 — settingsSchema 있는 플러그인만 */}
+        {/* 플러그인별 고유 설정 — 로드된 플러그인 중 settingsSchema 있는 것만 */}
         {loaded.filter((p) => p.settingsSchema && p.settingsSchema.length > 0).map((p) => (
           <PluginSettingsSection key={p.id} plugin={p} />
         ))}
-
-        <section className="plugins-view__section plugins-view__section--muted">
-          <h3 className="plugins-view__section-title">곧 추가될 기능</h3>
-          <ul className="plugins-view__todo">
-            <li>활성화 가능한 플러그인 목록 (disk 스캔)</li>
-            <li>플러그인별 on/off 토글</li>
-            <li>라이선스 서버 상태 + 갱신</li>
-          </ul>
-        </section>
       </div>
     </div>
   );
@@ -110,17 +175,12 @@ function Stat({ label, value }) {
   );
 }
 
-/**
- * 한 플러그인의 설정 섹션. manifest.settingsSchema 를 순회해 폼 렌더.
- * 값은 settings.json 의 `plugins.<id>` 하위에 저장.
- */
 function PluginSettingsSection({ plugin }) {
   const [values, setValues] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
 
-  // 초기 로드
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -128,7 +188,9 @@ function PluginSettingsSection({ plugin }) {
       if (cancelled) return;
       const all = res?.settings || {};
       const mine = (all.plugins && all.plugins[plugin.id]) || {};
-      setValues(mine);
+      // 'enabled' 는 토글이 관리하므로 폼 값에서 제외
+      const { enabled, ...rest } = mine;
+      setValues(rest);
       setLoaded(true);
     })();
     return () => { cancelled = true; };
@@ -146,10 +208,13 @@ function PluginSettingsSection({ plugin }) {
     try {
       const cur = await api.loadSettings();
       const curSettings = cur?.settings || {};
-      const nextPlugins = { ...(curSettings.plugins || {}), [plugin.id]: values };
+      const curPlugins = curSettings.plugins || {};
+      const existing = curPlugins[plugin.id] || {};
+      // 기존 enabled 보존 + 나머지 필드 갱신
+      const nextForPlugin = { ...existing, ...values };
       const res = await api.saveSettings({
         schemaVersion: cur?.schemaVersion || 1,
-        settings: { ...curSettings, plugins: nextPlugins },
+        settings: { ...curSettings, plugins: { ...curPlugins, [plugin.id]: nextForPlugin } },
       });
       if (!res?.success) throw new Error(res?.error || 'settings save 실패');
       setStatus('저장됨');
