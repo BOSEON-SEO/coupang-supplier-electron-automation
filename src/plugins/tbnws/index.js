@@ -19,8 +19,18 @@ import { KNOWN_SCOPES, KNOWN_HOOKS } from '../../core/plugin-api';
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * @param {object} r  CoupangOrderFormCheck 한 행
- * @returns {{label: string, value: any}[]}
+ * 백엔드 export_yn → 표시용 '가능' / '불가능'.
+ * ERPService 의 UNORDERABLE_STATUSES = {N, 불가, 불가능} 과 동일 판정.
+ */
+function renderExportStatus(exportYn) {
+  const v = String(exportYn ?? '').trim();
+  if (!v) return '';
+  return (v === 'N' || v === '불가' || v === '불가능') ? '불가능' : '가능';
+}
+
+/**
+ * @param {object} r  CoupangOrderFormCheck 한 행 (백엔드 enrichStep2Defaults 적용 후)
+ * @returns {[string, any][]}
  */
 function toExtendedRow(r) {
   const orderQty = Number(r.order_quantity) || 0;
@@ -31,17 +41,6 @@ function toExtendedRow(r) {
 
   const totalPurchase = orderQty * purchasePrice;
   const diff = purchasePrice - deliveryPrice;
-
-  // 출고여부
-  let status = '가능';
-  if (tobe + fulfill < orderQty) status = '불가능';
-  else if (Math.abs(diff) >= 5000) status = '불가능';
-
-  // 비고 — 프론트 CoupangCheckModal 과 동일 로직 (다중 조건 쉼표 결합)
-  const remarks = [];
-  if (tobe + fulfill < orderQty) remarks.push('재고없음');
-  if (tobe < orderQty) remarks.push(`반출 (${orderQty - tobe})`);
-  if (Math.abs(diff) >= 5000) remarks.push('매입가 차액');
 
   return [
     ['발주번호',       r.coupang_order_seq ?? ''],
@@ -59,8 +58,9 @@ function toExtendedRow(r) {
     ['풀필재고',       fulfill],
     ['투비바코드',     r.rtn_tobe_barcode ?? ''],
     ['바코드일치',     r.rtn_barcode_matched ?? ''],
-    ['출고여부',       status],
-    ['비고',           remarks.join(', ')],
+    // 이하 백엔드 enrichStep2Defaults 가 채운 필드들 (로컬 재계산 없음)
+    ['출고여부',       renderExportStatus(r.export_yn)],
+    ['비고',           r.stock_remarks ?? ''],
   ];
 }
 
