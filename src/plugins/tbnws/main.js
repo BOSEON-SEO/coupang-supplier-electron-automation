@@ -167,6 +167,44 @@ module.exports = {
       }),
     );
 
+    /**
+     * 풀필먼트 재고 동기화 — POST /api/fulfillment/product/refetch
+     * Jenkins 배치 트리거 성격이라 응답 시간이 긴 편. timeout 5분.
+     *
+     * payload: 없음 (현재)
+     * 반환: { success: boolean, data?: any, status?: number, error?: string }
+     */
+    disposables.push(
+      registrar.handle('fulfillment.refetch', async () => {
+        const settings = readTbnwsSettings(registrar.dataDir);
+        if (!settings.apiBaseUrl) {
+          return { success: false, error: 'TBNWS API Base URL 이 설정되지 않았습니다.' };
+        }
+        const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/api/fulfillment/product/refetch`;
+        try {
+          const res = await request(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': 0,
+              ...authHeaders(settings),
+            },
+            timeoutMs: 5 * 60 * 1000,
+          });
+          if (res.status >= 200 && res.status < 300) {
+            return { success: true, data: res.data ?? res.raw };
+          }
+          return {
+            success: false,
+            status: res.status,
+            error: res.data?.message || res.raw?.slice(0, 300) || `HTTP ${res.status}`,
+          };
+        } catch (err) {
+          return { success: false, error: err.message || String(err) };
+        }
+      }),
+    );
+
     // TODO: po.confirmSubmit (발주확정 업로드)
     // TODO: inbound.startWork / saveStep1 / saveStep2 / saveStep3
     // TODO: inbound.registerTempSchedule (출고예정)

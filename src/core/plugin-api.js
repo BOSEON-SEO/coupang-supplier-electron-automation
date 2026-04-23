@@ -205,6 +205,7 @@ export const KNOWN_VIEW_ROLES = Object.freeze({
   RESULT_PANEL: 'result.panel',              // ResultView 본체
   JOB_CARD: 'job.card',                      // 달력 셀 내 작업 카드
   STOCK_ADJUST_MAIN: 'stock-adjust.main',    // 재고조정 모달 내부 메인 뷰
+  NEWJOB_OPTIONS: 'newjob.options',          // 새 작업 모달의 플러그인 옵션 영역. props: { options, onChange(key,value) }
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -252,6 +253,7 @@ export const KNOWN_HOOKS = Object.freeze({
   VENDOR_LOGIN: 'vendor.login',               // payload: { vendor, page } → 로그인 플로우
 
   // ── 라이프사이클 (부작용용, next() 꼭 호출) ──
+  JOB_PRE_CREATE: 'job.pre-create',           // payload: { date, vendor, sequence, plugin, options } — 작업 생성 직후·PO 다운 전. 실패하면 생성 흐름 중단.
   JOB_CREATED: 'job.created',                 // payload: { job } — 작업 생성 직후
   JOB_COMPLETED: 'job.completed',             // payload: { job } — 완료 처리 직후
   PHASE_ENTER: 'phase.enter',                 // payload: { job, from, to } — phase 진입

@@ -2443,6 +2443,38 @@ button.session-badge:disabled {
 }
 @keyframes newjob-spin { to { transform: rotate(360deg); } }
 
+/* 플러그인 옵션 영역 (NewJobModal 의 newjob.options view) */
+.newjob-plugin-option {
+  margin: 0 0 16px 0;
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+.newjob-plugin-option__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.newjob-plugin-option__row input[type="checkbox"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+}
+.newjob-plugin-option__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.newjob-plugin-option__hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+  line-height: 1.5;
+  font-weight: normal;
+}
+
 .result-type-badge {
   display: inline-block;
   padding: 2px 8px;

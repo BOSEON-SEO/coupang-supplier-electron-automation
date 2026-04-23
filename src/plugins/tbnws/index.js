@@ -11,8 +11,9 @@
  * 백엔드 HTTP 는 main-half(main.js) 에서 처리. renderer 는 ctx.ipcInvoke 로 호출.
  */
 
+import React from 'react';
 import * as XLSX from 'xlsx';
-import { KNOWN_SCOPES, KNOWN_HOOKS } from '../../core/plugin-api';
+import { KNOWN_SCOPES, KNOWN_HOOKS, KNOWN_VIEW_ROLES } from '../../core/plugin-api';
 
 // ═══════════════════════════════════════════════════════════════════
 // 17컬럼 정의 — 어드민 프론트의 CoupangCheckModal 과 동일 순서·라벨
@@ -95,6 +96,36 @@ function buildWorkbookBuffer(aoa) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// NewJobModal 옵션 view — '풀필 재고 동기화' 체크박스
+// ═══════════════════════════════════════════════════════════════════
+
+const OPT_KEY_REFETCH = 'tbnws.refetchFulfillment';
+
+function TbnwsNewJobOptions({ options, onChange, disabled }) {
+  const checked = !!(options && options[OPT_KEY_REFETCH]);
+  return (
+    <div className="newjob-plugin-option">
+      <label className="newjob-plugin-option__row">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(OPT_KEY_REFETCH, e.target.checked)}
+          disabled={disabled}
+        />
+        <div>
+          <div className="newjob-plugin-option__label">
+            풀필먼트 재고 동기화 진행
+          </div>
+          <div className="newjob-plugin-option__hint">
+            체크 시, PO 다운 전에 내부 DB 의 풀필 재고를 최신화하여 발주서 검증에 정확한 반출 가능 수량이 반영됩니다.
+          </div>
+        </div>
+      </label>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // 플러그인 manifest
 // ═══════════════════════════════════════════════════════════════════
 
@@ -123,6 +154,31 @@ const manifest = {
 
   activate(ctx) {
     const disposables = [];
+
+    // NewJobModal 에 풀필 재고 동기화 체크박스 기여.
+    disposables.push(
+      ctx.registerView(KNOWN_VIEW_ROLES.NEWJOB_OPTIONS, {
+        component: TbnwsNewJobOptions,
+        priority: 10,
+      }),
+    );
+
+    // job.pre-create 훅 — options.tbnws.refetchFulfillment 가 true 면
+    // 풀필 재고 동기화 API 를 호출하고 완료 대기.
+    disposables.push(
+      ctx.registerHook(KNOWN_HOOKS.JOB_PRE_CREATE, async (payload, hookCtx, next) => {
+        const refetch = payload?.options && payload.options[OPT_KEY_REFETCH];
+        if (!refetch) return next();
+        console.info('[tbnws] 풀필 재고 동기화 요청 시작');
+        const res = await ctx.ipcInvoke('fulfillment.refetch');
+        if (!res?.success) {
+          // 실패를 throw 하면 CalendarView 가 alert 로 표시.
+          throw new Error(`풀필 재고 동기화 실패: ${res?.error || 'unknown'}`);
+        }
+        console.info('[tbnws] 풀필 재고 동기화 완료');
+        return next();
+      }),
+    );
 
     // WorkView 에 "TBNWS 확장" 탭 기여.
     //

@@ -1,4 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useCallback } from 'react';
+import { ViewOutlet } from '../core/plugin-host';
+import { KNOWN_VIEW_ROLES } from '../core/plugin-api';
 
 /**
  * 새 작업 생성 모달 — 두 가지 소스 중 선택:
@@ -6,13 +8,16 @@ import React, { useMemo, useRef, useState } from 'react';
  *   1. '쿠팡에서 자동 가져오기' — 기존 동작. po_download.py 로 PO 다운로드
  *   2. '파일로 직접 업로드'     — 사용자가 xlsx 직접 업로드 → job 폴더의 po.xlsx 로 저장
  *
+ * 플러그인 옵션 (newjob.options role) — 플러그인이 체크박스 등을 기여하면
+ * 그 값이 pluginOptions 에 쌓여 onCoupang/onFile 의 마지막 인자로 전달됨.
+ *
  * Props:
  *   - date, vendor: 표시용 메타 정보
  *   - usedSequences: number[]  — 이미 생성된 차수 목록 (중복 방지)
  *   - defaultSequence: number  — 스피너 기본값 (보통 마지막+1)
  *   - onCancel()
- *   - onCoupang(sequence)             — 자동 가져오기 선택 시
- *   - onFile(fileBuffer, fileName, sequence)  — 파일 업로드 선택 시
+ *   - onCoupang(sequence, options)             — 자동 가져오기 선택 시
+ *   - onFile(fileBuffer, fileName, sequence, options)  — 파일 업로드 선택 시
  */
 export default function NewJobModal({
   date, vendor, usedSequences = [], defaultSequence = 1,
@@ -22,7 +27,13 @@ export default function NewJobModal({
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
   const [sequence, setSequence] = useState(defaultSequence);
+  const [pluginOptions, setPluginOptions] = useState({});
   const fileInputRef = useRef(null);
+
+  // 플러그인 view 에 전달할 controlled onChange — key/value 로 옵션 업데이트
+  const handlePluginOptionChange = useCallback((key, value) => {
+    setPluginOptions((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   const used = useMemo(() => new Set(usedSequences), [usedSequences]);
   const isDuplicate = used.has(sequence);
@@ -46,7 +57,7 @@ export default function NewJobModal({
     if (seqError) { alert(seqError); return; }
     setMode('coupang');
     setBusy(true);
-    try { await onCoupang(sequence); } finally { setBusy(false); }
+    try { await onCoupang(sequence, pluginOptions); } finally { setBusy(false); }
   };
 
   const handleFilePick = (e) => {
@@ -62,7 +73,7 @@ export default function NewJobModal({
     setBusy(true);
     try {
       const buf = await f.arrayBuffer();
-      await onFile(buf, f.name, sequence);
+      await onFile(buf, f.name, sequence, pluginOptions);
     } finally {
       setBusy(false);
     }
@@ -117,6 +128,17 @@ export default function NewJobModal({
         {seqError && (
           <div className="newjob-seq__error">{seqError}</div>
         )}
+
+        {/* 플러그인 옵션 영역 — tbnws 등의 플러그인이 체크박스/폼 기여 */}
+        <ViewOutlet
+          role={KNOWN_VIEW_ROLES.NEWJOB_OPTIONS}
+          ctx={{ date, vendor }}
+          viewProps={{
+            options: pluginOptions,
+            onChange: handlePluginOptionChange,
+            disabled: busy,
+          }}
+        />
 
         {!mode && (
           <div className="newjob-options">

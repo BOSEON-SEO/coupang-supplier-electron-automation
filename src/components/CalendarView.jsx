@@ -119,11 +119,24 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
   }, [vendors, activeVendor, selectedDate, runHook]);
 
   // 쿠팡 자동 다운로드 모드
-  const handleCoupangMode = useCallback(async (sequence) => {
+  const handleCoupangMode = useCallback(async (sequence, options) => {
     setCreating(true);
     try {
       const job = await createJobManifest(sequence);
       if (!job) return;
+
+      // PO 다운 전 — 플러그인에게 사전 작업 기회 부여 (예: tbnws 풀필 재고 동기화).
+      // 실패하면 작업은 이미 생성됐으므로 파일만 없이 열림. 사용자가 수동으로 다시 시도 가능.
+      try {
+        await runHook(KNOWN_HOOKS.JOB_PRE_CREATE, {
+          date: job.date, vendor: job.vendor, sequence: job.sequence,
+          plugin: job.plugin, options: options || {},
+        });
+      } catch (err) {
+        alert(`사전 작업 실패: ${err?.message || err}\n수동으로 해당 작업을 재시도하세요.`);
+        // 계속 진행 — PO 다운 자체는 시도
+      }
+
       const api = window.electronAPI;
       const dl = await api.runPython('scripts/po_download.py', [
         '--vendor', activeVendor,
@@ -141,14 +154,26 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     } finally {
       setCreating(false);
     }
-  }, [createJobManifest, activeVendor, selectedDate, loadMonth, loadDay, onOpenJob]);
+  }, [createJobManifest, activeVendor, selectedDate, loadMonth, loadDay, onOpenJob, runHook]);
 
   // 파일 업로드 모드 — 사용자가 선택한 xlsx 를 job/po.xlsx 로 저장
-  const handleFileMode = useCallback(async (fileBuffer, fileName, sequence) => {
+  const handleFileMode = useCallback(async (fileBuffer, fileName, sequence, options) => {
     setCreating(true);
     try {
       const job = await createJobManifest(sequence);
       if (!job) return;
+
+      // PO 파일 저장 전 — 플러그인 사전 작업 (tbnws 풀필 재고 동기화 등).
+      try {
+        await runHook(KNOWN_HOOKS.JOB_PRE_CREATE, {
+          date: job.date, vendor: job.vendor, sequence: job.sequence,
+          plugin: job.plugin, options: options || {},
+        });
+      } catch (err) {
+        alert(`사전 작업 실패: ${err?.message || err}`);
+        // 계속 진행 — 파일 저장은 시도
+      }
+
       const api = window.electronAPI;
       const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'po.xlsx');
       if (!resolved?.success) {
