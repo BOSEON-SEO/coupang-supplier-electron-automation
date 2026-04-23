@@ -199,7 +199,6 @@ const manifest = {
         fileName: 'po-tbnws.xlsx',
         after: 'po',
         readOnly: false,
-        replacesPoActions: true,
         handler: () => {},
         onSave: async (buffer, { job, electronAPI }) => {
           const wb = XLSX.read(buffer, { type: 'array' });
