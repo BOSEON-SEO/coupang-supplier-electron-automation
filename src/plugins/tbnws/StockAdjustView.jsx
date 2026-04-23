@@ -7,28 +7,30 @@ import * as XLSX from 'xlsx';
  * 구조:
  *   - 상단 요약 (전체 제품·행 수, 상태별 카운트)
  *   - tobe_product_code(G-xxxx) 기준 accordion 그룹 카드
+ *   - 카드 헤더: 상품코드·상품명은 드래그/복사 가능 (user-select)
+ *     → 토글은 우측 chevron 버튼을 눌러야만 동작
  *   - 각 그룹: 상품코드/상품명 + 주문/투비/풀필 배지 + 상태
- *   - accordion 펼치면: 내부 테이블 (발주번호/물류센터/SKU ID/바코드/수량/출고수량 입력/출고여부/비고)
+ *   - 내부 테이블:
+ *     발주번호 / 물류센터 / SKU ID / SKU Barcode / 주문수량
+ *     / 출고여부(chip = toggle) / 출고수량(input) / 반출수량(input) / 비고
+ *   - chip 클릭: 가능↔불가능 토글. 가능→불가능이면 출고수량=0, 반대면 주문수량.
  *
- * 데이터 소스: 두 파일을 조인해서 사용
- *   - po-tbnws.xlsx (startWork 응답 18컬럼)  → 그룹핑/상태/재고/출고여부/비고
- *   - 코어의 stockAdjust:load 결과 (groups)    → rowIndex (저장용)
- *
- * 조인 키: (coupang_order_seq, departure_warehouse, sku_barcode)
+ * 데이터 소스:
+ *   - po-tbnws.xlsx (19컬럼)   → 그룹핑/상태/재고/반출수량/출고여부/비고
+ *   - 코어 stockAdjust:load    → rowIndex (저장용)
  *
  * 저장 흐름:
- *   - 입력된 출고수량 → patches (rowIndex 기반) → onSave 로 상위(StockAdjustApp)에 전달
- *   - 상위가 electronAPI.stockAdjust.save 호출 (기존 경로 재사용)
+ *   - 출고수량 변경 → patches (rowIndex 기반) → onSave 로 상위 전달
+ *   - 상위가 electronAPI.stockAdjust.save 호출
+ *   - ※ 반출수량 저장 경로는 추후 연결 (현재는 UI 편집만)
  */
 
-/** 상태 → UI 변환 */
 function statusClass(exportYn) {
   const v = String(exportYn ?? '').trim();
   if (v === 'N' || v === '불가' || v === '불가능') return 'danger';
   return 'ok';
 }
 
-/** 그룹 전체 상태: 하나라도 불가면 'mixed' 또는 'danger' */
 function groupStatus(rows) {
   const statuses = rows.map((r) => statusClass(r.export_yn));
   const anyBad = statuses.includes('danger');
@@ -38,20 +40,32 @@ function groupStatus(rows) {
   return 'ok';
 }
 
-/** 배지/라벨 */
-function StatusPill({ status }) {
-  const label = status === 'danger' ? '불가능' : '가능';
-  return <span className={`tbnws-pill tbnws-pill--${status}`}>{label}</span>;
+/** 현재 출고수량에 따라 "가능"/"불가능" 판정 (입력값 0 이면 불가능) */
+function qtyToStatus(confirmedQty) {
+  const n = Number(confirmedQty);
+  if (!Number.isFinite(n) || n <= 0) return 'danger';
+  return 'ok';
 }
 
 export default function TbnwsStockAdjustView({
   groups: coreGroups, saving, onSave, onCancel,
   date, vendor, sequence,
 }) {
-  const [tbnwsRows, setTbnwsRows] = useState(null);  // 파일 없을 때 null
+  const [tbnwsRows, setTbnwsRows] = useState(null);
   const [loadError, setLoadError] = useState('');
-  const [overrides, setOverrides] = useState({});    // rowIndex → 입력값(string)
-  const [expanded, setExpanded] = useState({});       // tobe_product_code → bool
+  const [overrides, setOverrides] = useState({});       // rowIndex → 출고수량 string
+  const [fulfillOverrides, setFulfillOverrides] = useState({}); // rowIndex → 반출수량 string
+  const [expanded, setExpanded] = useState({});
+  const [activeFilters, setActiveFilters] = useState(() => new Set()); // Set<'ok'|'mixed'|'danger'>
+
+  const toggleFilter = useCallback((status) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  }, []);
 
   // po-tbnws.xlsx 로드
   useEffect(() => {
@@ -64,7 +78,7 @@ export default function TbnwsStockAdjustView({
         const exists = await api.fileExists(resolved.path);
         if (!exists) {
           if (!cancelled) {
-            setLoadError('po-tbnws.xlsx 가 없습니다. 작업을 먼저 생성해 검증을 완료하세요.');
+            setLoadError('po-tbnws.xlsx 가 없습니다. 작업 생성 + 검증이 먼저 완료되어야 합니다.');
             setTbnwsRows([]);
           }
           return;
@@ -88,6 +102,7 @@ export default function TbnwsStockAdjustView({
           sku_barcode: col('SKU 바코드'),
           order_quantity: col('발주수량'),
           requested_qty: col('확정수량'),
+          fulfillment_export_qty: col('반출수량'),
           departure_warehouse: col('물류센터'),
           rtn_tobe_stock: col('투비재고'),
           rtn_fulfillment_stock: col('풀필재고'),
@@ -104,10 +119,11 @@ export default function TbnwsStockAdjustView({
             sku_name:     String(r[idx.sku_name] ?? '').trim(),
             sku_barcode:  String(r[idx.sku_barcode] ?? '').trim(),
             departure_warehouse: String(r[idx.departure_warehouse] ?? '').trim(),
-            order_quantity:        Number(r[idx.order_quantity]) || 0,
-            requested_qty:         Number(r[idx.requested_qty]) || 0,
-            rtn_tobe_stock:        Number(r[idx.rtn_tobe_stock]) || 0,
-            rtn_fulfillment_stock: Number(r[idx.rtn_fulfillment_stock]) || 0,
+            order_quantity:          Number(r[idx.order_quantity]) || 0,
+            requested_qty:           Number(r[idx.requested_qty]) || 0,
+            fulfillment_export_qty:  Number(r[idx.fulfillment_export_qty]) || 0,
+            rtn_tobe_stock:          Number(r[idx.rtn_tobe_stock]) || 0,
+            rtn_fulfillment_stock:   Number(r[idx.rtn_fulfillment_stock]) || 0,
             export_yn:     String(r[idx.export_yn] ?? '').trim(),
             stock_remarks: String(r[idx.stock_remarks] ?? '').trim(),
           });
@@ -120,7 +136,7 @@ export default function TbnwsStockAdjustView({
     return () => { cancelled = true; };
   }, [date, vendor, sequence]);
 
-  // core groups 의 rowIndex → (order_seq, warehouse, sku_barcode) 매핑 생성
+  // core groups → rowIndex 조인 맵
   const rowIndexMap = useMemo(() => {
     const map = new Map();
     for (const g of coreGroups || []) {
@@ -132,7 +148,6 @@ export default function TbnwsStockAdjustView({
     return map;
   }, [coreGroups]);
 
-  // tbnws 행에 rowIndex 주입 + tobe_product_code 로 그룹핑
   const grouped = useMemo(() => {
     if (!tbnwsRows) return [];
     const byProduct = new Map();
@@ -151,7 +166,6 @@ export default function TbnwsStockAdjustView({
       entry.skuNames.add(r.sku_name);
       entry.rows.push({ ...r, rowIndex });
       entry.totalOrder   += r.order_quantity;
-      // 상품코드 단위로 같은 투비/풀필 재고가 반복되어 나오므로 max 로 요약
       entry.totalTobe    = Math.max(entry.totalTobe, r.rtn_tobe_stock);
       entry.totalFulfill = Math.max(entry.totalFulfill, r.rtn_fulfillment_stock);
       byProduct.set(productCode, entry);
@@ -163,8 +177,8 @@ export default function TbnwsStockAdjustView({
     }));
   }, [tbnwsRows, rowIndexMap]);
 
-  // 초기 확정수량 입력값 — po-tbnws 의 requested_qty
-  const initialQty = useMemo(() => {
+  // 초기 입력값 — 출고수량 = requested_qty, 반출수량 = fulfillment_export_qty
+  const initialConfirmed = useMemo(() => {
     const map = {};
     for (const g of grouped) {
       for (const r of g.rows) {
@@ -174,19 +188,43 @@ export default function TbnwsStockAdjustView({
     return map;
   }, [grouped]);
 
-  const getValue = (rowIndex) => {
-    if (rowIndex in overrides) return overrides[rowIndex];
-    return initialQty[rowIndex] ?? '';
-  };
-  const setValue = (rowIndex, v) => {
+  const initialFulfill = useMemo(() => {
+    const map = {};
+    for (const g of grouped) {
+      for (const r of g.rows) {
+        if (r.rowIndex != null) map[r.rowIndex] = String(r.fulfillment_export_qty ?? 0);
+      }
+    }
+    return map;
+  }, [grouped]);
+
+  const getQty = (rowIndex) => (
+    rowIndex in overrides ? overrides[rowIndex] : (initialConfirmed[rowIndex] ?? '')
+  );
+  const setQty = (rowIndex, v) => {
     setOverrides((prev) => ({ ...prev, [rowIndex]: v }));
   };
+
+  const getFulfill = (rowIndex) => (
+    rowIndex in fulfillOverrides ? fulfillOverrides[rowIndex] : (initialFulfill[rowIndex] ?? '')
+  );
+  const setFulfill = (rowIndex, v) => {
+    setFulfillOverrides((prev) => ({ ...prev, [rowIndex]: v }));
+  };
+
+  // chip toggle — 현재 상태에 따라 출고수량을 0 또는 주문수량으로.
+  const toggleStatus = useCallback((r) => {
+    if (r.rowIndex == null) return;
+    const curStatus = qtyToStatus(getQty(r.rowIndex));
+    const nextQty = curStatus === 'ok' ? 0 : (Number(r.order_quantity) || 0);
+    setQty(r.rowIndex, String(nextQty));
+  }, [overrides, initialConfirmed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleGroup = (code) => {
     setExpanded((prev) => ({ ...prev, [code]: !prev[code] }));
   };
 
-  // 요약 카운트
+  // 요약 카운트 (현재 입력값 기준으로 재계산하면 UX 이상적이지만 초기 데이터 기반으로 일관성 유지)
   const counts = useMemo(() => {
     let ok = 0, danger = 0, mixed = 0, totalRows = 0;
     for (const g of grouped) {
@@ -198,12 +236,18 @@ export default function TbnwsStockAdjustView({
     return { ok, danger, mixed, totalRows, totalGroups: grouped.length };
   }, [grouped]);
 
+  // 상단 chip 필터 적용 — 활성 필터 집합이 비어있으면 전체 표시
+  const visibleGrouped = useMemo(() => {
+    if (activeFilters.size === 0) return grouped;
+    return grouped.filter((g) => activeFilters.has(g.status));
+  }, [grouped, activeFilters]);
+
   const handleSave = () => {
     const patches = [];
     for (const g of grouped) {
       for (const r of g.rows) {
         if (r.rowIndex == null) continue;
-        const cur = getValue(r.rowIndex);
+        const cur = getQty(r.rowIndex);
         const n = Number(cur);
         if (!Number.isFinite(n) || n < 0) continue;
         if (String(n) !== String(r.requested_qty)) {
@@ -237,40 +281,70 @@ export default function TbnwsStockAdjustView({
   return (
     <>
       <div className="tbnws-adjust-body">
-        {/* 상단 요약 */}
+        {/* 상단 요약 — 각 chip 은 필터 토글 */}
         <div className="tbnws-adjust-summary">
           <span className="tbnws-adjust-summary__counts">
             총 {counts.totalGroups}개 제품 · {counts.totalRows}건
+            {activeFilters.size > 0 && (
+              <span className="tbnws-adjust-summary__filtered">
+                · 필터 적용 ({visibleGrouped.length} 표시)
+              </span>
+            )}
           </span>
-          {counts.mixed > 0 && (
-            <span className="tbnws-chip tbnws-chip--warn">⚠ 확인 필요 {counts.mixed}</span>
-          )}
-          {counts.danger > 0 && (
-            <span className="tbnws-chip tbnws-chip--danger">❗ 출고 불가 {counts.danger}</span>
-          )}
-          <span className="tbnws-chip tbnws-chip--ok">✓ 출고 가능 {counts.ok}</span>
+          <button
+            type="button"
+            className={`tbnws-chip tbnws-chip--warn${activeFilters.has('mixed') ? ' is-on' : ''}`}
+            onClick={() => toggleFilter('mixed')}
+            title="확인 필요 카드만 보기 (다시 눌러 해제)"
+          >
+            ⚠ 확인 필요 {counts.mixed}
+          </button>
+          <button
+            type="button"
+            className={`tbnws-chip tbnws-chip--danger${activeFilters.has('danger') ? ' is-on' : ''}`}
+            onClick={() => toggleFilter('danger')}
+            title="출고 불가 카드만 보기 (다시 눌러 해제)"
+          >
+            ❗ 출고 불가 {counts.danger}
+          </button>
+          <button
+            type="button"
+            className={`tbnws-chip tbnws-chip--ok${activeFilters.has('ok') ? ' is-on' : ''}`}
+            onClick={() => toggleFilter('ok')}
+            title="출고 가능 카드만 보기 (다시 눌러 해제)"
+          >
+            ✓ 출고 가능 {counts.ok}
+          </button>
         </div>
 
         {/* 그룹 카드들 */}
         <div className="tbnws-adjust-groups">
-          {grouped.map((g) => {
+          {visibleGrouped.map((g) => {
             const isOpen = !!expanded[g.productCode];
             return (
               <div key={g.productCode} className={`tbnws-group tbnws-group--${g.status}`}>
-                <button
-                  type="button"
-                  className="tbnws-group__header"
-                  onClick={() => toggleGroup(g.productCode)}
-                >
-                  <StatusPill status={g.status} />
+                {/* 헤더 — 전체 클릭으로 토글하지 않고, 텍스트는 드래그 가능.
+                    chevron 버튼만이 토글 트리거. */}
+                <div className="tbnws-group__header">
+                  <span className={`tbnws-pill tbnws-pill--${g.status}`}>
+                    {g.status === 'danger' ? '불가능' : g.status === 'mixed' ? '확인' : '가능'}
+                  </span>
                   <span className="tbnws-group__code">{g.productCode}</span>
                   <span className="tbnws-group__name">{g.sku_name_summary}</span>
                   <span className="tbnws-group__spacer" />
                   <span className="tbnws-group__stat">주문 <b>{g.totalOrder}</b></span>
                   <span className="tbnws-group__stat">투비 <b>{g.totalTobe}</b></span>
                   <span className="tbnws-group__stat">풀필 <b>{g.totalFulfill}</b></span>
-                  <span className="tbnws-group__chev">{isOpen ? '▲' : '▼'}</span>
-                </button>
+                  <button
+                    type="button"
+                    className="tbnws-group__chev-btn"
+                    onClick={() => toggleGroup(g.productCode)}
+                    aria-label={isOpen ? '접기' : '펼치기'}
+                    title={isOpen ? '접기' : '펼치기'}
+                  >
+                    {isOpen ? '▲' : '▼'}
+                  </button>
+                </div>
                 {isOpen && (
                   <div className="tbnws-group__body">
                     <table className="tbnws-group__table">
@@ -281,36 +355,68 @@ export default function TbnwsStockAdjustView({
                           <th>SKU ID</th>
                           <th>SKU Barcode</th>
                           <th className="num">주문수량</th>
-                          <th className="num">출고수량</th>
                           <th>출고여부</th>
+                          <th className="num">출고수량</th>
+                          <th className="num">반출수량</th>
                           <th>비고</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {g.rows.map((r) => (
-                          <tr key={`${r.coupang_order_seq}|${r.departure_warehouse}|${r.sku_barcode}`}>
-                            <td>{r.coupang_order_seq}</td>
-                            <td>{r.departure_warehouse}</td>
-                            <td>{r.sku_id}</td>
-                            <td>{r.sku_barcode}</td>
-                            <td className="num">{r.order_quantity}</td>
-                            <td className="num">
-                              {r.rowIndex != null ? (
-                                <input
-                                  type="number"
-                                  min="0"
-                                  className="tbnws-qty-input"
-                                  value={getValue(r.rowIndex)}
-                                  onChange={(e) => setValue(r.rowIndex, e.target.value)}
-                                />
-                              ) : (
-                                <span className="tbnws-qty-unmatched">미매칭</span>
-                              )}
-                            </td>
-                            <td><StatusPill status={statusClass(r.export_yn)} /></td>
-                            <td className="remark">{r.stock_remarks}</td>
-                          </tr>
-                        ))}
+                        {g.rows.map((r) => {
+                          const curStatus = r.rowIndex != null
+                            ? qtyToStatus(getQty(r.rowIndex))
+                            : statusClass(r.export_yn);
+                          return (
+                            <tr key={`${r.coupang_order_seq}|${r.departure_warehouse}|${r.sku_barcode}`}>
+                              <td>{r.coupang_order_seq}</td>
+                              <td>{r.departure_warehouse}</td>
+                              <td>{r.sku_id}</td>
+                              <td>{r.sku_barcode}</td>
+                              <td className="num">{r.order_quantity}</td>
+                              <td>
+                                {r.rowIndex != null ? (
+                                  <button
+                                    type="button"
+                                    className={`tbnws-pill tbnws-pill--${curStatus} tbnws-pill--toggle`}
+                                    onClick={() => toggleStatus(r)}
+                                    title="클릭 시 출고수량을 0 ↔ 주문수량 으로 전환"
+                                  >
+                                    {curStatus === 'danger' ? '불가능' : '가능'}
+                                  </button>
+                                ) : (
+                                  <span className={`tbnws-pill tbnws-pill--${statusClass(r.export_yn)}`}>
+                                    {statusClass(r.export_yn) === 'danger' ? '불가능' : '가능'}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="num">
+                                {r.rowIndex != null ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    className="tbnws-qty-input"
+                                    value={getQty(r.rowIndex)}
+                                    onChange={(e) => setQty(r.rowIndex, e.target.value)}
+                                  />
+                                ) : (
+                                  <span className="tbnws-qty-unmatched">미매칭</span>
+                                )}
+                              </td>
+                              <td className="num">
+                                {r.rowIndex != null ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    className="tbnws-qty-input"
+                                    value={getFulfill(r.rowIndex)}
+                                    onChange={(e) => setFulfill(r.rowIndex, e.target.value)}
+                                  />
+                                ) : null}
+                              </td>
+                              <td className="remark">{r.stock_remarks}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

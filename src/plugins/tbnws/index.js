@@ -38,6 +38,7 @@ function renderExportStatus(exportYn) {
 function toExtendedRow(r) {
   const orderQty = Number(r.order_quantity) || 0;
   const requestedQty = Number(r.requested_qty) || 0;
+  const fulfillExportQty = Number(r.fulfillment_export_qty) || 0;
   const purchasePrice = Number(r.purchase_price) || 0;
   const deliveryPrice = Number(r.rtn_sku_delivery_price) || 0;
   const tobe = Number(r.rtn_tobe_stock) || 0;
@@ -53,7 +54,8 @@ function toExtendedRow(r) {
     ['SKU 이름',       r.sku_name ?? ''],
     ['SKU 바코드',     r.sku_barcode ?? ''],
     ['발주수량',       orderQty],
-    ['확정수량',       requestedQty],     // 백엔드 할당값 기본, 사용자 편집 가능
+    ['확정수량',       requestedQty],
+    ['반출수량',       fulfillExportQty],  // 풀필에서 반출해야 할 수량 (백엔드 fulfillment_export_qty)
     ['물류센터',       r.departure_warehouse ?? ''],
     ['매입가',         purchasePrice],
     ['총매입금',       totalPurchase],
@@ -72,7 +74,7 @@ function toExtendedRow(r) {
 function buildAoa(data) {
   if (!Array.isArray(data) || data.length === 0) {
     return [[
-      '발주번호','상품코드','SKU ID','SKU 이름','SKU 바코드','발주수량','확정수량','물류센터',
+      '발주번호','상품코드','SKU ID','SKU 이름','SKU 바코드','발주수량','확정수량','반출수량','물류센터',
       '매입가','총매입금','SKU 납품가','매입-납품 차액','투비재고','풀필재고',
       '투비바코드','바코드일치','출고여부','비고',
     ]];
@@ -86,12 +88,12 @@ function buildAoa(data) {
 /** AOA → xlsx ArrayBuffer */
 function buildWorkbookBuffer(aoa) {
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  // 컬럼 폭 (18컬럼)
+  // 컬럼 폭 (19컬럼)
   ws['!cols'] = [
     { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 32 }, { wch: 16 },
-    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
-    { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 16 },
-    { wch: 10 }, { wch: 10 }, { wch: 28 },
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
+    { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
+    { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 28 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'TBNWS 확장');
