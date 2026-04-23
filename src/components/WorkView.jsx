@@ -161,6 +161,31 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   useEffect(() => { vendorRef.current = vendor; }, [vendor]);
   useEffect(() => { loadedPathRef.current = loadedPath; }, [loadedPath]);
   useEffect(() => { jobRef.current = job; }, [job]);
+  const dirtyRef = useRef(false);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
+  // 다른 프로세스/플러그인이 파일을 갱신했을 때 자동 재로드.
+  // 현재 표시 중인 탭의 파일이 방금 갱신된 것과 일치하면 메모리 버퍼 무효화.
+  // 사용자가 편집 중(dirty=true) 이면 손실 방지 위해 건너뜀.
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onJobFileUpdated) return undefined;
+    const off = api.onJobFileUpdated(async (data) => {
+      const j = jobRef.current;
+      if (!j) return;
+      if (data.date !== j.date || data.vendor !== j.vendor || data.sequence !== j.sequence) return;
+      const cur = loadedPathRef.current || '';
+      if (!cur.endsWith(data.file)) return;
+      if (dirtyRef.current) return;
+      const read = await api.readFile(cur);
+      if (read?.success) {
+        setXlsxBuffer(read.data);
+        latestSheetsRef.current = null;
+        appendLog('info', `[자동갱신] ${data.file} 재로드${typeof data.patched === 'number' ? ` (${data.patched}행)` : ''}`);
+      }
+    });
+    return off;
+  }, [appendLog]);
 
   // ── 플러그인 창 lock 구독 ──
   useEffect(() => {

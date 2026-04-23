@@ -10,7 +10,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
-const { safeStorage, dialog, shell } = require('electron');
+const { safeStorage, dialog, shell, BrowserWindow } = require('electron');
 const XLSX = require('xlsx');
 const ExcelJS = require('exceljs');
 
@@ -1777,6 +1777,20 @@ function registerIpcHandlers({
       for (const k of byKey.keys()) {
         if (!matchedKeys.has(k)) unmatched.push(k);
       }
+
+      // 렌더러들에게 "확정서 파일 갱신됨" 알림 → 해당 탭 열려있으면 자동 재로드.
+      // 팝업 윈도우(stock-adjust/transport) 도 같은 이벤트를 공유할 수 있도록 broadcast.
+      const payload = { date, vendor, sequence, file: 'confirmation.xlsx', patched };
+      try {
+        const w = getWindow();
+        if (w && !w.isDestroyed()) w.webContents.send('job:file-updated', payload);
+      } catch {}
+      for (const ch of BrowserWindow.getAllWindows()) {
+        try {
+          if (ch && !ch.isDestroyed()) ch.webContents.send('job:file-updated', payload);
+        } catch {}
+      }
+
       return { success: true, patched, unmatched };
     } catch (err) {
       return { success: false, error: err.message };

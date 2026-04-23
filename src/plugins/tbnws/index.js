@@ -205,7 +205,7 @@ const manifest = {
     disposables.push(
       ctx.registerCommand({
         id: 'tbnws.poExtended',
-        title: '검증·확정',
+        title: '투비 재고조정',
         icon: '🏢',
         scope: KNOWN_SCOPES.WORK_TAB_EXTRA,
         order: 50,

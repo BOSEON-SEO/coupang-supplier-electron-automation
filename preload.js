@@ -74,6 +74,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('confirmation:patchQuantities', date, vendor, sequence, patches),
   },
 
+  // ── 작업 파일 갱신 이벤트 (confirmation/po/po-tbnws 등 자동 재로드용) ──
+  //   renderer 가 해당 job·파일명 매칭되는 이벤트 받으면 현재 열린 탭 갱신.
+  onJobFileUpdated: (callback) => {
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.on('job:file-updated', handler);
+    return () => ipcRenderer.removeListener('job:file-updated', handler);
+  },
+
   // ── 운송 분배 서브 창 ──
   transport: {
     open: (date, vendor, sequence) => ipcRenderer.invoke('transport:open', date, vendor, sequence),
