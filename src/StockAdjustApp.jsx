@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import StockAdjustView from './components/StockAdjustView';
 import FindBar from './components/FindBar';
+import { ViewOutlet } from './core/plugin-host';
+import { KNOWN_VIEW_ROLES } from './core/plugin-api';
 
 /**
  * 재고조정 창 루트.
@@ -84,11 +86,21 @@ export default function StockAdjustApp({ params }) {
       {error && <div className="stock-adjust-error">{error}</div>}
 
       {!loading && !error && (
-        <StockAdjustView
-          groups={groups}
-          saving={saving}
-          onSave={handleSave}
-          onCancel={handleCancel}
+        <ViewOutlet
+          role={KNOWN_VIEW_ROLES.STOCK_ADJUST_MAIN}
+          ctx={{ date, vendor, sequence }}
+          viewProps={{
+            groups, saving, onSave: handleSave, onCancel: handleCancel,
+            date, vendor, sequence,
+          }}
+          fallback={(
+            <StockAdjustView
+              groups={groups}
+              saving={saving}
+              onSave={handleSave}
+              onCancel={handleCancel}
+            />
+          )}
         />
       )}
       <FindBar />

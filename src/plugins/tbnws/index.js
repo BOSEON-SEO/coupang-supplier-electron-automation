@@ -15,6 +15,7 @@ import React from 'react';
 import * as XLSX from 'xlsx';
 import { KNOWN_SCOPES, KNOWN_HOOKS, KNOWN_VIEW_ROLES } from '../../core/plugin-api';
 import { applyPoStyle } from '../../core/poStyler';
+import TbnwsStockAdjustView from './StockAdjustView';
 
 // ═══════════════════════════════════════════════════════════════════
 // 17컬럼 정의 — 어드민 프론트의 CoupangCheckModal 과 동일 순서·라벨
@@ -161,6 +162,14 @@ const manifest = {
     disposables.push(
       ctx.registerView(KNOWN_VIEW_ROLES.NEWJOB_OPTIONS, {
         component: TbnwsNewJobOptions,
+        priority: 10,
+      }),
+    );
+
+    // 재고조정 모달을 tobe_product_code 그룹핑된 admin 스타일 뷰로 치환.
+    disposables.push(
+      ctx.registerView(KNOWN_VIEW_ROLES.STOCK_ADJUST_MAIN, {
+        component: TbnwsStockAdjustView,
         priority: 10,
       }),
     );

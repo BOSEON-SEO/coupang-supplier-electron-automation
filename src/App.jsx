@@ -9,6 +9,7 @@ import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
+import { DEV_ENTITLEMENTS } from './core/entitlements';
 import { runHook } from './core/plugin-registry';
 import { KNOWN_HOOKS } from './core/plugin-api';
 
@@ -66,7 +67,7 @@ export default function App() {
 
   // ── 플러그인 로드 ─────────────────────────────────────────
   // 현재는 entitlements 하드코딩 (라이선스 서버 미연결). 출시 단계에 교체.
-  const entitlements = useMemo(() => ['core', 'hello', 'tbnws.plugin'], []);
+  const entitlements = useMemo(() => DEV_ENTITLEMENTS, []);
   useEffect(() => {
     bootstrapPlugins({
       entitlements,
