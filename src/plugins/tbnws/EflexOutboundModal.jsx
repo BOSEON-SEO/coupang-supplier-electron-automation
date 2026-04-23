@@ -119,7 +119,11 @@ export default function EflexOutboundModal({ job, onClose }) {
       const items = Array.from(itemsByCode.values());
       const res = await window.electronAPI.invokePluginChannel(
         'tbnws', 'eflex.submitOutbound',
-        { workSeq, items, jobMeta: { date: job.date, vendor: job.vendor } },
+        {
+          workSeq,
+          items,
+          jobMeta: { date: job.date, vendor: job.vendor, sequence: job.sequence },
+        },
       );
       if (res?.testMode) {
         // eslint-disable-next-line no-console

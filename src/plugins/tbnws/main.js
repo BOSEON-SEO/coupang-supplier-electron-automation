@@ -248,11 +248,12 @@ module.exports = {
      *
      * admin 프론트와 동일한 포맷으로 전송:
      *   - 1개 order 로 전체 items 묶음
-     *   - refOrdNo = YYYYMMDD + 카테고리코드(01=canon 외, 02=canon) + workSeq
+     *   - refOrdNo = YYYYMMDD + 벤더코드(3자리) + 차수(2자리)  (workSeq 비의존)
+     *     · 벤더코드: coupang=001, canon=002, 그 외=000
      *   - receiver 정보는 설정값 사용 (default admin 프론트 값)
      *
      * 렌더러 payload: { workSeq, items: Array<{productCode, eflexProductCode, ea}>,
-     *                   jobMeta?: { date, vendor } }
+     *                   jobMeta?: { date, vendor, sequence } }
      */
     disposables.push(
       registrar.handle('eflex.submitOutbound', async (_event, payload) => {
@@ -275,13 +276,17 @@ module.exports = {
           remark:       settings.eflexRemark       || '쿠팡 입고 반출',
         };
 
-        // refOrdNo 빌드 — admin 프론트의 buildEflexRefOrdNo 와 동일 포맷.
-        //   YYYYMMDD + 카테고리코드 + workSeq
-        //   카테고리코드: canon → 02, 그 외(coupang/basic/…) → 01
+        // refOrdNo 빌드 — workSeq 의존 제거. 날짜+벤더코드+차수만으로 유일 식별.
+        //   YYYYMMDD + 벤더코드(3자리) + 차수(2자리 0패딩)
+        //   벤더코드: coupang → 001, canon → 002, 그 외 → 000 (확장 가능)
+        //   예) 2026-04-29 / canon / 1차 → '20260429002' + '01' = '2026042900201'
         const ymd = String(payload?.jobMeta?.date || '').replace(/-/g, '').slice(0, 8);
-        const cat = String(payload?.jobMeta?.vendor || '').toLowerCase() === 'canon' ? '02' : '01';
-        const refOrdNo = (ymd && payload.workSeq != null)
-          ? `${ymd}${cat}${payload.workSeq}`
+        const v = String(payload?.jobMeta?.vendor || '').toLowerCase();
+        const vendorCode = v === 'coupang' ? '001' : v === 'canon' ? '002' : '000';
+        const seq = payload?.jobMeta?.sequence;
+        const roundPart = Number.isFinite(Number(seq)) ? String(Number(seq)).padStart(2, '0') : null;
+        const refOrdNo = (ymd && roundPart)
+          ? `${ymd}${vendorCode}${roundPart}`
           : null;
 
         const reqBody = {
