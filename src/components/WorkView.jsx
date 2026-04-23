@@ -354,18 +354,18 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     setDirty(true);
   }, []);
 
-  // ── PO → confirmation 확정수량/부족사유 부분 패치 (I, M 컬럼만) ──
-  // 입고유형(C) 과 사용자 직접 편집은 보존. confirmation.xlsx 없으면 skipped.
+  // ── PO → po/po-tbnws/confirmation 확정수량 cross-sync ──
+  // PO 저장 직후에 자동 호출되어 세 파일의 확정수량을 같은 값으로 맞춤.
+  // 현재 confirmation 뷰가 열려있으면 자동 재로드는 job:file-updated 이벤트로 처리.
   const patchConfirmationFromPo = useCallback(async () => {
     const j = jobRef.current;
     if (!j) return { success: false, skipped: true };
     const api = window.electronAPI;
-    if (!api?.confirmation?.patchQuantities) return { success: false, skipped: true };
+    if (!api?.confirmedQty?.sync) return { success: false, skipped: true };
 
     const confPath = await api.resolveJobPath(j.date, j.vendor, j.sequence, 'confirmation.xlsx');
     if (!confPath?.success) return { success: false, error: confPath?.error };
     const confExists = await api.fileExists(confPath.path);
-    if (!confExists) return { success: false, skipped: true };
 
     const poPath = await api.resolveJobPath(j.date, j.vendor, j.sequence, 'po.xlsx');
     if (!poPath?.success) return { success: false, error: poPath?.error };
@@ -401,19 +401,13 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       };
     });
 
-    const res = await api.confirmation.patchQuantities(j.date, j.vendor, j.sequence, patches);
-    if (!res?.success) return res || { success: false };
-
-    // 현재 확정서를 보고 있으면 즉시 리로드
-    if (loadedPathRef.current?.endsWith('confirmation.xlsx')) {
-      const read = await api.readFile(confPath.path);
-      if (read?.success) {
-        setXlsxBuffer(read.data);
-        setLoadedPath(confPath.path);
-        latestSheetsRef.current = null;
-      }
-    }
-    return res;
+    const res = await api.confirmedQty.sync(j.date, j.vendor, j.sequence, patches);
+    if (!res?.success) return { success: false, error: res?.error };
+    // 현재 확정서/PO/투비 탭이 열려있으면 job:file-updated 이벤트 리스너가 자동 재로드.
+    // 기존 반환 스키마 유지: patched 는 confirmation 기준, 없으면 skipped.
+    const cr = res.results?.['confirmation.xlsx'];
+    if (!confExists || cr?.skipped) return { success: true, skipped: true, patched: 0 };
+    return { success: true, patched: cr?.patched || 0, unmatched: cr?.unmatched || [] };
   }, []);
 
   // 수동 저장 — PO 저장이면 confirmation.xlsx 의 I/M 도 자동 패치

@@ -1451,6 +1451,51 @@ function registerIpcHandlers({
       }
 
       XLSX.writeFile(wb, poPath, { bookType: 'xlsx' });
+
+      // 저장 직후 po-tbnws.xlsx / confirmation.xlsx 도 자동 동기화.
+      // aoa 에서 복합키(발주번호|물류센터|SKU바코드) 와 확정수량을 뽑아서 sync.
+      try {
+        const headerNames = headerRow.map((h) => String(h).trim());
+        const findIdx = (names) => {
+          for (const n of names) {
+            const i = headerNames.indexOf(n);
+            if (i >= 0) return i;
+          }
+          return -1;
+        };
+        const iOrder   = findIdx(['발주번호', '주문번호']);
+        const iWh      = findIdx(['물류센터']);
+        const iBarcode = findIdx(['상품바코드', 'SKU Barcode', 'SKU Barcode ', 'SKU 바코드']);
+        const iOrderQ  = findIdx(['발주수량']);
+        if (iOrder >= 0 && iWh >= 0 && iBarcode >= 0) {
+          const reason = loadDefaultShortageReason(vendor);
+          const syncPatches = [];
+          for (const p of patches) {
+            if (!Number.isInteger(p?.rowIndex) || p.rowIndex < 1) continue;
+            const row = aoa[p.rowIndex];
+            if (!row) continue;
+            const order    = String(row[iOrder] ?? '').trim();
+            const wh       = String(row[iWh] ?? '').trim();
+            const barcode  = String(row[iBarcode] ?? '').trim();
+            if (!order || !wh || !barcode) continue;
+            const qty = Number(p.confirmed_qty);
+            const orderQ = iOrderQ >= 0 ? (Number(row[iOrderQ]) || 0) : 0;
+            syncPatches.push({
+              key: `${order}|${wh}|${barcode}`,
+              confirmedQty: String(qty),
+              shortageReason: (orderQ > 0 && qty < orderQ) ? reason : '',
+            });
+          }
+          if (syncPatches.length > 0) {
+            await syncConfirmedQtyAcrossFiles(date, vendor, sequence, syncPatches);
+          }
+        }
+      } catch (syncErr) {
+        // sync 실패는 로그만 — po.xlsx 저장 자체는 성공.
+        // eslint-disable-next-line no-console
+        console.warn('[stockAdjust:save] cross-sync 실패', syncErr.message);
+      }
+
       return { success: true, applied };
     } catch (err) {
       return { success: false, error: err.message };
@@ -1706,8 +1751,136 @@ function registerIpcHandlers({
   });
 
   /**
-   * confirmation:patchQuantities — confirmation.xlsx 의 확정수량(I) · 납품부족사유(M) 만
-   * in-place 패치. 입고유형(C)·사용자 직접 편집(회송담당자 수정 등)은 보존.
+   * 단일 xlsx 파일에서 복합키(발주번호|물류센터|SKU바코드) 매칭 후
+   * 확정수량(+선택적으로 납품부족사유) 를 in-place 패치.
+   *
+   * 확정수량 컬럼만 있는 파일(po.xlsx / po-tbnws.xlsx) 과 납품부족사유까지 있는
+   * 확정서(confirmation.xlsx) 양쪽 모두 처리. 컬럼 이름은 바리에이션 모두 수용.
+   *
+   * @returns {{ success: true, skipped?: true, patched?: number, unmatched?: string[] } | { success: false, error: string }}
+   */
+  async function patchConfirmedQtyInFile(filePath, patches, opts = {}) {
+    if (!fs.existsSync(filePath)) {
+      return { success: true, skipped: true, patched: 0, unmatched: [] };
+    }
+    const byKey = new Map();
+    for (const p of patches) {
+      if (p && typeof p.key === 'string') byKey.set(p.key, p);
+    }
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(filePath);
+    const ws = opts.sheetName
+      ? (wb.getWorksheet(opts.sheetName) || wb.worksheets[0])
+      : wb.worksheets[0];
+    if (!ws) return { success: false, error: `시트 없음: ${path.basename(filePath)}` };
+
+    let iOrder = null;
+    let iWh = null;
+    let iBarcode = null;
+    let iQty = null;
+    let iReason = null;
+    ws.getRow(1).eachCell((cell, col) => {
+      const v = String(cell.value ?? '').trim();
+      if (v === '발주번호' || v === '주문번호') iOrder = col;
+      else if (v === '물류센터') iWh = col;
+      else if (v === '상품바코드' || v === 'SKU Barcode' || v === 'SKU Barcode ' || v === 'SKU 바코드') iBarcode = col;
+      else if (v === '확정수량') iQty = col;
+      else if (v === '납품부족사유') iReason = col;
+    });
+    if (!iOrder || !iWh || !iBarcode || !iQty) {
+      return { success: false, error: `필수 컬럼 없음: ${path.basename(filePath)}` };
+    }
+
+    const last = ws.actualRowCount || ws.rowCount;
+    let patched = 0;
+    const matchedKeys = new Set();
+    for (let r = 2; r <= last; r += 1) {
+      const order = String(ws.getCell(r, iOrder).value ?? '').trim();
+      const wh = String(ws.getCell(r, iWh).value ?? '').trim();
+      const barcode = String(ws.getCell(r, iBarcode).value ?? '').trim();
+      if (!order || !wh || !barcode) continue;
+      const key = `${order}|${wh}|${barcode}`;
+      const p = byKey.get(key);
+      if (!p) continue;
+      ws.getCell(r, iQty).value = String(p.confirmedQty ?? '');
+      if (iReason && p.shortageReason !== undefined) {
+        ws.getCell(r, iReason).value = String(p.shortageReason ?? '');
+      }
+      matchedKeys.add(key);
+      patched += 1;
+    }
+
+    if (patched > 0) {
+      await wb.xlsx.writeFile(filePath);
+    }
+    const unmatched = [];
+    for (const k of byKey.keys()) if (!matchedKeys.has(k)) unmatched.push(k);
+    return { success: true, patched, unmatched };
+  }
+
+  /** 파일 갱신 이벤트 broadcast — main + popup 윈도우 전부에게 */
+  function broadcastFileUpdated(payload) {
+    try {
+      const w = getWindow();
+      if (w && !w.isDestroyed()) w.webContents.send('job:file-updated', payload);
+    } catch {}
+    for (const ch of BrowserWindow.getAllWindows()) {
+      try {
+        if (ch && !ch.isDestroyed()) ch.webContents.send('job:file-updated', payload);
+      } catch {}
+    }
+  }
+
+  /**
+   * 세 파일(po.xlsx / po-tbnws.xlsx / confirmation.xlsx) 에 동시에 확정수량 patch.
+   * 파일 없으면 skip, 있으면 patch + 이벤트 broadcast.
+   */
+  async function syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches) {
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const targets = [
+      { file: 'po.xlsx',           path: path.join(dir, 'po.xlsx'),           sheetName: null },
+      { file: 'po-tbnws.xlsx',     path: path.join(dir, 'po-tbnws.xlsx'),     sheetName: null },
+      { file: 'confirmation.xlsx', path: path.join(dir, 'confirmation.xlsx'), sheetName: '상품목록' },
+    ];
+    const results = {};
+    for (const t of targets) {
+      try {
+        const r = await patchConfirmedQtyInFile(t.path, patches, { sheetName: t.sheetName });
+        results[t.file] = r;
+        if (r.success && !r.skipped && (r.patched || 0) > 0) {
+          broadcastFileUpdated({ date, vendor, sequence, file: t.file, patched: r.patched });
+        }
+      } catch (err) {
+        results[t.file] = { success: false, error: err.message };
+      }
+    }
+    return { success: true, results };
+  }
+
+  /** 벤더 > 전역 순서로 defaultShortageReason 조회 */
+  function loadDefaultShortageReason(vendor) {
+    const HARD_DEFAULT = '협력사 재고부족 - 수입상품 입고지연 (선적/통관지연)';
+    let defaultVal = HARD_DEFAULT;
+    try {
+      const sp = path.join(dataDir, 'settings.json');
+      if (fs.existsSync(sp)) {
+        const s = JSON.parse(fs.readFileSync(sp, 'utf-8'));
+        if (s?.settings?.defaultShortageReason) defaultVal = s.settings.defaultShortageReason;
+      }
+      const vp = path.join(dataDir, 'vendors.json');
+      if (fs.existsSync(vp)) {
+        const v = JSON.parse(fs.readFileSync(vp, 'utf-8'));
+        const meta = (v?.vendors || []).find((x) => x.id === vendor);
+        const vr = meta?.settings?.defaultShortageReason;
+        if (vr) return vr;
+      }
+    } catch {}
+    return defaultVal;
+  }
+
+  /**
+   * confirmation:patchQuantities — confirmation.xlsx 만 patch (기존 호환).
+   * 새 호출자는 가능하면 confirmedQty:sync 를 사용해 세 파일 동시 갱신 권장.
    *
    * 매칭 키: 발주번호|물류센터|상품바코드
    * patches: Array<{ key: string, confirmedQty: string, shortageReason: string }>
@@ -1725,76 +1898,32 @@ function registerIpcHandlers({
       return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
     }
     try {
-      const byKey = new Map();
-      for (const p of patches) {
-        if (p && typeof p.key === 'string') byKey.set(p.key, p);
-      }
-
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.readFile(confPath);
-      const ws = wb.getWorksheet('상품목록') || wb.worksheets[0];
-      if (!ws) return { success: false, error: '상품목록 시트 없음' };
-
-      let iOrder = null;
-      let iWh = null;
-      let iBarcode = null;
-      let iQty = null;
-      let iReason = null;
-      ws.getRow(1).eachCell((cell, col) => {
-        const v = String(cell.value ?? '').trim();
-        if (v === '발주번호') iOrder = col;
-        else if (v === '물류센터') iWh = col;
-        else if (v === '상품바코드') iBarcode = col;
-        else if (v === '확정수량') iQty = col;
-        else if (v === '납품부족사유') iReason = col;
+      const res = await patchConfirmedQtyInFile(confPath, patches, { sheetName: '상품목록' });
+      if (!res.success) return res;
+      broadcastFileUpdated({
+        date, vendor, sequence, file: 'confirmation.xlsx', patched: res.patched,
       });
-      if (!iOrder || !iWh || !iBarcode || !iQty || !iReason) {
-        return { success: false, error: '필수 컬럼을 찾지 못했습니다.' };
-      }
-
-      const last = ws.actualRowCount || ws.rowCount;
-      let patched = 0;
-      const matchedKeys = new Set();
-      for (let r = 2; r <= last; r += 1) {
-        const order = String(ws.getCell(r, iOrder).value ?? '').trim();
-        const wh = String(ws.getCell(r, iWh).value ?? '').trim();
-        const barcode = String(ws.getCell(r, iBarcode).value ?? '').trim();
-        if (!order || !wh || !barcode) continue;
-        const key = `${order}|${wh}|${barcode}`;
-        const p = byKey.get(key);
-        if (!p) continue;
-        ws.getCell(r, iQty).value = String(p.confirmedQty ?? '');
-        ws.getCell(r, iReason).value = String(p.shortageReason ?? '');
-        matchedKeys.add(key);
-        patched += 1;
-      }
-
-      if (patched > 0) {
-        await wb.xlsx.writeFile(confPath);
-      }
-
-      const unmatched = [];
-      for (const k of byKey.keys()) {
-        if (!matchedKeys.has(k)) unmatched.push(k);
-      }
-
-      // 렌더러들에게 "확정서 파일 갱신됨" 알림 → 해당 탭 열려있으면 자동 재로드.
-      // 팝업 윈도우(stock-adjust/transport) 도 같은 이벤트를 공유할 수 있도록 broadcast.
-      const payload = { date, vendor, sequence, file: 'confirmation.xlsx', patched };
-      try {
-        const w = getWindow();
-        if (w && !w.isDestroyed()) w.webContents.send('job:file-updated', payload);
-      } catch {}
-      for (const ch of BrowserWindow.getAllWindows()) {
-        try {
-          if (ch && !ch.isDestroyed()) ch.webContents.send('job:file-updated', payload);
-        } catch {}
-      }
-
-      return { success: true, patched, unmatched };
+      return res;
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  /**
+   * confirmedQty:sync — po.xlsx / po-tbnws.xlsx / confirmation.xlsx 3 파일을 동시에
+   * 복합키 기반으로 확정수량(+confirmation 은 납품부족사유) patch. 파일이 없으면 skip.
+   *
+   * 한 저장 경로에서 한 번만 호출하면 나머지 파일들이 동기화됨.
+   * 각 파일마다 'job:file-updated' 이벤트를 발송 → 렌더러가 자동 재로드.
+   */
+  ipcMain.handle('confirmedQty:sync', async (_e, date, vendor, sequence, patches) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!Array.isArray(patches)) {
+      return { success: false, error: 'patches must be array' };
+    }
+    return await syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches);
   });
 }
 

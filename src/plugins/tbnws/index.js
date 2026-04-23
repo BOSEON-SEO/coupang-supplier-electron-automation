@@ -216,6 +216,15 @@ const manifest = {
         tabVariant: 'tbnws',
         handler: () => {},
         onSave: async (buffer, { job, electronAPI }) => {
+          // 1) 편집된 po-tbnws.xlsx 자체를 먼저 디스크에 저장 (탭 닫아도 편집 보존)
+          const tbnwsResolved = await electronAPI.resolveJobPath(
+            job.date, job.vendor, job.sequence, 'po-tbnws.xlsx',
+          );
+          if (tbnwsResolved?.success) {
+            await electronAPI.writeFile(tbnwsResolved.path, buffer);
+          }
+
+          // 2) 편집된 buffer 에서 patches 추출
           const wb = XLSX.read(buffer, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
           if (!ws) throw new Error('시트를 찾을 수 없습니다.');
@@ -232,7 +241,6 @@ const manifest = {
             throw new Error('필수 컬럼을 찾을 수 없습니다.');
           }
 
-          // 기본 부족사유 — patchConfirmationFromPo 와 동일 로직
           const [vRes, sRes] = await Promise.all([
             electronAPI.loadVendors(),
             electronAPI.loadSettings(),
@@ -261,16 +269,22 @@ const manifest = {
               shortageReason: confirmedNum < orderNum ? defaultReason : '',
             });
           }
-          const res = await electronAPI.confirmation.patchQuantities(
+
+          // 3) 세 파일 동시 sync (po.xlsx / po-tbnws.xlsx / confirmation.xlsx)
+          const res = await electronAPI.confirmedQty.sync(
             job.date, job.vendor, job.sequence, patches,
           );
-          if (!res?.success && !res?.skipped) {
-            throw new Error(res?.error || '발주확정서 patch 실패');
+          if (!res?.success) {
+            throw new Error(res?.error || '확정수량 sync 실패');
           }
-          if (res?.skipped) {
-            alert('발주확정서가 아직 생성되지 않아 patch 를 건너뛰었습니다.');
+          const r = res.results || {};
+          const parts = Object.entries(r)
+            .filter(([, v]) => v?.success && !v.skipped && (v.patched || 0) > 0)
+            .map(([f, v]) => `${f} ${v.patched}건`);
+          if (parts.length === 0) {
+            alert('반영된 파일이 없습니다. 복합키 매칭을 확인하세요.');
           } else {
-            alert(`확정수량 ${patches.length}건을 발주확정서에 반영했습니다.`);
+            alert(`확정수량 반영 완료: ${parts.join(' · ')}`);
           }
         },
       }),
