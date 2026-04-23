@@ -9,7 +9,7 @@ import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
-import { DEV_ENTITLEMENTS } from './core/entitlements';
+import { resolveEntitlements } from './core/entitlements';
 import { runHook } from './core/plugin-registry';
 import { KNOWN_HOOKS } from './core/plugin-api';
 
@@ -66,8 +66,10 @@ export default function App() {
   const pluginsMenuEnabled = !!globalSettings.pluginsMenuEnabled;
 
   // ── 플러그인 로드 ─────────────────────────────────────────
-  // 현재는 entitlements 하드코딩 (라이선스 서버 미연결). 출시 단계에 교체.
-  const entitlements = useMemo(() => DEV_ENTITLEMENTS, []);
+  // entitlements 는 글로벌 설정(pluginsMenuEnabled) 으로 on/off.
+  // 설정 변경 시 settings-changed 이벤트 → globalSettings 갱신 → entitlements 재계산
+  //   → bootstrapPlugins useEffect 재실행 → 플러그인 unload + load.
+  const entitlements = useMemo(() => resolveEntitlements(globalSettings), [globalSettings]);
   useEffect(() => {
     bootstrapPlugins({
       entitlements,

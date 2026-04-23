@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import StockAdjustApp from './StockAdjustApp';
 import TransportApp from './TransportApp';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
-import { DEV_ENTITLEMENTS } from './core/entitlements';
+import { resolveEntitlements } from './core/entitlements';
 import './styles/global.css';
 
 // hash 기반 라우팅 — 새 BrowserWindow 도 같은 index.html 을 재사용
@@ -23,15 +23,44 @@ function parseRoute() {
 
 const route = parseRoute();
 
-// Popup 윈도우(stock-adjust / transport) 는 별도 React 트리라서 이 쪽에서도
-// 플러그인을 부트스트랩해야 ViewOutlet/SlotRenderer 가 동작함.
-// Main 윈도우의 App 컴포넌트는 자체적으로 bootstrapPlugins 를 호출함.
-if (route.name === 'stock-adjust' || route.name === 'transport') {
-  bootstrapPlugins({
-    entitlements: DEV_ENTITLEMENTS,
-    currentVendor: route.params?.vendor || null,
-    electronAPI: window.electronAPI,
-  });
+/**
+ * Popup 윈도우용 래퍼 — 설정을 async 로 로드한 뒤 entitlements 계산 +
+ * 플러그인 부트스트랩. settings-changed 이벤트로 재로드도 처리.
+ * Main 윈도우의 App 은 자체적으로 설정·bootstrap 처리하므로 여기서는 popup 만.
+ */
+function PopupShell({ children, vendor }) {
+  const [entitlements, setEntitlements] = useState([]);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const reload = async () => {
+      const res = await window.electronAPI?.loadSettings();
+      if (cancelled) return;
+      const ents = resolveEntitlements(res?.settings || {});
+      setEntitlements(ents);
+      bootstrapPlugins({
+        entitlements: ents,
+        currentVendor: vendor || null,
+        electronAPI: window.electronAPI,
+      });
+      setReady(true);
+    };
+    reload();
+    const onChanged = () => reload();
+    window.addEventListener('settings-changed', onChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('settings-changed', onChanged);
+    };
+  }, [vendor]);
+
+  if (!ready) return null;
+  return (
+    <PluginProvider entitlements={entitlements} currentVendor={vendor || null}>
+      {children}
+    </PluginProvider>
+  );
 }
 
 const popupVendor = route.params?.vendor || null;
@@ -40,14 +69,14 @@ const root = createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     {route.name === 'stock-adjust' && (
-      <PluginProvider entitlements={DEV_ENTITLEMENTS} currentVendor={popupVendor}>
+      <PopupShell vendor={popupVendor}>
         <StockAdjustApp params={route.params} />
-      </PluginProvider>
+      </PopupShell>
     )}
     {route.name === 'transport' && (
-      <PluginProvider entitlements={DEV_ENTITLEMENTS} currentVendor={popupVendor}>
+      <PopupShell vendor={popupVendor}>
         <TransportApp params={route.params} />
-      </PluginProvider>
+      </PopupShell>
     )}
     {route.name === 'main' && <App />}
   </React.StrictMode>

@@ -323,9 +323,11 @@ export default function SettingsView({ activeVendor }) {
             checked={!!defaults.pluginsMenuEnabled}
             onChange={(e) => handleDefaultChange('pluginsMenuEnabled', e.target.checked)}
           />
-          <span className="settings-toggle__label">플러그인 메뉴 표시</span>
+          <span className="settings-toggle__label">플러그인 활성화</span>
           <span className="settings-toggle__hint">
-            사이드바에 🔌 플러그인 메뉴를 추가합니다 (로드된 플러그인 현황 확인용).
+            모든 플러그인을 on/off 합니다. 끄면 벤더별 커스텀 탭·모달·체크박스 등
+            플러그인이 기여한 UI 가 전부 사라지고 순정 코어만 동작. 사이드바의
+            🔌 플러그인 메뉴도 이 설정에 따라 함께 토글됩니다.
           </span>
         </label>
       </div>
