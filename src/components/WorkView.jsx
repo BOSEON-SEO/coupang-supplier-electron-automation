@@ -98,6 +98,16 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     return pluginTabs.find((c) => c.id === id) || null;
   }, [activeTab, pluginTabs]);
 
+  // 플러그인 탭을 after='po' 와 나머지로 분리 (나머지는 끝에)
+  const pluginTabsAfterPo = useMemo(
+    () => pluginTabs.filter((c) => c.after === 'po'),
+    [pluginTabs],
+  );
+  const pluginTabsAtEnd = useMemo(
+    () => pluginTabs.filter((c) => c.after !== 'po'),
+    [pluginTabs],
+  );
+
   /**
    * 플러그인 탭 클릭 핸들러 — fileName 으로 파일 로드.
    * 파일 없으면 (= 플러그인 후처리 전) 안내만.
@@ -416,6 +426,29 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       setSaving(false);
     }
   }, [appendLog, patchConfirmationFromPo]);
+
+  // 플러그인 탭 저장 — command.onSave 가 있으면 그걸 호출 (파일 덮어쓰기 대신).
+  const handlePluginSave = useCallback(async () => {
+    const cmd = activePluginTab;
+    if (!cmd?.onSave) return;
+    const data = latestSheetsRef.current;
+    if (!data || !job) {
+      appendLog('warn', '저장할 데이터가 없습니다.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const buf = sheetsToXlsx(data);
+      await cmd.onSave(buf, { job, electronAPI: window.electronAPI });
+      setDirty(false);
+      appendLog('info', `[${cmd.title}] 저장 완료`);
+    } catch (err) {
+      appendLog('error', `[${cmd.title}] 저장 실패: ${err.message}`);
+      alert(`저장 실패: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [activePluginTab, job, appendLog]);
 
   // ── Python 이벤트 리스너 ──
   useEffect(() => {
@@ -1451,6 +1484,22 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
           >
             📄 PO 원본
           </button>
+          {/* 플러그인 탭 — after='po' 인 것들 PO 바로 뒤에 */}
+          {pluginTabsAfterPo.map((cmd) => {
+            const tabKey = `plugin:${cmd.id}`;
+            return (
+              <button
+                key={cmd.id}
+                type="button"
+                className={`workview-file-tab${activeTab === tabKey ? ' is-active' : ''}`}
+                onClick={() => handlePluginTabClick(cmd)}
+                disabled={!job}
+                title={cmd.title}
+              >
+                {cmd.icon ? `${cmd.icon} ` : ''}{cmd.title}
+              </button>
+            );
+          })}
           <button
             type="button"
             className={`workview-file-tab${activeTab === 'confirmation' ? ' is-active' : ''}`}
@@ -1486,8 +1535,8 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
           >
             📊 결과/출력
           </button>
-          {/* 플러그인 기여 탭 (work.tab.extra) */}
-          {pluginTabs.map((cmd) => {
+          {/* 플러그인 기여 탭 — after 미지정은 끝에 */}
+          {pluginTabsAtEnd.map((cmd) => {
             const tabKey = `plugin:${cmd.id}`;
             return (
               <button
@@ -1688,9 +1737,13 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
               <button
                 type="button"
                 className="btn btn--secondary btn--sm"
-                onClick={handleSaveNow}
+                onClick={activePluginTab?.onSave ? handlePluginSave : handleSaveNow}
                 disabled={!dirty || saving || !xlsxBuffer || jobLocked}
-                title={jobLocked ? '플러그인 창이 열려있습니다' : '현재 파일에 덮어쓰기'}
+                title={
+                  jobLocked ? '플러그인 창이 열려있습니다'
+                    : activePluginTab?.onSave ? '확정수량을 발주확정서에 반영'
+                    : '현재 파일에 덮어쓰기'
+                }
               >
                 💾 {saving ? '저장 중...' : '저장'}
               </button>

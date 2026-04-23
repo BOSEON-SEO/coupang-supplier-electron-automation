@@ -35,6 +35,7 @@ function renderExportStatus(exportYn) {
  */
 function toExtendedRow(r) {
   const orderQty = Number(r.order_quantity) || 0;
+  const requestedQty = Number(r.requested_qty) || 0;
   const purchasePrice = Number(r.purchase_price) || 0;
   const deliveryPrice = Number(r.rtn_sku_delivery_price) || 0;
   const tobe = Number(r.rtn_tobe_stock) || 0;
@@ -50,6 +51,7 @@ function toExtendedRow(r) {
     ['SKU 이름',       r.sku_name ?? ''],
     ['SKU 바코드',     r.sku_barcode ?? ''],
     ['발주수량',       orderQty],
+    ['확정수량',       requestedQty],     // 백엔드 할당값 기본, 사용자 편집 가능
     ['물류센터',       r.departure_warehouse ?? ''],
     ['매입가',         purchasePrice],
     ['총매입금',       totalPurchase],
@@ -59,7 +61,6 @@ function toExtendedRow(r) {
     ['풀필재고',       fulfill],
     ['투비바코드',     r.rtn_tobe_barcode ?? ''],
     ['바코드일치',     r.rtn_barcode_matched ?? ''],
-    // 이하 백엔드 enrichStep2Defaults 가 채운 필드들 (로컬 재계산 없음)
     ['출고여부',       renderExportStatus(r.export_yn)],
     ['비고',           r.stock_remarks ?? ''],
   ];
@@ -69,7 +70,7 @@ function toExtendedRow(r) {
 function buildAoa(data) {
   if (!Array.isArray(data) || data.length === 0) {
     return [[
-      '발주번호','상품코드','SKU ID','SKU 이름','SKU 바코드','발주수량','물류센터',
+      '발주번호','상품코드','SKU ID','SKU 이름','SKU 바코드','발주수량','확정수량','물류센터',
       '매입가','총매입금','SKU 납품가','매입-납품 차액','투비재고','풀필재고',
       '투비바코드','바코드일치','출고여부','비고',
     ]];
@@ -83,12 +84,12 @@ function buildAoa(data) {
 /** AOA → xlsx ArrayBuffer */
 function buildWorkbookBuffer(aoa) {
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  // 컬럼 폭 대충
+  // 컬럼 폭 (18컬럼)
   ws['!cols'] = [
     { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 32 }, { wch: 16 },
-    { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
-    { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 10 },
-    { wch: 10 }, { wch: 28 },
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+    { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 16 },
+    { wch: 10 }, { wch: 10 }, { wch: 28 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'TBNWS 확장');
@@ -180,24 +181,82 @@ const manifest = {
       }),
     );
 
-    // WorkView 에 "TBNWS 확장" 탭 기여.
+    // WorkView 에 "검증·확정" 탭 기여 (PO ↔ 확정서 사이).
     //
-    // scope=work.tab.extra 의 command 는 특수 규약:
-    //   - fileName: WorkView 가 해당 파일을 탭 콘텐츠로 로드
-    //   - handler: 빈 함수 (탭 전환은 코어가 처리, command 는 메타데이터만)
-    //
-    // 파일이 아직 없으면 (PO 후처리 전) 탭은 보이되 클릭 시 안내만.
+    // scope=work.tab.extra 의 command 규약:
+    //   - fileName: 탭이 로드할 파일 (po-tbnws.xlsx)
+    //   - after: 'po' → PO 탭 뒤에 배치
+    //   - onSave: 사용자가 확정수량 편집 후 저장 누를 때 호출.
+    //             편집된 buffer 에서 확정수량 추출 → confirmation.xlsx 에 patch.
     disposables.push(
       ctx.registerCommand({
         id: 'tbnws.poExtended',
-        title: 'TBNWS 확장',
+        title: '검증·확정',
         icon: '🏢',
         scope: KNOWN_SCOPES.WORK_TAB_EXTRA,
         order: 50,
-        // Command 규약 확장 — WorkView 가 해석
         fileName: 'po-tbnws.xlsx',
-        readOnly: true,  // 원본 PO 의 후처리 산출물이라 편집 금지
+        after: 'po',
+        readOnly: false,
         handler: () => {},
+        onSave: async (buffer, { job, electronAPI }) => {
+          const wb = XLSX.read(buffer, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          if (!ws) throw new Error('시트를 찾을 수 없습니다.');
+          const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (aoa.length < 2) throw new Error('데이터 행이 없습니다.');
+          const header = aoa[0].map((h) => String(h).trim());
+          const col = (name) => header.indexOf(name);
+          const iOrder = col('발주번호');
+          const iWh = col('물류센터');
+          const iBarcode = col('SKU 바코드');
+          const iOrderQty = col('발주수량');
+          const iConfirmedQty = col('확정수량');
+          if (iOrder < 0 || iWh < 0 || iBarcode < 0 || iConfirmedQty < 0) {
+            throw new Error('필수 컬럼을 찾을 수 없습니다.');
+          }
+
+          // 기본 부족사유 — patchConfirmationFromPo 와 동일 로직
+          const [vRes, sRes] = await Promise.all([
+            electronAPI.loadVendors(),
+            electronAPI.loadSettings(),
+          ]);
+          const defaults = sRes?.settings || {};
+          const vendorMeta = vRes?.vendors?.find?.((v) => v.id === job.vendor) || {};
+          const override = vendorMeta.settings || {};
+          const pick = (k) =>
+            (override[k] !== undefined && override[k] !== '') ? override[k] : (defaults[k] ?? '');
+          const defaultReason = pick('defaultShortageReason')
+            || '협력사 재고부족 - 수입상품 입고지연 (선적/통관지연)';
+
+          const patches = [];
+          for (let i = 1; i < aoa.length; i += 1) {
+            const row = aoa[i];
+            const orderSeq = String(row[iOrder] ?? '').trim();
+            const warehouse = String(row[iWh] ?? '').trim();
+            const barcode = String(row[iBarcode] ?? '').trim();
+            if (!orderSeq || !barcode) continue;
+            const confirmedQty = String(row[iConfirmedQty] ?? 0);
+            const confirmedNum = Number(confirmedQty) || 0;
+            const orderNum = Number(row[iOrderQty] ?? 0) || 0;
+            patches.push({
+              key: `${orderSeq}|${warehouse}|${barcode}`,
+              confirmedQty,
+              shortageReason: confirmedNum < orderNum ? defaultReason : '',
+            });
+          }
+          const res = await electronAPI.confirmation.patchQuantities(
+            job.date, job.vendor, job.sequence, patches,
+          );
+          if (!res?.success && !res?.skipped) {
+            throw new Error(res?.error || '발주확정서 patch 실패');
+          }
+          if (res?.skipped) {
+            alert('발주확정서가 아직 생성되지 않아 patch 를 건너뛰었습니다.');
+          } else {
+            alert(`확정수량 ${patches.length}건을 발주확정서에 반영했습니다.`);
+          }
+        },
       }),
     );
 

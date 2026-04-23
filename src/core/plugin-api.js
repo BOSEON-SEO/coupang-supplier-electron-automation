@@ -149,6 +149,13 @@
  *   표시 조건. false 면 해당 호출에서 숨김.
  * @property {(args: any, ctx: PluginContext) => (void | Promise<void>)} handler
  *   실행 함수. args 는 scope 별로 다름 (예: 'transport.row.actions' 는 { row } 전달).
+ *
+ * scope='work.tab.extra' 전용 옵션 필드:
+ * @property {string} [fileName]   WorkView 탭이 로드할 파일명. 예: 'po-tbnws.xlsx'
+ * @property {boolean} [readOnly]  탭에서 저장 버튼 숨김
+ * @property {'po' | 'confirmation' | 'result'} [after]  탭 렌더 위치 (기본: 끝)
+ * @property {(buffer: ArrayBuffer, ctx: { job: object, electronAPI: object }) => Promise<void>} [onSave]
+ *   저장 버튼 눌렸을 때 호출. 주어지면 기본 파일 덮어쓰기 대신 이걸 실행.
  */
 
 /**
