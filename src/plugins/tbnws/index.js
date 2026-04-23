@@ -213,6 +213,9 @@ const manifest = {
           const res = await ctx.ipcInvoke('po.checkForm', {
             fileName: payload?.fileName,
             fileBuffer: payload?.buffer,
+            // 백엔드 normalizeCategory: CANON → CANON, 나머지 → BASIC.
+            // 작업 벤더(예: 'canon', 'coupang') 그대로 보내면 백이 정규화해서 분기.
+            category: payload?.job?.vendor || '',
           });
           if (!res?.success) {
             console.warn('[tbnws] po.checkForm 실패:', res?.error);

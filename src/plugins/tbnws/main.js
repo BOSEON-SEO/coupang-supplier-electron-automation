@@ -147,15 +147,18 @@ module.exports = {
         if (buffer.length === 0) {
           return { success: false, error: 'fileBuffer 가 비어있습니다.' };
         }
-        // 백엔드 coupangCheckForm 은 file 만 받는다 (벤더 판정은 SKU 마스터에서 자동).
-        const { body, contentType } = buildMultipart([
+        // category: 작업 벤더 그대로 전달. 백엔드 normalizeCategory 가 CANON/BASIC 로 정리.
+        // 컨트롤러가 아직 이 파라미터를 받지 않아도 Spring 은 무시하니 안전.
+        const fields = [
           {
             name: 'file',
             value: buffer,
             filename: payload?.fileName || 'po.xlsx',
             contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           },
-        ]);
+        ];
+        if (payload?.category) fields.unshift({ name: 'category', value: String(payload.category) });
+        const { body, contentType } = buildMultipart(fields);
         const url = apiUrl(settings, '/coupang/coupangList/coupangCheckForm');
         try {
           const res = await request(url, {
