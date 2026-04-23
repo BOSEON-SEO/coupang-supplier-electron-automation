@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import SpreadsheetView from './SpreadsheetView';
 import LogPanel from './LogPanel';
 import CountdownModal from './CountdownModal';
 import { sheetsToXlsx } from '../lib/excelFormats';
 import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
-import { SlotRenderer } from '../core/plugin-host';
+import { SlotRenderer, usePluginRuntime } from '../core/plugin-host';
+import { getCommandsForScope } from '../core/plugin-registry';
 import { KNOWN_SCOPES } from '../core/plugin-api';
 import { nextPhase } from './PhaseStepper';
 import { buildConfirmationArrayBuffer, applyDateRule } from '../core/confirmationBuilder';
@@ -76,8 +77,54 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   const [poExists, setPoExists] = useState(false);
   const [confirmationExists, setConfirmationExists] = useState(false);
 
-  // ── 활성 탭 ('po' | 'confirmation' | 'result') ──
+  // ── 활성 탭 ('po' | 'confirmation' | 'result' | 'plugin:<id>') ──
   const [activeTab, setActiveTab] = useState('po');
+
+  // ── 플러그인 탭 기여 (scope=work.tab.extra) ──
+  // command.fileName 으로 표시할 파일을 지정하는 규약.
+  const pluginRuntime = usePluginRuntime();
+  const pluginTabs = useMemo(() => {
+    return getCommandsForScope(KNOWN_SCOPES.WORK_TAB_EXTRA, {
+      currentVendor: pluginRuntime.currentVendor,
+      entitlements: pluginRuntime.entitlements,
+      job, phase: job?.phase,
+    });
+  }, [pluginRuntime.currentVendor, pluginRuntime.entitlements, job]);
+
+  // 활성 탭이 플러그인 탭일 때 그 command 반환
+  const activePluginTab = useMemo(() => {
+    if (!activeTab.startsWith('plugin:')) return null;
+    const id = activeTab.slice('plugin:'.length);
+    return pluginTabs.find((c) => c.id === id) || null;
+  }, [activeTab, pluginTabs]);
+
+  /**
+   * 플러그인 탭 클릭 핸들러 — fileName 으로 파일 로드.
+   * 파일 없으면 (= 플러그인 후처리 전) 안내만.
+   */
+  const handlePluginTabClick = useCallback(async (cmd) => {
+    if (!job) return;
+    setActiveTab(`plugin:${cmd.id}`);
+    if (!cmd.fileName) return;
+    const api = window.electronAPI;
+    const resolved = await api.resolveJobPath(job.date, job.vendor, job.sequence, cmd.fileName);
+    if (!resolved?.success) return;
+    const exists = await api.fileExists(resolved.path);
+    if (!exists) {
+      appendLog('info', `${cmd.title}: 파일이 아직 생성되지 않았습니다 (${cmd.fileName}).`);
+      setXlsxBuffer(null);
+      setLoadedPath(null);
+      return;
+    }
+    if (loadedPath === resolved.path) return;
+    const read = await api.readFile(resolved.path);
+    if (read?.success) {
+      setXlsxBuffer(read.data);
+      setLoadedPath(resolved.path);
+      latestSheetsRef.current = null;
+      appendLog('info', `${cmd.title} 로드 (${cmd.fileName})`);
+    }
+  }, [job, loadedPath, appendLog]);
 
   // ── 업로드 준비 스크립트가 끝나면 "업로드하셨나요?" 확인 오버레이 ──
   const [askUploadConfirm, setAskUploadConfirm] = useState(false);
@@ -1439,7 +1486,23 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
           >
             📊 결과/출력
           </button>
-          {dirty && activeTab !== 'result' && <span className="workview-section-header__dirty">· 변경됨</span>}
+          {/* 플러그인 기여 탭 (work.tab.extra) */}
+          {pluginTabs.map((cmd) => {
+            const tabKey = `plugin:${cmd.id}`;
+            return (
+              <button
+                key={cmd.id}
+                type="button"
+                className={`workview-file-tab${activeTab === tabKey ? ' is-active' : ''}`}
+                onClick={() => handlePluginTabClick(cmd)}
+                disabled={!job}
+                title={cmd.title}
+              >
+                {cmd.icon ? `${cmd.icon} ` : ''}{cmd.title}
+              </button>
+            );
+          })}
+          {dirty && activeTab !== 'result' && !activePluginTab && <span className="workview-section-header__dirty">· 변경됨</span>}
           {jobLocked && (
             <span
               className="workview-lock-badge"
@@ -1620,15 +1683,18 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             >
               📥 다운로드
             </button>
-            <button
-              type="button"
-              className="btn btn--secondary btn--sm"
-              onClick={handleSaveNow}
-              disabled={!dirty || saving || !xlsxBuffer || jobLocked}
-              title={jobLocked ? '플러그인 창이 열려있습니다' : '현재 파일에 덮어쓰기'}
-            >
-              💾 {saving ? '저장 중...' : '저장'}
-            </button>
+            {/* 플러그인 readonly 탭에선 저장 버튼 숨김 */}
+            {!activePluginTab?.readOnly && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={handleSaveNow}
+                disabled={!dirty || saving || !xlsxBuffer || jobLocked}
+                title={jobLocked ? '플러그인 창이 열려있습니다' : '현재 파일에 덮어쓰기'}
+              >
+                💾 {saving ? '저장 중...' : '저장'}
+              </button>
+            )}
           </>
         )}
       </div>

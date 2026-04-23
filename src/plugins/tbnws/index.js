@@ -124,23 +124,24 @@ const manifest = {
   activate(ctx) {
     const disposables = [];
 
-    // 스모크 테스트용 — work.toolbar 에 플러그인 식별 버튼.
+    // WorkView 에 "TBNWS 확장" 탭 기여.
+    //
+    // scope=work.tab.extra 의 command 는 특수 규약:
+    //   - fileName: WorkView 가 해당 파일을 탭 콘텐츠로 로드
+    //   - handler: 빈 함수 (탭 전환은 코어가 처리, command 는 메타데이터만)
+    //
+    // 파일이 아직 없으면 (PO 후처리 전) 탭은 보이되 클릭 시 안내만.
     disposables.push(
       ctx.registerCommand({
-        id: 'tbnws.menu',
-        title: 'TBNWS',
+        id: 'tbnws.poExtended',
+        title: 'TBNWS 확장',
         icon: '🏢',
-        scope: KNOWN_SCOPES.WORK_TOOLBAR,
+        scope: KNOWN_SCOPES.WORK_TAB_EXTRA,
         order: 50,
-        variant: 'secondary',
-        handler: (args) => {
-          alert(
-            `[TBNWS 플러그인]\n` +
-            `- 작업: ${args?.job ? `${args.job.vendor}/${args.job.sequence}차` : '(없음)'}\n` +
-            `- 탭: ${args?.activeTab || '-'}\n\n` +
-            `5개 기능 구현 예정 — 스켈레톤 상태.`,
-          );
-        },
+        // Command 규약 확장 — WorkView 가 해석
+        fileName: 'po-tbnws.xlsx',
+        readOnly: true,  // 원본 PO 의 후처리 산출물이라 편집 금지
+        handler: () => {},
       }),
     );
 
