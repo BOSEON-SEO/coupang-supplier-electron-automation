@@ -246,8 +246,10 @@ module.exports = {
      *   Order { receiverName, phone, zipCode, address, remark, refOrdNo?, items: [Item...] }
      *   Item  { productCode, eflexProductCode, ea }
      *
-     * 현재는 1개 order 로 모든 items 묶음. receiver 정보는 설정값 사용
-     * (default 는 admin 프론트와 동일). refOrdNo 미전송 → 백엔드가 yyMMdd-NNNN 자동 채번.
+     * admin 프론트와 동일한 포맷으로 전송:
+     *   - 1개 order 로 전체 items 묶음
+     *   - refOrdNo = YYYYMMDD + 카테고리코드(01=canon 외, 02=canon) + workSeq
+     *   - receiver 정보는 설정값 사용 (default admin 프론트 값)
      *
      * 렌더러 payload: { workSeq, items: Array<{productCode, eflexProductCode, ea}>,
      *                   jobMeta?: { date, vendor } }
@@ -273,11 +275,20 @@ module.exports = {
           remark:       settings.eflexRemark       || '쿠팡 입고 반출',
         };
 
+        // refOrdNo 빌드 — admin 프론트의 buildEflexRefOrdNo 와 동일 포맷.
+        //   YYYYMMDD + 카테고리코드 + workSeq
+        //   카테고리코드: canon → 02, 그 외(coupang/basic/…) → 01
+        const ymd = String(payload?.jobMeta?.date || '').replace(/-/g, '').slice(0, 8);
+        const cat = String(payload?.jobMeta?.vendor || '').toLowerCase() === 'canon' ? '02' : '01';
+        const refOrdNo = (ymd && payload.workSeq != null)
+          ? `${ymd}${cat}${payload.workSeq}`
+          : null;
+
         const reqBody = {
           work_seq: Number(payload.workSeq),
           orders: [{
+            refOrdNo,
             ...receiver,
-            // refOrdNo 는 보내지 않음 — 백엔드가 yyMMdd-NNNN 자동 채번
             items: payload.items.map((it) => ({
               productCode:      String(it.productCode ?? '').trim(),
               eflexProductCode: String(it.eflexProductCode ?? '').trim(),

@@ -99,13 +99,24 @@ export default function EflexOutboundModal({ job, onClose }) {
       //   productCode     : 제조사 상품코드 (내부 추적용)
       //   eflexProductCode: eFlexs 상품코드 (G-XXXXX 또는 cj_code)
       //   ea              : 수량
-      // po-tbnws 에는 제조사 상품코드 별도 필드가 없어 둘 다 tobe_product_code 로 전송.
-      // 백엔드가 G-코드로 일괄 조회하여 CJ 코드 매핑 수행.
-      const items = rows.map((r) => ({
-        productCode: r.productCode,
-        eflexProductCode: r.productCode,
-        ea: r.exportQuantity,
-      }));
+      // admin 프론트와 동일하게 productCode 별 그룹핑 + ea 합산.
+      // 같은 상품이 여러 발주·물류센터에 걸쳐 있어도 한 item 으로 합쳐짐.
+      const itemsByCode = new Map();
+      for (const r of rows) {
+        const code = r.productCode;
+        if (!code) continue;
+        const prev = itemsByCode.get(code);
+        if (prev) {
+          prev.ea += r.exportQuantity;
+        } else {
+          itemsByCode.set(code, {
+            productCode: code,
+            eflexProductCode: code,
+            ea: r.exportQuantity,
+          });
+        }
+      }
+      const items = Array.from(itemsByCode.values());
       const res = await window.electronAPI.invokePluginChannel(
         'tbnws', 'eflex.submitOutbound',
         { workSeq, items, jobMeta: { date: job.date, vendor: job.vendor } },
