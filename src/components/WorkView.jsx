@@ -1593,7 +1593,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       {/* Row 2: 탭 컨텍스트 액션 (왼쪽) + 다운로드/저장 (오른쪽) — 결과 탭에서는 생략 */}
       {activeTab !== 'result' && (
       <div className="workview-actions-bar">
-        {activeTab === 'po' && (
+        {activePluginTab?.replacesPoActions && (
           <>
             <button
               type="button"

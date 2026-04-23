@@ -156,6 +156,9 @@
  * @property {'po' | 'confirmation' | 'result'} [after]  탭 렌더 위치 (기본: 끝)
  * @property {(buffer: ArrayBuffer, ctx: { job: object, electronAPI: object }) => Promise<void>} [onSave]
  *   저장 버튼 눌렸을 때 호출. 주어지면 기본 파일 덮어쓰기 대신 이걸 실행.
+ * @property {boolean} [replacesPoActions]
+ *   true 면 이 탭이 PO 원본 탭의 context action(재고조정·확정서 생성/반영)을 대체.
+ *   PO 원본 탭은 순수 참조로 남고 액션 버튼은 이 탭에만 노출됨.
  */
 
 /**
