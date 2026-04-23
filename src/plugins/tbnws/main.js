@@ -129,14 +129,20 @@ module.exports = {
     const disposables = [];
 
     /**
-     * 쿠팡 PO xlsx 를 백엔드로 전송해 검증된 SKU 배열 받기.
-     * 백엔드: POST /coupang/coupangList/coupangCheckForm (FormData: file + category)
+     * 쿠팡 PO xlsx 를 백엔드로 전송해 작업 생성 + 검증된 SKU 배열 받기.
+     * 백엔드: POST /coupang/coupangList/inbound/startWork
      *
-     * payload: { fileName: string, fileBuffer: ArrayBuffer | Uint8Array, category?: string }
-     * 반환: { success: boolean, data?: any[], error?: string }
+     * payload: {
+     *   fileName: string,
+     *   fileBuffer: ArrayBuffer | Uint8Array,
+     *   inboundDate: 'YYYY-MM-DD',
+     *   category: string,  // 벤더 그대로 (canon/coupang 등)
+     *   round: number      // 작업 차수
+     * }
+     * 반환: { success: boolean, workSeq?: number, data?: any[], error?: string }
      */
     disposables.push(
-      registrar.handle('po.checkForm', async (_event, payload) => {
+      registrar.handle('po.startWork', async (_event, payload) => {
         const settings = readTbnwsSettings(registrar.dataDir);
         if (!settings.apiBaseUrl) {
           return { success: false, error: 'TBNWS API Base URL 이 설정되지 않았습니다.' };
@@ -147,9 +153,13 @@ module.exports = {
         if (buffer.length === 0) {
           return { success: false, error: 'fileBuffer 가 비어있습니다.' };
         }
-        // category: 작업 벤더 그대로 전달. 백엔드 normalizeCategory 가 CANON/BASIC 로 정리.
-        // 컨트롤러가 아직 이 파라미터를 받지 않아도 Spring 은 무시하니 안전.
+        if (!payload?.inboundDate) {
+          return { success: false, error: 'inboundDate 가 비어있습니다.' };
+        }
         const fields = [
+          { name: 'inbound_date', value: String(payload.inboundDate) },
+          { name: 'category', value: String(payload.category || '') },
+          { name: 'round', value: String(payload.round ?? 1) },
           {
             name: 'file',
             value: buffer,
@@ -157,9 +167,8 @@ module.exports = {
             contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           },
         ];
-        if (payload?.category) fields.unshift({ name: 'category', value: String(payload.category) });
         const { body, contentType } = buildMultipart(fields);
-        const url = apiUrl(settings, '/coupang/coupangList/coupangCheckForm');
+        const url = apiUrl(settings, '/coupang/coupangList/inbound/startWork');
         try {
           const res = await request(url, {
             method: 'POST',
@@ -172,7 +181,13 @@ module.exports = {
             timeoutMs: 60000,
           });
           if (res.status >= 200 && res.status < 300) {
-            return { success: true, data: res.data ?? res.raw };
+            const body2 = res.data ?? {};
+            // 응답: { work_seq: number, data: CoupangOrderFormCheck[] }
+            return {
+              success: true,
+              workSeq: body2.work_seq ?? null,
+              data: Array.isArray(body2.data) ? body2.data : [],
+            };
           }
           return {
             success: false,

@@ -202,41 +202,57 @@ const manifest = {
     );
 
     /**
-     * po.postprocess 훅 — 원본 PO 를 coupangCheckForm 으로 검증 + 재고 조회,
-     * 결과를 17컬럼 xlsx (어드민 프론트 CoupangCheckModal 와 동일 구조) 로 저장.
+     * po.postprocess 훅 — 원본 PO 를 startWork 로 전송해 작업 생성 + 검증.
+     * 결과를 17컬럼 xlsx (어드민 프론트 CoupangCheckModal 와 동일 구조) 로 저장하고,
+     * 백엔드의 work_seq 를 manifest.pluginData.tbnws.workSeq 에 영속화.
      *
      * 저장 위치: {job-folder}/po-tbnws.xlsx  (원본 po.xlsx 는 보존)
+     * work_seq 는 이후 saveStep1/2/3·eFlexs 반출 등 후속 API 에서 사용됨.
      */
     disposables.push(
       ctx.registerHook(KNOWN_HOOKS.PO_POSTPROCESS, async (payload, hookCtx, next) => {
         try {
-          const res = await ctx.ipcInvoke('po.checkForm', {
+          const job = payload?.job;
+          if (!job) {
+            console.warn('[tbnws] payload.job 없어서 startWork 스킵');
+            return next();
+          }
+          const res = await ctx.ipcInvoke('po.startWork', {
             fileName: payload?.fileName,
             fileBuffer: payload?.buffer,
-            // 백엔드 normalizeCategory: CANON → CANON, 나머지 → BASIC.
-            // 작업 벤더(예: 'canon', 'coupang') 그대로 보내면 백이 정규화해서 분기.
-            category: payload?.job?.vendor || '',
+            inboundDate: job.date,
+            category: job.vendor || '',
+            round: job.sequence,
           });
           if (!res?.success) {
-            console.warn('[tbnws] po.checkForm 실패:', res?.error);
+            console.warn('[tbnws] startWork 실패:', res?.error);
             return next();
           }
           const data = Array.isArray(res.data) ? res.data : [];
-          console.info('[tbnws] coupangCheckForm 응답 수신:', {
+          console.info('[tbnws] startWork 응답 수신:', {
+            workSeq: res.workSeq,
             rowCount: data.length,
             sample: data[0],
           });
 
-          // 응답 → 17컬럼 엑셀 빌드
+          // work_seq 를 manifest 에 영속화 (후속 API 호출에 사용)
+          if (res.workSeq != null) {
+            try {
+              const existing = (job.pluginData && job.pluginData.tbnws) || {};
+              await ctx.electronAPI.jobs.updateManifest(job.date, job.vendor, job.sequence, {
+                pluginData: {
+                  ...(job.pluginData || {}),
+                  tbnws: { ...existing, workSeq: res.workSeq },
+                },
+              });
+            } catch (err) {
+              console.warn('[tbnws] manifest workSeq 저장 실패', err);
+            }
+          }
+
+          // 응답 → 17컬럼 엑셀 빌드 + 저장
           const aoa = buildAoa(data);
           const outBuffer = buildWorkbookBuffer(aoa);
-
-          // job 폴더에 저장
-          const job = payload?.job;
-          if (!job) {
-            console.warn('[tbnws] payload.job 없어서 파일 저장 스킵');
-            return next();
-          }
           const resolved = await ctx.electronAPI.resolveJobPath(
             job.date, job.vendor, job.sequence, 'po-tbnws.xlsx',
           );
