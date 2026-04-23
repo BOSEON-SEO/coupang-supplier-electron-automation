@@ -141,8 +141,8 @@ const manifest = {
       key: 'apiBaseUrl',
       label: 'API Base URL',
       type: 'url',
-      placeholder: 'https://api.tbnws.co.kr/api',
-      description: 'TBNWS 사내 관리 백엔드 주소. /api 까지 포함 (예: https://api.tbnws.co.kr/api, http://localhost:8080/api).',
+      placeholder: 'https://api.tbnws.co.kr',
+      description: 'TBNWS 사내 관리 백엔드 주소. 뒤의 /api 는 포함해도 생략해도 OK (자동 정규화). 예: https://api.tbnws.co.kr 또는 http://localhost:8080',
     },
     {
       key: 'apiToken',
