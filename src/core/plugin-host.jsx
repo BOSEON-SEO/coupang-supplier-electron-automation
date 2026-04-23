@@ -48,8 +48,30 @@ export function usePluginRuntime() {
 // 실제 데이터는 version 을 dep 로 useMemo 로 계산 → 루프 없음.
 // ═══════════════════════════════════════════════════════════════════
 
-function useRegistryVersion() {
+export function useRegistryVersion() {
   return useSyncExternalStore(subscribeRegistry, getRegistryVersion, getRegistryVersion);
+}
+
+/**
+ * useCommandsForScope — SlotRenderer 외부에서 Command 목록을 직접 쓰고 싶을 때.
+ * registry 변경 시 자동으로 최신 목록을 반환.
+ */
+export function useCommandsForScope(scope, ctx) {
+  const runtime = usePluginRuntime();
+  const version = useRegistryVersion();
+  const mergedCtx = useMemo(
+    () => ({
+      currentVendor: runtime.currentVendor,
+      entitlements: runtime.entitlements,
+      ...ctx,
+    }),
+    [runtime.currentVendor, runtime.entitlements, ctx],
+  );
+  return useMemo(
+    () => getCommandsForScope(scope, mergedCtx),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, scope, mergedCtx],
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════

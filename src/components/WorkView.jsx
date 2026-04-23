@@ -5,8 +5,7 @@ import CountdownModal from './CountdownModal';
 import { sheetsToXlsx } from '../lib/excelFormats';
 import { findLatest } from '../lib/vendorFiles';
 import { getPlugin } from '../core/plugins';
-import { SlotRenderer, usePluginRuntime } from '../core/plugin-host';
-import { getCommandsForScope } from '../core/plugin-registry';
+import { SlotRenderer, useCommandsForScope } from '../core/plugin-host';
 import { KNOWN_SCOPES } from '../core/plugin-api';
 import { nextPhase } from './PhaseStepper';
 import { buildConfirmationArrayBuffer, applyDateRule } from '../core/confirmationBuilder';
@@ -82,14 +81,11 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
 
   // ── 플러그인 탭 기여 (scope=work.tab.extra) ──
   // command.fileName 으로 표시할 파일을 지정하는 규약.
-  const pluginRuntime = usePluginRuntime();
-  const pluginTabs = useMemo(() => {
-    return getCommandsForScope(KNOWN_SCOPES.WORK_TAB_EXTRA, {
-      currentVendor: pluginRuntime.currentVendor,
-      entitlements: pluginRuntime.entitlements,
-      job, phase: job?.phase,
-    });
-  }, [pluginRuntime.currentVendor, pluginRuntime.entitlements, job]);
+  // useCommandsForScope 가 registry version 을 구독하므로 플러그인 등록/해제 즉시 반영.
+  const pluginTabs = useCommandsForScope(
+    KNOWN_SCOPES.WORK_TAB_EXTRA,
+    useMemo(() => ({ job, phase: job?.phase }), [job]),
+  );
 
   // 활성 탭이 플러그인 탭일 때 그 command 반환
   const activePluginTab = useMemo(() => {
