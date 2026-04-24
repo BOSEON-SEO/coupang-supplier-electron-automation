@@ -2336,6 +2336,8 @@ function registerIpcHandlers({
       for (let c = 8; c <= 16; c += 1) ws.getColumn(c).width = 10;
 
       // 센터 그룹 경계 추적
+      // 동시에 preview 용 rows 도 축적 (렌더러가 표로 바로 보여줄 수 있게 동일 값).
+      const previewRows = [];
       let prevWh = null;
       for (const d of dataRows) {
         const saved = savedRows[d.rowKey] || {};
@@ -2361,7 +2363,7 @@ function registerIpcHandlers({
         const warehouseQty = saved.warehouseQty ?? d.reqQty; // 기본: 신청수량 복사
         const confirmedQty = saved.confirmedQty ?? d.reqQty;
 
-        const row = ws.addRow([
+        const rowValues = [
           d.wh,
           isFirstOfCenter ? totals.totalReq : '',
           isFirstOfCenter ? totals.totalExport : '',
@@ -2378,17 +2380,28 @@ function registerIpcHandlers({
           invoiceNo,
           palletNo,
           saved.remark ?? '',
-        ]);
+        ];
+        const row = ws.addRow(rowValues);
         row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
         // SKU Barcode 열은 숫자 보존 (numFmt "0")
         row.getCell(6).numFmt = '0';
 
+        previewRows.push({
+          values: rowValues,
+          isFirstOfCenter,
+        });
         prevWh = d.wh;
       }
 
       const outPath = path.join(dir, 'coupang-export-template.xlsx');
       await wb.xlsx.writeFile(outPath);
-      return { success: true, path: outPath, rowCount: dataRows.length };
+      return {
+        success: true,
+        path: outPath,
+        rowCount: dataRows.length,
+        headers: HEADER,
+        rows: previewRows,
+      };
     } catch (err) {
       console.error('[tbnwsCoupangExport:generate]', err);
       return { success: false, error: err.message };

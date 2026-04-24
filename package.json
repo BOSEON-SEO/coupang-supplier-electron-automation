@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "concurrently \"npx webpack serve --mode development\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev": "concurrently -k -n webpack,electron -c blue,magenta \"npx webpack serve --mode development\" \"wait-on tcp:3100 && electron .\"",
     "build:renderer": "npx webpack --mode production",
     "build": "npm run build:renderer && electron-builder",
     "test:ui": "node run-ui-test.js",

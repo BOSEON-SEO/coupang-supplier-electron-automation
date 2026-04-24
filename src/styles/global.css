@@ -361,12 +361,86 @@ body {
   background: #c25500;
   border-color: #c25500;
 }
+.btn--phase-coupang-export {
+  background: #0097a7;
+  color: #fff;
+  border-color: #0097a7;
+}
+
+/* 쿠팡반출 양식 모달 — 미리보기 표 */
+.coupang-export-modal {
+  max-width: 1200px;
+  width: min(1200px, 96vw);
+}
+.coupang-export-modal__snapshot {
+  padding: 8px 12px;
+  background: #f4f6f9;
+  border-left: 3px solid #2b5cab;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.coupang-export-modal__preview-wrap {
+  margin-top: 10px;
+  max-height: 50vh;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.coupang-export-modal__preview-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+.coupang-export-modal__preview-empty.is-error {
+  color: var(--color-danger);
+}
+.coupang-export-modal__preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.coupang-export-modal__preview-table thead th {
+  position: sticky;
+  top: 0;
+  background: #e0f2fe;
+  padding: 6px 8px;
+  border-bottom: 1px solid #81c8e8;
+  text-align: left;
+  font-weight: 700;
+  z-index: 1;
+}
+.coupang-export-modal__preview-table tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #eef2f5;
+  font-variant-numeric: tabular-nums;
+}
+.coupang-export-modal__preview-table tbody td.is-num {
+  text-align: right;
+}
+.coupang-export-modal__preview-table tbody tr:hover {
+  background: #f7fbfd;
+}
+.coupang-export-modal__preview-table tbody tr.is-center-head td {
+  border-top: 2px solid #81c8e8;
+}
+.coupang-export-modal__preview-table tbody tr.is-center-head td:first-child {
+  background: #f0f8fc;
+  font-weight: 600;
+}
+.btn--phase-coupang-export:hover:not(:disabled) {
+  background: #00707a;
+  border-color: #00707a;
+}
 .btn--phase-adjust:disabled,
 .btn--phase-transport:disabled,
 .btn--phase-upload:disabled,
 .btn--phase-milkrun:disabled,
 .btn--phase-shipment:disabled,
-.btn--phase-regenerate:disabled {
+.btn--phase-regenerate:disabled,
+.btn--phase-coupang-export:disabled {
   opacity: 0.5;
 }
 

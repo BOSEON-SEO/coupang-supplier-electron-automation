@@ -446,7 +446,7 @@ function createWindow() {
   const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
   if (isDev) {
     const http = require('http');
-    const devUrl = 'http://localhost:3000';
+    const devUrl = 'http://localhost:3100';
     const checkDevServer = () => new Promise((resolve) => {
       const req = http.get(devUrl, () => resolve(true));
       req.on('error', () => resolve(false));
@@ -507,7 +507,7 @@ function openPluginWindow(kind, { date, vendor, sequence, variant }) {
   const hash = `#/${kind}?date=${encodeURIComponent(date)}&vendor=${encodeURIComponent(vendor)}&sequence=${sequence}${variantSeg}`;
   const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
   if (isDev) {
-    win.loadURL(`http://localhost:3000/${hash}`);
+    win.loadURL(`http://localhost:3100/${hash}`);
   } else {
     win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: hash.slice(1) });
   }

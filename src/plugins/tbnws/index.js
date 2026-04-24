@@ -548,7 +548,7 @@ const manifest = {
         id: 'tbnws.coupangExport',
         title: '투비 쿠팡반출',
         icon: '📑',
-        variant: 'secondary',
+        variant: 'phase-coupang-export',
         scope: KNOWN_SCOPES.WORK_TAB_CONFIRMATION_ACTIONS,
         order: 55,
         handler: (args) => {

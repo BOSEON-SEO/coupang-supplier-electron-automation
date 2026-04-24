@@ -10,13 +10,16 @@ import React, { useEffect, useRef, useState } from 'react';
  *             확정수량은 cross-sync, 반출은 po-tbnws, 운송방법/박스/파렛트/송장은
  *             transport.json, 나머지(창고수량·비고) 는 coupang-export.json 스냅샷.
  *
- * 저장 위치: jobDir/coupang-export.json (snapshot) +
- *           jobDir/coupang-export-latest.xlsx (사용자가 마지막 올린 원본)
+ *  모달 열릴 때 generate 를 자동 호출해 테이블로 실제 내려갈 데이터를 미리보기.
+ *  다운로드 버튼은 saveFileAs 만 실행 (generate 로 만들어둔 path 사용).
  */
 export default function TbnwsCoupangExportModal({ job, onClose }) {
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
   const [snapshot, setSnapshot] = useState(null);
+  const [preview, setPreview] = useState(null); // { path, headers, rows }
+  const [previewErr, setPreviewErr] = useState('');
   const fileInputRef = useRef(null);
 
   // 마지막 업로드 snapshot 로드 (있으면 UI 에 요약 표시)
@@ -43,22 +46,40 @@ export default function TbnwsCoupangExportModal({ job, onClose }) {
     return () => { cancelled = true; };
   }, [job]);
 
+  // 모달 마운트 시 generate 호출 → 미리보기 데이터 로드
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setPreviewErr('');
+      try {
+        const api = window.electronAPI;
+        const res = await api.tbnwsCoupangExport.generate(job.date, job.vendor, job.sequence);
+        if (cancelled) return;
+        if (!res?.success) {
+          setPreviewErr(res?.error || '미리보기 생성 실패');
+          return;
+        }
+        setPreview({ path: res.path, headers: res.headers || [], rows: res.rows || [] });
+      } catch (err) {
+        if (!cancelled) setPreviewErr(err?.message || String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [job]);
+
   const handleDownload = async () => {
-    if (busy) return;
+    if (busy || !preview?.path) return;
     setBusy(true);
-    setStatus('양식 생성 중…');
+    setStatus('다운로드 준비 중…');
     try {
       const api = window.electronAPI;
-      const res = await api.tbnwsCoupangExport.generate(job.date, job.vendor, job.sequence);
-      if (!res?.success) {
-        alert(`양식 생성 실패: ${res?.error || 'unknown'}`);
-        return;
-      }
-      setStatus(`생성 완료 (${res.rowCount}행)`);
       const dateCompact = String(job.date).replace(/-/g, '');
       const seq = String(job.sequence).padStart(2, '0');
       const defaultName = `${job.vendor}-${dateCompact}-${seq}-쿠팡반출.xlsx`;
-      const dl = await api.saveFileAs(res.path, defaultName);
+      const dl = await api.saveFileAs(preview.path, defaultName);
       if (dl?.canceled) { setStatus(''); return; }
       if (!dl?.success) {
         alert(`다운로드 실패: ${dl?.error ?? 'unknown'}`);
@@ -109,7 +130,7 @@ export default function TbnwsCoupangExportModal({ job, onClose }) {
       setStatus(
         `반영 완료 — 확정수량 ${res.confirmedPatched}행 · 반출 ${res.fulfillPatched}행 · 운송 ${res.transportPatched}행`,
       );
-      // 스냅샷 새로 읽어 UI 갱신
+      // 스냅샷 + 미리보기 새로고침
       try {
         const resolved = await api.resolveJobPath(
           job.date, job.vendor, job.sequence, 'coupang-export.json',
@@ -119,6 +140,10 @@ export default function TbnwsCoupangExportModal({ job, onClose }) {
           if (read?.success && read.data) {
             setSnapshot(JSON.parse(new TextDecoder('utf-8').decode(read.data)));
           }
+        }
+        const regen = await api.tbnwsCoupangExport.generate(job.date, job.vendor, job.sequence);
+        if (regen?.success) {
+          setPreview({ path: regen.path, headers: regen.headers || [], rows: regen.rows || [] });
         }
       } catch { /* 무시 */ }
       window.dispatchEvent(new Event('job:reload'));
@@ -136,7 +161,7 @@ export default function TbnwsCoupangExportModal({ job, onClose }) {
 
   return (
     <div className="eflex-overlay" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="eflex-overlay__card" onClick={(e) => e.stopPropagation()}>
+      <div className="eflex-overlay__card coupang-export-modal" onClick={(e) => e.stopPropagation()}>
         <header className="eflex-overlay__header">
           <h3 className="eflex-overlay__title">
             📑 투비 쿠팡반출 양식
@@ -148,44 +173,80 @@ export default function TbnwsCoupangExportModal({ job, onClose }) {
           <p style={{ marginTop: 0, fontSize: 13, lineHeight: 1.5 }}>
             외부 물류팀과 엑셀로 주고받는 전용 양식입니다.
             {' '}
-            현재 상태(confirmation + 운송분배 + 이전 스냅샷)를 담아 내려받은 뒤,
-            창고 담당자가 편집한 파일을 다시 올리면 해당 컬럼만 앱에 반영됩니다.
+            아래 표가 이대로 xlsx 로 내려받아집니다. 창고 담당자가 편집한 파일을 다시
+            올리면 해당 컬럼만 앱에 반영됩니다.
           </p>
 
-          <div style={{ margin: '12px 0', fontSize: 12, color: 'var(--color-text-muted)' }}>
+          <div style={{ margin: '8px 0', fontSize: 12, color: 'var(--color-text-muted)' }}>
             <b>편집 가능 컬럼</b>: 반출 · 창고수량 · 확정수량 · 운송방법 ·
             박스번호 · 송장번호 · 파렛트번호 · 비고
           </div>
 
           {snapshot && (
-            <div
-              style={{
-                padding: '8px 12px',
-                background: '#f4f6f9',
-                borderLeft: '3px solid #2b5cab',
-                fontSize: 12,
-                margin: '12px 0',
-              }}
-            >
+            <div className="coupang-export-modal__snapshot">
               마지막 업로드 스냅샷: <b>{snapshotRowCount}행</b>
               {snapshotDate && <> · {snapshotDate}</>}
             </div>
           )}
 
           {status && (
-            <div style={{ margin: '8px 0', color: 'var(--color-primary)', fontSize: 12 }}>
+            <div style={{ margin: '6px 0', color: 'var(--color-primary)', fontSize: 12 }}>
               {status}
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          {/* 미리보기 표 */}
+          <div className="coupang-export-modal__preview-wrap">
+            {loading && (
+              <div className="coupang-export-modal__preview-empty">
+                미리보기 생성 중…
+              </div>
+            )}
+            {previewErr && !loading && (
+              <div className="coupang-export-modal__preview-empty is-error">
+                미리보기 실패: {previewErr}
+              </div>
+            )}
+            {!loading && !previewErr && preview && preview.rows.length === 0 && (
+              <div className="coupang-export-modal__preview-empty">
+                출력할 데이터가 없습니다. 발주확정서에 확정수량 &gt; 0 인 행이 필요합니다.
+              </div>
+            )}
+            {!loading && !previewErr && preview && preview.rows.length > 0 && (
+              <table className="coupang-export-modal__preview-table">
+                <thead>
+                  <tr>
+                    {preview.headers.map((h, i) => (
+                      <th key={i}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.rows.map((r, rIdx) => (
+                    <tr
+                      key={rIdx}
+                      className={r.isFirstOfCenter ? 'is-center-head' : ''}
+                    >
+                      {r.values.map((v, cIdx) => (
+                        <td key={cIdx} className={typeof v === 'number' ? 'is-num' : ''}>
+                          {v === '' || v == null ? '' : String(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
             <button
               type="button"
               className="btn btn--primary"
               onClick={handleDownload}
-              disabled={busy}
+              disabled={busy || loading || !preview || preview.rows.length === 0}
             >
-              📥 양식 다운로드
+              📥 양식 다운로드 {preview && preview.rows.length > 0 && `(${preview.rows.length}행)`}
             </button>
             <button
               type="button"
