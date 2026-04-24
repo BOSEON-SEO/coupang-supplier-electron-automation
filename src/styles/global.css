@@ -4183,16 +4183,15 @@ button.session-badge:disabled {
  * v4 lot 기반 UI
  * ───────────────────────────────────────────────────────────── */
 .tcard--paper {
-  background: #fffdf6;
-  border-color: #e0d9c3;
-  box-shadow: 0 1px 0 rgba(0,0,0,.03), 0 4px 14px -8px rgba(120,100,60,.18);
+  background: var(--color-surface);
+  border-color: var(--color-border);
 }
 .tcard--paper .tcard__header {
-  background: #f6eed9;
-  border-bottom-color: #e0d9c3;
+  background: #f5f7fa;
+  border-bottom-color: var(--color-border);
 }
 .tcard__lot-count {
-  color: #7a6a3e;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -4230,8 +4229,8 @@ button.session-badge:disabled {
   text-align: center;
   color: var(--color-text-muted);
   font-size: 12px;
-  background: #fffaf0;
-  border: 1px dashed #e0d9c3;
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border);
   border-radius: 6px;
 }
 .tcard__actions {
@@ -4377,9 +4376,9 @@ button.session-badge:disabled {
 
 /* ── 미배정 SKU 섹션 (창고 카드 하단) ── */
 .unassigned-section {
-  border: 1px solid #e5dfc9;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #fffcef;
+  background: var(--color-bg);
   padding: 10px 12px;
 }
 .unassigned-section__head {
@@ -4390,7 +4389,7 @@ button.session-badge:disabled {
 .unassigned-section__title {
   font-size: 12px;
   font-weight: 600;
-  color: #7a6a3e;
+  color: var(--color-text-muted);
 }
 .unassigned-section__table {
   width: 100%;
@@ -4400,14 +4399,14 @@ button.session-badge:disabled {
 .unassigned-section__table th,
 .unassigned-section__table td {
   padding: 4px 8px;
-  border-bottom: 1px solid #ece5cf;
+  border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
 }
 .unassigned-section__table thead th {
-  background: #f6eed9;
+  background: #eceff1;
   font-weight: 600;
   text-align: left;
-  color: #5c4e2d;
+  color: var(--color-text);
 }
 .unassigned-section__table .col-po       { width: 110px; font-variant-numeric: tabular-nums; }
 .unassigned-section__table .col-barcode  { width: 130px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
