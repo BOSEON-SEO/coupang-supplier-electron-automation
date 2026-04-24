@@ -2242,9 +2242,15 @@ function registerIpcHandlers({
       }
       const savedRows = snapshot?.rows || {};
 
-      // po-tbnws.xlsx 에서 반출수량 조회 — 같은 rowKey 복합키(발주번호|물류센터|바코드)
+      // po-tbnws.xlsx 에서 확정수량(=출고수량=신청수량) + 반출수량 조회.
+      //   키: 복합키 `발주번호|물류센터|SKU바코드`.
+      //   po-tbnws 의 '확정수량' 은 재고조정(stockAdjust:save) → syncConfirmedQtyAcrossFiles
+      //   로 즉시 갱신되므로 "우리가 요청한 수량" 의 가장 최신·권위 있는 소스.
+      //   confirmation.xlsx 는 재생성 시 데이터 소스 이슈로 order_quantity 로 폴백될 수
+      //   있어 신뢰도가 낮음. 따라서 po-tbnws 확정수량을 우선 사용.
       const poTbnwsPath = path.join(dir, 'po-tbnws.xlsx');
       const exportQtyByKey = new Map();
+      const requestQtyByKey = new Map();
       if (fs.existsSync(poTbnwsPath)) {
         try {
           const wb2 = XLSX.readFile(poTbnwsPath, { cellDates: false, cellStyles: false });
@@ -2255,28 +2261,36 @@ function registerIpcHandlers({
           h2.forEach((h, i) => { cm2[String(h ?? '').trim()] = i; });
           const iOrd2 = cm2['발주번호'];
           const iWh2 = cm2['물류센터'];
-          const iBc2 = cm2['SKU 바코드'];
+          const iBc2 = cm2['SKU 바코드'] ?? cm2['상품바코드'] ?? cm2['SKU Barcode'];
           const iEx2 = cm2['반출수량'];
-          if (iOrd2 != null && iWh2 != null && iBc2 != null && iEx2 != null) {
+          const iCf2 = cm2['확정수량'];
+          if (iOrd2 != null && iWh2 != null && iBc2 != null) {
             for (let r = 1; r < aoa2.length; r += 1) {
               const row = aoa2[r] || [];
               const k = `${row[iOrd2]}|${row[iWh2]}|${row[iBc2]}`;
-              exportQtyByKey.set(k, Number(row[iEx2]) || 0);
+              if (iEx2 != null) exportQtyByKey.set(k, Number(row[iEx2]) || 0);
+              if (iCf2 != null) requestQtyByKey.set(k, Number(row[iCf2]) || 0);
             }
           }
         } catch { /* 무시 */ }
       }
 
       // 행 데이터 빌드 — 센터 정렬 후 센터 첫 행에만 총합 표시
+      // 신청수량 = po-tbnws 확정수량 (있으면) → confirmation 확정수량 (폴백)
       const dataRows = []; // {wh, orderSeq, code, barcode, name, reqQty, rowKey, skuRowIndex}
       for (let r = 1; r < aoa.length; r += 1) {
         const row = aoa[r] || [];
         const wh = String(row[iWh] ?? '').trim();
         const orderSeq = String(row[iOrder] ?? '');
         const barcode = String(row[iBarcode] ?? '');
-        const reqQty = Number(row[iQty]) || 0;
+        const confirmFromConf = Number(row[iQty]) || 0;
+        const composite = `${orderSeq}|${wh}|${barcode}`;
+        const reqQtyFromPoTbnws = requestQtyByKey.has(composite)
+          ? requestQtyByKey.get(composite)
+          : null;
+        const reqQty = reqQtyFromPoTbnws != null ? reqQtyFromPoTbnws : confirmFromConf;
         if (!wh || !barcode) continue;
-        if (reqQty <= 0) continue; // 납품 제외 행
+        if (reqQty <= 0) continue; // 납품 제외 행 (0 인 경우 양식에서 숨김)
         dataRows.push({
           wh,
           orderSeq,
@@ -2285,7 +2299,7 @@ function registerIpcHandlers({
           name: String(row[iName] ?? ''),
           reqQty,
           rowKey: `${orderSeq}|${barcode}|${r}`,
-          warehouseComposite: `${orderSeq}|${wh}|${barcode}`, // po-tbnws 매칭 키
+          warehouseComposite: composite, // po-tbnws 매칭 키
         });
       }
       dataRows.sort((a, b) => a.wh.localeCompare(b.wh) || a.code.localeCompare(b.code));
