@@ -296,14 +296,15 @@ body {
 .btn--warning { background: #ef6c00; color: #fff; border-color: #ef6c00; }
 .btn--warning:hover { background: #c75900; }
 
-/* slot 버튼 — 플러그인 Command 렌더링 */
+/* slot 버튼 — 플러그인 Command 렌더링.
+ * line-height 는 주변 btn 과 동일하게 상속받아 높이 통일 (설정 안 하면 얇아짐). */
 .slot-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  line-height: 1.4;
 }
-.slot-btn__icon { font-size: 14px; line-height: 1; }
-.slot-btn__label { line-height: 1; }
+.slot-btn__icon { font-size: 14px; }
 .slot-btn.is-busy { opacity: 0.6; cursor: wait; }
 
 /* phase 액션 버튼 — 단계별 색상 구분 */
