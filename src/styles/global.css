@@ -4103,3 +4103,303 @@ button.session-badge:disabled {
   border: 1px solid var(--color-border);
   border-radius: 999px;
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * v4 lot 기반 UI
+ * ───────────────────────────────────────────────────────────── */
+.tcard--paper {
+  background: #fffdf6;
+  border-color: #e0d9c3;
+  box-shadow: 0 1px 0 rgba(0,0,0,.03), 0 4px 14px -8px rgba(120,100,60,.18);
+}
+.tcard--paper .tcard__header {
+  background: #f6eed9;
+  border-bottom-color: #e0d9c3;
+}
+.tcard__lot-count {
+  color: #7a6a3e;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tcard__badge {
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+.tcard__badge--ok {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #b7e1b9;
+}
+.tcard__badge--warn {
+  background: #fff3e0;
+  color: #c75300;
+  border-color: #ffd8a3;
+}
+.tcard__badge--danger {
+  background: #ffe5e5;
+  color: #b5281f;
+  border-color: #ffb8b2;
+}
+.tcard__body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tcard__empty {
+  padding: 14px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  background: #fffaf0;
+  border: 1px dashed #e0d9c3;
+  border-radius: 6px;
+}
+.tcard__actions {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+.tcard__add-lot {
+  border: 1px dashed;
+  background: transparent;
+  font-weight: 600;
+}
+.tcard__add-lot--shipment {
+  color: #4a7f1e;
+  border-color: #a6c87a;
+}
+.tcard__add-lot--shipment:hover {
+  background: #f1f8e9;
+}
+.tcard__add-lot--milkrun {
+  color: #1b4b99;
+  border-color: #9cb8e8;
+}
+.tcard__add-lot--milkrun:hover {
+  background: #eaf2fe;
+}
+
+/* ── Lot 타일 ── */
+.lot-tile {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: box-shadow .15s, border-color .15s;
+}
+.lot-tile--shipment { border-left: 4px solid #7cb342; }
+.lot-tile--milkrun  { border-left: 4px solid #1976d2; }
+.lot-tile.is-expanded {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+  border-color: #b8c4d8;
+}
+.lot-tile__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  background: #fafbfd;
+}
+.lot-tile__summary:hover {
+  background: #f0f3f8;
+}
+.lot-tile.is-expanded .lot-tile__summary {
+  background: #eaf0f8;
+  border-bottom: 1px solid #d4dde8;
+}
+.lot-tile__badge {
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+.lot-tile__badge--shipment {
+  background: #e8f5e9;
+  color: #33691e;
+}
+.lot-tile__badge--milkrun {
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+.lot-tile__text {
+  font-size: 12px;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+.lot-tile__spacer { flex: 1; }
+.lot-tile__remove {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.lot-tile__remove:hover {
+  background: #ffebee;
+  color: var(--color-danger);
+}
+.lot-tile__chev {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  width: 16px;
+  text-align: center;
+}
+.lot-tile__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background: #fff;
+}
+
+/* Lot 내부 설정 */
+.lot-editor__settings {
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lot-editor__settings--shipment { padding: 4px 0; }
+
+.lot-editor__table {
+  width: 100%;
+}
+.lot-editor__table .col-actions { width: 28px; }
+.lot-editor__empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  padding: 12px !important;
+  font-style: italic;
+}
+.lot-editor__add-sku {
+  padding: 8px 10px !important;
+  background: #f7f9fc !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lot-editor__add-sku span {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.lot-editor__add-sku .stock-adjust-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── 미배정 SKU 섹션 (창고 카드 하단) ── */
+.unassigned-section {
+  border: 1px solid #e5dfc9;
+  border-radius: 8px;
+  background: #fffcef;
+  padding: 10px 12px;
+}
+.unassigned-section__head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.unassigned-section__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #7a6a3e;
+}
+.unassigned-section__table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.unassigned-section__table th,
+.unassigned-section__table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #ece5cf;
+  vertical-align: middle;
+}
+.unassigned-section__table thead th {
+  background: #f6eed9;
+  font-weight: 600;
+  text-align: left;
+  color: #5c4e2d;
+}
+.unassigned-section__table .col-po       { width: 110px; font-variant-numeric: tabular-nums; }
+.unassigned-section__table .col-barcode  { width: 130px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.unassigned-section__table .col-name     { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unassigned-section__table .col-num      { width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
+.unassigned-section__table .col-note     { min-width: 180px; }
+.unassigned-row.is-ok    { background: transparent; }
+.unassigned-row.is-short { background: #fff3e0; }
+.unassigned-row.is-over  { background: #ffecec; }
+.unassigned-section__note {
+  padding-top: 6px;
+  font-size: 11px;
+  color: #c75300;
+}
+
+/* ── AddLotModal ── */
+.add-lot-modal {
+  width: min(880px, 94vw);
+  max-width: 94vw;
+}
+.add-lot-modal__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 8px;
+}
+.add-lot-modal__all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.add-lot-modal__total {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.add-lot-modal__total strong {
+  color: var(--color-primary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.add-lot-modal__table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.add-lot-modal__table th,
+.add-lot-modal__table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.add-lot-modal__table thead th {
+  background: #eceff1;
+  font-weight: 600;
+  text-align: left;
+}
+.add-lot-modal__table .col-po       { width: 110px; font-variant-numeric: tabular-nums; }
+.add-lot-modal__table .col-barcode  { width: 130px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.add-lot-modal__table .col-name     { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-lot-modal__table .col-num      { width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
+.add-lot-modal__table tr.is-unchecked td { opacity: 0.55; }
+.add-lot-modal__qty {
+  width: 74px;
+  text-align: right;
+}

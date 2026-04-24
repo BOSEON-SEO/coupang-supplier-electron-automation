@@ -1840,7 +1840,10 @@ function registerIpcHandlers({
       };
       fs.writeFileSync(transportPath, JSON.stringify(payload, null, 2), 'utf-8');
 
-      // confirmation.xlsx 의 입고유형(C) 컬럼을 물류센터별 transportType 으로 in-place 패치.
+      // confirmation.xlsx 의 입고유형(C) 컬럼 in-place 패치.
+      // 혼합 센터(쉽먼트 + 밀크런 lot 공존) 를 위해 SKU 단위로 lot type 을 찾아 반영.
+      //   우선순위: ①lots 기반 — rowKey 가 해당 lot 의 items 에 있으면 그 lot 의 type
+      //             ②legacy fallback — lots[0]?.type / transportType
       // 다른 셀(확정수량/납품부족사유 등 사용자 편집)은 보존.
       let confirmationPatched = 0;
       const confPath = path.join(dir, 'confirmation.xlsx');
@@ -1852,22 +1855,51 @@ function registerIpcHandlers({
           if (ws) {
             let iWh = null;
             let iType = null;
+            let iOrder = null;
+            let iBarcode = null;
             ws.getRow(1).eachCell((cell, col) => {
               const v = String(cell.value ?? '').trim();
               if (v === '물류센터') iWh = col;
               if (v === '입고유형') iType = col;
+              if (v === '발주번호') iOrder = col;
+              if (v === '상품바코드') iBarcode = col;
             });
             if (iWh && iType) {
               const last = ws.actualRowCount || ws.rowCount;
+              // 센터별 rowKey → type 맵 (items rowKey 는 `order|barcode|rowIndex` 형식)
+              const buildRowKey = (order, barcode, rowIdx) =>
+                `${String(order ?? '')}|${String(barcode ?? '')}|${rowIdx}`;
+              const typeByRowKeyByWh = {};
+              for (const [wh, a] of Object.entries(assignments)) {
+                if (!a) continue;
+                const m = new Map();
+                if (Array.isArray(a.lots)) {
+                  for (const lot of a.lots) {
+                    for (const it of (lot.items || [])) {
+                      if (!m.has(it.rowKey)) m.set(it.rowKey, lot.type);
+                    }
+                  }
+                }
+                typeByRowKeyByWh[wh] = {
+                  map: m,
+                  fallback: (Array.isArray(a.lots) && a.lots[0]?.type) || a.transportType || '',
+                };
+              }
               for (let r = 2; r <= last; r += 1) {
                 const wh = String(ws.getCell(r, iWh).value ?? '').trim();
                 if (!wh) continue;
-                const a = assignments[wh];
-                // UI 가 old 포맷(transportType) 또는 new lots 둘 다 수용.
-                // 혼합 센터는 첫 lot 기준 (Phase 2 에서 SKU 단위 세밀화 예정).
-                const tt = a?.transportType
-                         || (Array.isArray(a?.lots) && a.lots[0]?.type)
-                         || '';
+                const entry = typeByRowKeyByWh[wh];
+                if (!entry) continue;
+                let tt = '';
+                if (iOrder && iBarcode) {
+                  const rk = buildRowKey(
+                    ws.getCell(r, iOrder).value,
+                    ws.getCell(r, iBarcode).value,
+                    r,
+                  );
+                  tt = entry.map.get(rk) || '';
+                }
+                if (!tt) tt = entry.fallback;
                 if (tt) {
                   ws.getCell(r, iType).value = tt;
                   confirmationPatched += 1;
