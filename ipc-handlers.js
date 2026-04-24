@@ -2218,7 +2218,8 @@ function registerIpcHandlers({
       const iCode = colMap['상품번호'];
       const iBarcode = colMap['상품바코드'];
       const iName = colMap['상품이름'];
-      const iQty = colMap['확정수량'];
+      const iOrderQty = colMap['발주수량'];   // 쿠팡이 신청한 수량 (원본) — 신청수량 컬럼으로 출력
+      const iQty = colMap['확정수량'];       // 재고조정 후 우리 출고수량 — 확정수량 컬럼으로 출력
 
       // transport.json 로드
       let transport = {};
@@ -2242,15 +2243,13 @@ function registerIpcHandlers({
       }
       const savedRows = snapshot?.rows || {};
 
-      // po-tbnws.xlsx 에서 확정수량(=출고수량=신청수량) + 반출수량 조회.
+      // po-tbnws.xlsx 에서 확정수량(=우리 출고수량) + 반출수량 조회.
       //   키: 복합키 `발주번호|물류센터|SKU바코드`.
       //   po-tbnws 의 '확정수량' 은 재고조정(stockAdjust:save) → syncConfirmedQtyAcrossFiles
-      //   로 즉시 갱신되므로 "우리가 요청한 수량" 의 가장 최신·권위 있는 소스.
-      //   confirmation.xlsx 는 재생성 시 데이터 소스 이슈로 order_quantity 로 폴백될 수
-      //   있어 신뢰도가 낮음. 따라서 po-tbnws 확정수량을 우선 사용.
+      //   로 즉시 갱신되므로 "재고조정 후 우리가 실제로 출고할 수량" 의 권위 있는 소스.
       const poTbnwsPath = path.join(dir, 'po-tbnws.xlsx');
       const exportQtyByKey = new Map();
-      const requestQtyByKey = new Map();
+      const ourConfirmedByKey = new Map();
       if (fs.existsSync(poTbnwsPath)) {
         try {
           const wb2 = XLSX.readFile(poTbnwsPath, { cellDates: false, cellStyles: false });
@@ -2269,42 +2268,49 @@ function registerIpcHandlers({
               const row = aoa2[r] || [];
               const k = `${row[iOrd2]}|${row[iWh2]}|${row[iBc2]}`;
               if (iEx2 != null) exportQtyByKey.set(k, Number(row[iEx2]) || 0);
-              if (iCf2 != null) requestQtyByKey.set(k, Number(row[iCf2]) || 0);
+              if (iCf2 != null) ourConfirmedByKey.set(k, Number(row[iCf2]) || 0);
             }
           }
         } catch { /* 무시 */ }
       }
 
-      // 행 데이터 빌드 — 센터 정렬 후 센터 첫 행에만 총합 표시
-      // 신청수량 = po-tbnws 확정수량 (있으면) → confirmation 확정수량 (폴백)
-      const dataRows = []; // {wh, orderSeq, code, barcode, name, reqQty, rowKey, skuRowIndex}
+      // 행 데이터 빌드 — 센터 정렬 후 센터 첫 행에만 총합 표시.
+      // 출력 컬럼 역할:
+      //   신청수량    = 쿠팡 원본 발주수량 (창고가 "쿠팡이 얼마 요청했나" 확인 가능)
+      //   확정수량    = 재고조정 후 우리 출고수량 (po-tbnws 확정수량)
+      //   반출        = 풀필 반출수량
+      //   창고수량    = 창고 실제 카운트 (기본 확정수량 복사)
+      // 필터: 쿠팡이 발주한 행은 모두 노출 (발주수량 > 0). 우리 출고수량이 0 이어도
+      //      창고가 "왜 못 나가는지" 파악해야 하므로 숨기지 않음 (비고에 사유 기재 가능).
+      const dataRows = [];
       for (let r = 1; r < aoa.length; r += 1) {
         const row = aoa[r] || [];
         const wh = String(row[iWh] ?? '').trim();
         const orderSeq = String(row[iOrder] ?? '');
         const barcode = String(row[iBarcode] ?? '');
-        const confirmFromConf = Number(row[iQty]) || 0;
+        const reqQty = iOrderQty != null ? (Number(row[iOrderQty]) || 0) : 0;     // 쿠팡 신청수량
+        const confirmFromConf = Number(row[iQty]) || 0;                           // confirmation 확정수량 (폴백용)
         const composite = `${orderSeq}|${wh}|${barcode}`;
-        const reqQtyFromPoTbnws = requestQtyByKey.has(composite)
-          ? requestQtyByKey.get(composite)
-          : null;
-        const reqQty = reqQtyFromPoTbnws != null ? reqQtyFromPoTbnws : confirmFromConf;
+        const ourQty = ourConfirmedByKey.has(composite)
+          ? ourConfirmedByKey.get(composite)
+          : confirmFromConf;
         if (!wh || !barcode) continue;
-        if (reqQty <= 0) continue; // 납품 제외 행 (0 인 경우 양식에서 숨김)
+        if (reqQty <= 0) continue; // 쿠팡이 발주 안 한 행만 제외
         dataRows.push({
           wh,
           orderSeq,
           code: String(row[iCode] ?? ''),
           barcode,
           name: String(row[iName] ?? ''),
-          reqQty,
+          reqQty,        // 쿠팡 신청수량 (발주수량)
+          ourQty,        // 재고조정 후 우리 출고수량 (= 확정수량)
           rowKey: `${orderSeq}|${barcode}|${r}`,
-          warehouseComposite: composite, // po-tbnws 매칭 키
+          warehouseComposite: composite,
         });
       }
       dataRows.sort((a, b) => a.wh.localeCompare(b.wh) || a.code.localeCompare(b.code));
 
-      // 센터별 총합 (신청수량, 반출) 계산
+      // 센터별 총합 — 총 주문수량(쿠팡 신청 합) / 총 풀필반출(반출수량 합)
       const totalsByWh = new Map();
       for (const d of dataRows) {
         const t = totalsByWh.get(d.wh) || { totalReq: 0, totalExport: 0 };
@@ -2360,8 +2366,9 @@ function registerIpcHandlers({
         const isFirstOfCenter = prevWh !== d.wh;
         const totals = totalsByWh.get(d.wh) || {};
         const exportQty = saved.fulfillExportQty ?? exportQtyByKey.get(d.warehouseComposite) ?? 0;
-        const warehouseQty = saved.warehouseQty ?? d.reqQty; // 기본: 신청수량 복사
-        const confirmedQty = saved.confirmedQty ?? d.reqQty;
+        // 창고수량·확정수량 기본은 "우리 출고수량"(ourQty) 으로 — 재고조정에서 0 이면 0.
+        const warehouseQty = saved.warehouseQty ?? d.ourQty;
+        const confirmedQty = saved.confirmedQty ?? d.ourQty;
 
         const rowValues = [
           d.wh,
@@ -2371,10 +2378,10 @@ function registerIpcHandlers({
           d.code,
           d.barcode,
           d.name,
-          d.reqQty,
-          exportQty,
-          warehouseQty,
-          confirmedQty,
+          d.reqQty,     // 신청수량 = 쿠팡 원본 발주수량
+          exportQty,    // 반출
+          warehouseQty, // 창고수량
+          confirmedQty, // 확정수량 = 재고조정 후 우리 출고수량
           transportMethod,
           boxNo,
           invoiceNo,
