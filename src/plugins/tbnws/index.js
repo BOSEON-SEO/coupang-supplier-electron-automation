@@ -19,6 +19,7 @@ import TbnwsStockAdjustView from './StockAdjustView';
 import EflexOutboundModal from './EflexOutboundModal';
 import RelocationModal from './RelocationModal';
 import ExportScheduleModal from './ExportScheduleModal';
+import TbnwsCoupangExportModal from './TbnwsCoupangExportModal';
 import { CoupangWarehousesManageButton } from './CoupangWarehousesModal';
 import { COUPANG_WAREHOUSES_SEED } from './coupangWarehousesSeed';
 
@@ -281,23 +282,28 @@ const MONTH_CACHE_TTL_MS = 30 * 1000;
 const EFLEX_OPEN_EVENT = 'tbnws:open-eflex-modal';
 const RELOCATION_OPEN_EVENT = 'tbnws:open-relocation-modal';
 const EXPORT_SCHEDULE_OPEN_EVENT = 'tbnws:open-export-schedule-modal';
+const COUPANG_EXPORT_OPEN_EVENT = 'tbnws:open-coupang-export-modal';
 
 function TbnwsOverlayHost() {
   const [eflexJob, setEflexJob] = useState(null);
   const [relocationJob, setRelocationJob] = useState(null);
   const [exportJob, setExportJob] = useState(null);
+  const [coupangExportJob, setCoupangExportJob] = useState(null);
 
   useEffect(() => {
     const openEflex = (e) => setEflexJob(e?.detail?.job || null);
     const openReloc = (e) => setRelocationJob(e?.detail?.job || null);
     const openExp   = (e) => setExportJob(e?.detail?.job || null);
+    const openCpx   = (e) => setCoupangExportJob(e?.detail?.job || null);
     window.addEventListener(EFLEX_OPEN_EVENT, openEflex);
     window.addEventListener(RELOCATION_OPEN_EVENT, openReloc);
     window.addEventListener(EXPORT_SCHEDULE_OPEN_EVENT, openExp);
+    window.addEventListener(COUPANG_EXPORT_OPEN_EVENT, openCpx);
     return () => {
       window.removeEventListener(EFLEX_OPEN_EVENT, openEflex);
       window.removeEventListener(RELOCATION_OPEN_EVENT, openReloc);
       window.removeEventListener(EXPORT_SCHEDULE_OPEN_EVENT, openExp);
+      window.removeEventListener(COUPANG_EXPORT_OPEN_EVENT, openCpx);
     };
   }, []);
   if (eflexJob) {
@@ -308,6 +314,9 @@ function TbnwsOverlayHost() {
   }
   if (exportJob) {
     return <ExportScheduleModal job={exportJob} onClose={() => setExportJob(null)} />;
+  }
+  if (coupangExportJob) {
+    return <TbnwsCoupangExportModal job={coupangExportJob} onClose={() => setCoupangExportJob(null)} />;
   }
   return null;
 }
@@ -526,6 +535,26 @@ const manifest = {
           const job = args?.job;
           if (!job) { alert('활성 작업이 없습니다.'); return; }
           window.dispatchEvent(new CustomEvent(EXPORT_SCHEDULE_OPEN_EVENT, {
+            detail: { job },
+          }));
+        },
+      }),
+    );
+
+    // 투비 쿠팡반출 — 발주확정서 탭의 '운송분배' 오른쪽.
+    // 전용 양식을 엑셀로 주고받는 외부 물류팀 협업용 기능.
+    disposables.push(
+      ctx.registerCommand({
+        id: 'tbnws.coupangExport',
+        title: '투비 쿠팡반출',
+        icon: '📑',
+        variant: 'secondary',
+        scope: KNOWN_SCOPES.WORK_TAB_CONFIRMATION_ACTIONS,
+        order: 55,
+        handler: (args) => {
+          const job = args?.job;
+          if (!job) { alert('활성 작업이 없습니다.'); return; }
+          window.dispatchEvent(new CustomEvent(COUPANG_EXPORT_OPEN_EVENT, {
             detail: { job },
           }));
         },

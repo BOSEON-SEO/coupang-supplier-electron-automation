@@ -1727,6 +1727,12 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             >
               🚚 운송 분배
             </button>
+            {/* 플러그인이 기여한 확정서 탭 전용 액션 (예: tbnws '투비 쿠팡반출') */}
+            <SlotRenderer
+              scope={KNOWN_SCOPES.WORK_TAB_CONFIRMATION_ACTIONS}
+              ctx={{ job, phase: job?.phase }}
+              args={{ job }}
+            />
             <button
               type="button"
               className="btn btn--phase-upload btn--sm"

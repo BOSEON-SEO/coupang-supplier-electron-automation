@@ -180,6 +180,7 @@
 export const KNOWN_SCOPES = Object.freeze({
   WORK_TOOLBAR: 'work.toolbar',                    // WorkView 툴바 우측
   WORK_TAB_EXTRA: 'work.tab.extra',                // 탭 목록 끝. { phase } 전달
+  WORK_TAB_CONFIRMATION_ACTIONS: 'work.tab.confirmation.actions', // 발주확정서 탭 액션 — 운송분배 버튼 오른쪽
   TRANSPORT_TOOLBAR: 'transport.toolbar',          // TransportView 툴바
   TRANSPORT_ROW_ACTIONS: 'transport.row.actions',  // 행 액션. { row } 전달
   STOCK_ADJUST_TOOLBAR: 'stock-adjust.toolbar',    // StockAdjustView 툴바

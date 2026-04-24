@@ -2005,6 +2005,421 @@ function registerIpcHandlers({
     }
   });
 
+  // ─────────────────────────────────────────────────────────────
+  // 투비 쿠팡반출 양식 — 외부 물류팀과 엑셀로 데이터 주고받기
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * 쿠팡반출 양식 다운로드 생성.
+   *   confirmation.xlsx + transport.json + coupang-export.json(snapshot) 결합.
+   *   컬럼: 물류센터, 총주문수량, 총풀필반출, 발주번호, 상품코드, SKU Barcode,
+   *         상품명, 신청수량, 반출, 창고수량, 확정수량, 운송방법,
+   *         박스번호, 송장번호, 파렛트번호, 비고
+   */
+  ipcMain.handle('tbnwsCoupangExport:generate', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const confPath = path.join(dir, 'confirmation.xlsx');
+    const transportPath = path.join(dir, 'transport.json');
+    const snapshotPath = path.join(dir, 'coupang-export.json');
+    if (!fs.existsSync(confPath)) {
+      return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
+    }
+    try {
+      // confirmation.xlsx 로드
+      const wbIn = XLSX.readFile(confPath, { cellDates: false, cellStyles: false });
+      const wsIn = wbIn.Sheets[wbIn.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(wsIn, { header: 1, defval: '' });
+      const head = aoa[0] || [];
+      const colMap = {};
+      head.forEach((h, i) => { colMap[String(h ?? '').trim()] = i; });
+      const iOrder = colMap['발주번호'];
+      const iWh = colMap['물류센터'];
+      const iCode = colMap['상품번호'];
+      const iBarcode = colMap['상품바코드'];
+      const iName = colMap['상품이름'];
+      const iQty = colMap['확정수량'];
+
+      // transport.json 로드
+      let transport = {};
+      if (fs.existsSync(transportPath)) {
+        try { transport = JSON.parse(fs.readFileSync(transportPath, 'utf-8')); }
+        catch { /* 무시 */ }
+      }
+      const assignments = transport?.assignments || {};
+
+      // 스냅샷 로드
+      let snapshot = { rows: {} };
+      if (fs.existsSync(snapshotPath)) {
+        try { snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf-8')) || { rows: {} }; }
+        catch { /* 무시 */ }
+      }
+      const savedRows = snapshot?.rows || {};
+
+      // po-tbnws.xlsx 에서 반출수량 조회 — 같은 rowKey 복합키(발주번호|물류센터|바코드)
+      const poTbnwsPath = path.join(dir, 'po-tbnws.xlsx');
+      const exportQtyByKey = new Map();
+      if (fs.existsSync(poTbnwsPath)) {
+        try {
+          const wb2 = XLSX.readFile(poTbnwsPath, { cellDates: false, cellStyles: false });
+          const ws2 = wb2.Sheets[wb2.SheetNames[0]];
+          const aoa2 = XLSX.utils.sheet_to_json(ws2, { header: 1, defval: '' });
+          const h2 = aoa2[0] || [];
+          const cm2 = {};
+          h2.forEach((h, i) => { cm2[String(h ?? '').trim()] = i; });
+          const iOrd2 = cm2['발주번호'];
+          const iWh2 = cm2['물류센터'];
+          const iBc2 = cm2['SKU 바코드'];
+          const iEx2 = cm2['반출수량'];
+          if (iOrd2 != null && iWh2 != null && iBc2 != null && iEx2 != null) {
+            for (let r = 1; r < aoa2.length; r += 1) {
+              const row = aoa2[r] || [];
+              const k = `${row[iOrd2]}|${row[iWh2]}|${row[iBc2]}`;
+              exportQtyByKey.set(k, Number(row[iEx2]) || 0);
+            }
+          }
+        } catch { /* 무시 */ }
+      }
+
+      // 행 데이터 빌드 — 센터 정렬 후 센터 첫 행에만 총합 표시
+      const dataRows = []; // {wh, orderSeq, code, barcode, name, reqQty, rowKey, skuRowIndex}
+      for (let r = 1; r < aoa.length; r += 1) {
+        const row = aoa[r] || [];
+        const wh = String(row[iWh] ?? '').trim();
+        const orderSeq = String(row[iOrder] ?? '');
+        const barcode = String(row[iBarcode] ?? '');
+        const reqQty = Number(row[iQty]) || 0;
+        if (!wh || !barcode) continue;
+        if (reqQty <= 0) continue; // 납품 제외 행
+        dataRows.push({
+          wh,
+          orderSeq,
+          code: String(row[iCode] ?? ''),
+          barcode,
+          name: String(row[iName] ?? ''),
+          reqQty,
+          rowKey: `${orderSeq}|${barcode}|${r}`,
+          warehouseComposite: `${orderSeq}|${wh}|${barcode}`, // po-tbnws 매칭 키
+        });
+      }
+      dataRows.sort((a, b) => a.wh.localeCompare(b.wh) || a.code.localeCompare(b.code));
+
+      // 센터별 총합 (신청수량, 반출) 계산
+      const totalsByWh = new Map();
+      for (const d of dataRows) {
+        const t = totalsByWh.get(d.wh) || { totalReq: 0, totalExport: 0 };
+        t.totalReq += d.reqQty;
+        t.totalExport += (exportQtyByKey.get(d.warehouseComposite) || 0);
+        totalsByWh.set(d.wh, t);
+      }
+
+      // 워크북 작성
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('반출');
+
+      const HEADER = ['물류센터', '총 주문수량', '총 풀필반출', '발주번호', '상품코드',
+        'SKU Barcode', '상품명', '신청수량', '반출', '창고수량', '확정수량',
+        '운송방법', '박스번호', '송장번호', '파렛트번호', '비고'];
+      ws.addRow(HEADER);
+      ws.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, size: 10 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
+      });
+      // 컬럼 폭
+      ws.getColumn(1).width = 12;
+      ws.getColumn(2).width = 10;
+      ws.getColumn(3).width = 10;
+      ws.getColumn(4).width = 12;
+      ws.getColumn(5).width = 18;
+      ws.getColumn(6).width = 18;
+      ws.getColumn(7).width = 50;
+      for (let c = 8; c <= 16; c += 1) ws.getColumn(c).width = 10;
+
+      // 센터 그룹 경계 추적
+      let prevWh = null;
+      for (const d of dataRows) {
+        const saved = savedRows[d.rowKey] || {};
+        const centerAsn = assignments[d.wh] || {};
+        const skuTransport = centerAsn?.skuTransportType?.[d.rowKey];
+        const transportMethod = saved.transportMethod
+                             ?? skuTransport
+                             ?? centerAsn?.transportType
+                             ?? '';
+        // 박스/파렛트/송장 — 이 양식에선 단일 값만 표현. 여러 배정이면 첫 값.
+        const firstBox = (centerAsn?.skuBoxes?.[d.rowKey] || [])[0];
+        const firstPallet = (centerAsn?.skuPallets?.[d.rowKey] || [])[0];
+        const boxNo = saved.boxNo ?? firstBox?.boxNo ?? '';
+        const palletNo = saved.palletNo ?? firstPallet?.palletNo ?? '';
+        const invoiceNo = saved.invoiceNo
+          ?? (boxNo && Array.isArray(centerAsn?.boxInvoices)
+                ? (centerAsn.boxInvoices[Number(boxNo) - 1] || '')
+                : '');
+
+        const isFirstOfCenter = prevWh !== d.wh;
+        const totals = totalsByWh.get(d.wh) || {};
+        const exportQty = saved.fulfillExportQty ?? exportQtyByKey.get(d.warehouseComposite) ?? 0;
+        const warehouseQty = saved.warehouseQty ?? d.reqQty; // 기본: 신청수량 복사
+        const confirmedQty = saved.confirmedQty ?? d.reqQty;
+
+        const row = ws.addRow([
+          d.wh,
+          isFirstOfCenter ? totals.totalReq : '',
+          isFirstOfCenter ? totals.totalExport : '',
+          '', // 발주번호는 빈 값 (원본 양식 규칙)
+          d.code,
+          d.barcode,
+          d.name,
+          d.reqQty,
+          exportQty,
+          warehouseQty,
+          confirmedQty,
+          transportMethod,
+          boxNo,
+          invoiceNo,
+          palletNo,
+          saved.remark ?? '',
+        ]);
+        row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
+        // SKU Barcode 열은 숫자 보존 (numFmt "0")
+        row.getCell(6).numFmt = '0';
+
+        prevWh = d.wh;
+      }
+
+      const outPath = path.join(dir, 'coupang-export-template.xlsx');
+      await wb.xlsx.writeFile(outPath);
+      return { success: true, path: outPath, rowCount: dataRows.length };
+    } catch (err) {
+      console.error('[tbnwsCoupangExport:generate]', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * 쿠팡반출 양식 업로드 반영.
+   *   파싱 후:
+   *     확정수량 → confirmedQty:sync (cross-file)
+   *     반출     → po-tbnws.xlsx 반출수량 patch
+   *     운송방법 → transport.json skuTransportType
+   *     박스번호(쉽먼트) / 파렛트번호(밀크런) → skuBoxes / skuPallets 덮어쓰기
+   *     송장번호 → boxInvoices[boxNo-1]
+   *     비고     → skuNotes
+   *     창고수량 → coupang-export.json 스냅샷에 보관 (앱 내부 반영 안 됨)
+   */
+  ipcMain.handle('tbnwsCoupangExport:apply', async (_e, date, vendor, sequence, fileBuffer) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!fileBuffer) return { success: false, error: 'fileBuffer required' };
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const confPath = path.join(dir, 'confirmation.xlsx');
+    if (!fs.existsSync(confPath)) {
+      return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
+    }
+    try {
+      const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
+      // 원본 업로드본도 보관
+      fs.writeFileSync(path.join(dir, 'coupang-export-latest.xlsx'), buf);
+
+      const wbIn = XLSX.read(buf, { type: 'buffer' });
+      const wsIn = wbIn.Sheets[wbIn.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(wsIn, { header: 1, defval: '' });
+      if (aoa.length < 2) return { success: false, error: '빈 양식입니다.' };
+      const head = aoa[0] || [];
+      const col = {};
+      head.forEach((h, i) => { col[String(h ?? '').trim()] = i; });
+      const required = ['물류센터', '상품코드', 'SKU Barcode', '확정수량'];
+      for (const k of required) {
+        if (col[k] == null) return { success: false, error: `컬럼 '${k}' 이 없습니다.` };
+      }
+      const iWh = col['물류센터'];
+      const iCode = col['상품코드'];
+      const iBc = col['SKU Barcode'];
+      const iReq = col['신청수량'];
+      const iExport = col['반출'];
+      const iWhQty = col['창고수량'];
+      const iConfirmed = col['확정수량'];
+      const iMethod = col['운송방법'];
+      const iBox = col['박스번호'];
+      const iInvoice = col['송장번호'];
+      const iPallet = col['파렛트번호'];
+      const iRemark = col['비고'];
+
+      // confirmation.xlsx 로 rowKey 복원 — (물류센터, 상품코드, 바코드) → rowKey
+      const wbConf = XLSX.readFile(confPath, { cellDates: false, cellStyles: false });
+      const wsConf = wbConf.Sheets[wbConf.SheetNames[0]];
+      const aoaConf = XLSX.utils.sheet_to_json(wsConf, { header: 1, defval: '' });
+      const hConf = aoaConf[0] || [];
+      const cmConf = {};
+      hConf.forEach((h, i) => { cmConf[String(h ?? '').trim()] = i; });
+      const cOrder = cmConf['발주번호'];
+      const cWh = cmConf['물류센터'];
+      const cCode = cmConf['상품번호'];
+      const cBc = cmConf['상품바코드'];
+
+      const rowKeyByLookup = new Map(); // key = `${wh}|${code}|${bc}` → { rowKey, orderSeq }
+      for (let r = 1; r < aoaConf.length; r += 1) {
+        const row = aoaConf[r] || [];
+        const wh = String(row[cWh] ?? '').trim();
+        const code = String(row[cCode] ?? '').trim();
+        const bc = String(row[cBc] ?? '').trim();
+        const orderSeq = String(row[cOrder] ?? '');
+        if (!wh || !bc) continue;
+        rowKeyByLookup.set(`${wh}|${code}|${bc}`, {
+          rowKey: `${orderSeq}|${bc}|${r}`,
+          orderSeq,
+          warehouseComposite: `${orderSeq}|${wh}|${bc}`,
+        });
+      }
+
+      // 업로드 데이터 파싱
+      const uploads = [];
+      for (let r = 1; r < aoa.length; r += 1) {
+        const row = aoa[r] || [];
+        const wh = String(row[iWh] ?? '').trim();
+        const code = String(row[iCode] ?? '').trim();
+        const bc = String(row[iBc] ?? '').trim();
+        if (!wh || !bc) continue;
+        const lookup = rowKeyByLookup.get(`${wh}|${code}|${bc}`);
+        if (!lookup) continue;
+        uploads.push({
+          ...lookup,
+          wh,
+          reqQty: Number(row[iReq]) || 0,
+          exportQty: iExport != null ? Number(row[iExport]) || 0 : 0,
+          warehouseQty: iWhQty != null ? Number(row[iWhQty]) || 0 : 0,
+          confirmedQty: Number(row[iConfirmed]) || 0,
+          transportMethod: iMethod != null ? String(row[iMethod] ?? '').trim() : '',
+          boxNo: iBox != null ? String(row[iBox] ?? '').trim() : '',
+          invoiceNo: iInvoice != null ? String(row[iInvoice] ?? '').trim() : '',
+          palletNo: iPallet != null ? String(row[iPallet] ?? '').trim() : '',
+          remark: iRemark != null ? String(row[iRemark] ?? '').trim() : '',
+        });
+      }
+
+      // ── 1. 확정수량 cross-sync ──
+      const confirmedPatches = uploads.map((u) => ({
+        key: u.warehouseComposite,
+        confirmedQty: String(u.confirmedQty),
+      }));
+      const syncRes = await syncConfirmedQtyAcrossFiles(
+        date, vendor, sequence, confirmedPatches, {},
+      );
+      const confirmedPatched = syncRes?.success
+        ? Object.values(syncRes.results || {}).reduce(
+            (sum, r) => sum + (r?.patched || 0), 0)
+        : 0;
+
+      // ── 2. 반출수량 → po-tbnws ──
+      const fulfillPatches = uploads.map((u) => ({
+        key: u.warehouseComposite,
+        value: u.exportQty,
+      }));
+      let fulfillPatched = 0;
+      try {
+        const pRes = await patchFulfillExportInFile(
+          path.join(dir, 'po-tbnws.xlsx'), fulfillPatches,
+        );
+        fulfillPatched = pRes?.patched || 0;
+      } catch (err) {
+        console.warn('[tbnwsCoupangExport:apply] fulfill patch 실패', err);
+      }
+
+      // ── 3. transport.json 업데이트 (운송방법 / 박스 / 파렛트 / 송장 / 비고) ──
+      let transport = { schemaVersion: 3, updatedAt: new Date().toISOString(), assignments: {} };
+      const transportPath = path.join(dir, 'transport.json');
+      if (fs.existsSync(transportPath)) {
+        try { transport = JSON.parse(fs.readFileSync(transportPath, 'utf-8')); }
+        catch { /* 무시 */ }
+      }
+      const assignments = transport.assignments || {};
+      let transportPatched = 0;
+      for (const u of uploads) {
+        const a = assignments[u.wh] || {
+          transportType: u.transportMethod || '쉽먼트',
+          skuTransportType: {},
+          skuBoxes: {},
+          skuPallets: {},
+          skuNotes: {},
+          boxInvoices: [],
+          pallets: [{ presetName: '', boxCount: '' }],
+        };
+        a.skuTransportType = a.skuTransportType || {};
+        a.skuBoxes = a.skuBoxes || {};
+        a.skuPallets = a.skuPallets || {};
+        a.skuNotes = a.skuNotes || {};
+        a.boxInvoices = Array.isArray(a.boxInvoices) ? a.boxInvoices : [];
+
+        if (u.transportMethod) a.skuTransportType[u.rowKey] = u.transportMethod;
+        if (u.remark) a.skuNotes[u.rowKey] = u.remark;
+        else if (a.skuNotes[u.rowKey]) delete a.skuNotes[u.rowKey];
+
+        // SKU 의 운송방법에 따라 박스 vs 팔레트 저장
+        const isShipment = u.transportMethod === '쉽먼트';
+        const isMilkrun = u.transportMethod === '밀크런';
+        if (isShipment && u.boxNo) {
+          a.skuBoxes[u.rowKey] = [{ boxNo: u.boxNo, qty: u.confirmedQty }];
+          if (u.invoiceNo) {
+            const idx = Number(u.boxNo) - 1;
+            if (Number.isInteger(idx) && idx >= 0) {
+              while (a.boxInvoices.length <= idx) a.boxInvoices.push('');
+              a.boxInvoices[idx] = u.invoiceNo;
+            }
+          }
+        } else if (isShipment) {
+          delete a.skuBoxes[u.rowKey];
+        }
+        if (isMilkrun && u.palletNo) {
+          a.skuPallets[u.rowKey] = [{ palletNo: u.palletNo, qty: u.confirmedQty }];
+        } else if (isMilkrun) {
+          delete a.skuPallets[u.rowKey];
+        }
+        assignments[u.wh] = a;
+        transportPatched += 1;
+      }
+      transport.assignments = assignments;
+      transport.updatedAt = new Date().toISOString();
+      fs.writeFileSync(transportPath, JSON.stringify(transport, null, 2), 'utf-8');
+
+      // ── 4. 스냅샷 저장 — 창고수량 포함 모든 입력 필드 보관 ──
+      const snapshot = {
+        schemaVersion: 1,
+        updatedAt: new Date().toISOString(),
+        rows: {},
+      };
+      for (const u of uploads) {
+        snapshot.rows[u.rowKey] = {
+          warehouseQty: u.warehouseQty,
+          confirmedQty: u.confirmedQty,
+          fulfillExportQty: u.exportQty,
+          transportMethod: u.transportMethod,
+          boxNo: u.boxNo,
+          invoiceNo: u.invoiceNo,
+          palletNo: u.palletNo,
+          remark: u.remark,
+        };
+      }
+      fs.writeFileSync(
+        path.join(dir, 'coupang-export.json'),
+        JSON.stringify(snapshot, null, 2),
+        'utf-8',
+      );
+
+      return {
+        success: true,
+        parsedRows: uploads.length,
+        confirmedPatched,
+        fulfillPatched,
+        transportPatched,
+      };
+    } catch (err) {
+      console.error('[tbnwsCoupangExport:apply]', err);
+      return { success: false, error: err.message };
+    }
+  });
+
   /**
    * 단일 xlsx 파일에서 복합키(발주번호|물류센터|SKU바코드) 매칭 후
    * 확정수량(+선택적으로 납품부족사유) 를 in-place 패치.

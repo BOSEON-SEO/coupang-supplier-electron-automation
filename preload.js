@@ -102,6 +102,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('palletList:generate', date, vendor, sequence, options),
   },
 
+  // ── 투비 쿠팡반출 양식 — 외부 물류팀 협업용 양식 xlsx 생성·업로드 반영 ──
+  tbnwsCoupangExport: {
+    generate: (date, vendor, sequence) =>
+      ipcRenderer.invoke('tbnwsCoupangExport:generate', date, vendor, sequence),
+    apply: (date, vendor, sequence, fileBuffer) =>
+      ipcRenderer.invoke('tbnwsCoupangExport:apply', date, vendor, sequence, fileBuffer),
+  },
+
   // ── 작업 파일 갱신 이벤트 (confirmation/po/po-tbnws 등 자동 재로드용) ──
   //   renderer 가 해당 job·파일명 매칭되는 이벤트 받으면 현재 열린 탭 갱신.
   onJobFileUpdated: (callback) => {
