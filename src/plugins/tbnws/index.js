@@ -17,6 +17,10 @@ import { KNOWN_SCOPES, KNOWN_HOOKS, KNOWN_VIEW_ROLES } from '../../core/plugin-a
 import { applyPoStyle } from '../../core/poStyler';
 import TbnwsStockAdjustView from './StockAdjustView';
 import EflexOutboundModal from './EflexOutboundModal';
+import RelocationModal from './RelocationModal';
+import ExportScheduleModal from './ExportScheduleModal';
+import { CoupangWarehousesManageButton } from './CoupangWarehousesModal';
+import { COUPANG_WAREHOUSES_SEED } from './coupangWarehousesSeed';
 
 // ═══════════════════════════════════════════════════════════════════
 // 17컬럼 정의 — 어드민 프론트의 CoupangCheckModal 과 동일 순서·라벨
@@ -69,6 +73,70 @@ function toExtendedRow(r) {
     ['출고여부',       renderExportStatus(r.export_yn)],
     ['비고',           r.stock_remarks ?? ''],
   ];
+}
+
+/**
+ * workDetail 응답의 skuList 원소를 startWork 응답 (CoupangOrderFormCheck) 과
+ * 동일한 형태로 정규화.
+ *
+ * 주의:
+ *   - DB 컬럼명 (`order_no`, `product_code`, `ordered_qty`, `logistics_center`,
+ *     `delivery_price`, `stock_tobe`, `stock_fulfillment`, `tobe_barcode`) 과
+ *     startWork 계산 컬럼명 (`rtn_*`) 모두 수용.
+ *   - "확정수량"·"반출수량"은 **물류 단위**(logisticsList) 에 저장되므로
+ *     (product_code, logistics_center) 기준으로 병합. sku level 은 보통 null.
+ *   - `rtn_barcode_matched` 는 startWork 에서 enrich 되는 계산 필드이므로 로컬 계산.
+ *
+ * @param {object} r         skuList 원소
+ * @param {Map<string, object>} [logiMap] key='product_code|logistics_center' 인덱스
+ */
+function normalizeSkuRow(r, logiMap) {
+  const productCode = r.tobe_product_code ?? r.product_code ?? '';
+  const center = r.departure_warehouse ?? r.logistics_center ?? '';
+  const logi = logiMap ? logiMap.get(`${productCode}|${center}`) : null;
+
+  // 바코드 일치 로컬 계산 (startWork 의 enrichStep2Defaults 와 동일 규칙).
+  const skuBarcode = String(r.sku_barcode ?? '').trim();
+  const tobeBarcode = String(r.rtn_tobe_barcode ?? r.tobe_barcode ?? '').trim();
+  const barcodeMatched = tobeBarcode
+    ? (skuBarcode === tobeBarcode ? 'Y' : 'N')
+    : '';
+
+  return {
+    coupang_order_seq:       r.coupang_order_seq ?? r.order_no ?? '',
+    tobe_product_code:       productCode,
+    sku_id:                  r.sku_id ?? '',
+    sku_name:                r.sku_name ?? '',
+    sku_barcode:             r.sku_barcode ?? '',
+    order_quantity:          r.order_quantity ?? r.ordered_qty ?? 0,
+    // 확정수량: 물류 단위 confirmed_qty 우선, 없으면 requested_qty, 그 다음 sku level
+    requested_qty:           logi?.confirmed_qty ?? logi?.requested_qty
+                              ?? r.requested_qty ?? r.confirmed_qty ?? 0,
+    fulfillment_export_qty:  logi?.fulfillment_export_qty ?? r.fulfillment_export_qty ?? 0,
+    departure_warehouse:     center,
+    purchase_price:          r.purchase_price ?? 0,
+    rtn_sku_delivery_price:  r.rtn_sku_delivery_price ?? r.sku_delivery_price
+                              ?? r.delivery_price ?? 0,
+    rtn_tobe_stock:          r.rtn_tobe_stock ?? r.stock_tobe ?? 0,
+    rtn_fulfillment_stock:   r.rtn_fulfillment_stock ?? r.stock_fulfillment ?? 0,
+    rtn_tobe_barcode:        tobeBarcode,
+    rtn_barcode_matched:     r.rtn_barcode_matched ?? r.barcode_matched ?? barcodeMatched,
+    export_yn:               r.export_yn ?? '',
+    stock_remarks:           r.stock_remarks ?? logi?.logistics_remarks ?? '',
+  };
+}
+
+/** logisticsList 를 (product_code, logistics_center) 키로 인덱싱. */
+function buildLogisticsMap(logisticsList) {
+  const m = new Map();
+  if (!Array.isArray(logisticsList)) return m;
+  for (const l of logisticsList) {
+    const pc = l?.product_code ?? '';
+    const lc = l?.logistics_center ?? '';
+    if (!pc || !lc) continue;
+    m.set(`${pc}|${lc}`, l);
+  }
+  return m;
 }
 
 /** 응답 배열 → AOA (header + rows) */
@@ -132,20 +200,114 @@ function TbnwsNewJobOptions({ options, onChange, disabled }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// 원격 work 레코드 → 로컬 manifest 모양 skeleton
+// ═══════════════════════════════════════════════════════════════════
+
+// 앱 내부 vendor id 검증 패턴 — ipc-handlers 와 동일 (소문자+숫자+언더스코어, 2~20자).
+const VENDOR_RE = /^[a-z0-9_]{2,20}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * DB `category` (예: 'BASIC', 'CANON') → 앱 vendor id (소문자).
+ * 단순 toLowerCase 로 충분하지 않은 특수 매핑이 생기면 여기에 테이블 추가.
+ */
+function toVendorId(category) {
+  return String(category || '').trim().toLowerCase();
+}
+
+/**
+ * 백엔드 work 레코드(coupang_inbound_work row) 를 로컬 manifest 와
+ * 같은 모양의 객체로 변환. `remote: true` 플래그로 구분.
+ *
+ * 유효성 실패 (vendor regex 미통과, date 포맷 이상) 시 null 반환 —
+ * 호출자가 스킵하도록 함.
+ *
+ * status → phase 매핑은 대략:
+ *   DRAFT            → 'po_downloaded'
+ *   LOGISTICS_LOCKED → 'assigned'
+ *   CONFIRMED        → 'confirmed'
+ *   COMPLETED        → 'uploaded'
+ */
+function toRemoteJobSkeleton(work) {
+  const vendor = toVendorId(work.category);
+  const date = String(work.inbound_date || '').slice(0, 10);
+  if (!VENDOR_RE.test(vendor)) return null;
+  if (!DATE_RE.test(date)) return null;
+
+  const status = String(work.status || '').toUpperCase();
+  const PHASE_MAP = {
+    DRAFT: 'po_downloaded',
+    LOGISTICS_LOCKED: 'assigned',
+    CONFIRMED: 'confirmed',
+    COMPLETED: 'uploaded',
+  };
+  return {
+    schemaVersion: 1,
+    vendor,
+    date,
+    sequence: Number(work.round) || 1,
+    phase: PHASE_MAP[status] || 'po_downloaded',
+    completed: status === 'COMPLETED',
+    plugin: 'tbnws',
+    remote: true,
+    createdAt: work.created_at || null,
+    updatedAt: work.updated_at || null,
+    stats: {},
+    pluginData: { tbnws: toTbnwsMeta(work) },
+  };
+}
+
+function toTbnwsMeta(work) {
+  return {
+    workSeq: work.seq,
+    status: String(work.status || '').toUpperCase(),
+    stepCompleted: Number(work.step_completed) || 0,
+    eflexRequested: String(work.eflex_requested || 'N').toUpperCase() === 'Y',
+    exportScheduleSeq: work.export_schedule_seq ?? null,
+    relocationSeq: work.relocation_seq ?? null,
+    milkrunReflectedAt: work.milkrun_reflected_at ?? null,
+  };
+}
+
+// 간단한 월 캐시 — calendar.list-day 가 같은 달에서 반복 호출될 때 재사용.
+// 달/벤더 바뀌면 무효. 수 분 이상 안정적으로 쓰진 않음 (세션 내 캐시 용도만).
+let monthCache = { key: null, works: [], ts: 0 };
+const MONTH_CACHE_TTL_MS = 30 * 1000;
+
+// ═══════════════════════════════════════════════════════════════════
 // 전역 오버레이 호스트 — window event 로 모달 on/off
 // ═══════════════════════════════════════════════════════════════════
 
 const EFLEX_OPEN_EVENT = 'tbnws:open-eflex-modal';
+const RELOCATION_OPEN_EVENT = 'tbnws:open-relocation-modal';
+const EXPORT_SCHEDULE_OPEN_EVENT = 'tbnws:open-export-schedule-modal';
 
 function TbnwsOverlayHost() {
   const [eflexJob, setEflexJob] = useState(null);
+  const [relocationJob, setRelocationJob] = useState(null);
+  const [exportJob, setExportJob] = useState(null);
+
   useEffect(() => {
-    const open = (e) => setEflexJob(e?.detail?.job || null);
-    window.addEventListener(EFLEX_OPEN_EVENT, open);
-    return () => window.removeEventListener(EFLEX_OPEN_EVENT, open);
+    const openEflex = (e) => setEflexJob(e?.detail?.job || null);
+    const openReloc = (e) => setRelocationJob(e?.detail?.job || null);
+    const openExp   = (e) => setExportJob(e?.detail?.job || null);
+    window.addEventListener(EFLEX_OPEN_EVENT, openEflex);
+    window.addEventListener(RELOCATION_OPEN_EVENT, openReloc);
+    window.addEventListener(EXPORT_SCHEDULE_OPEN_EVENT, openExp);
+    return () => {
+      window.removeEventListener(EFLEX_OPEN_EVENT, openEflex);
+      window.removeEventListener(RELOCATION_OPEN_EVENT, openReloc);
+      window.removeEventListener(EXPORT_SCHEDULE_OPEN_EVENT, openExp);
+    };
   }, []);
   if (eflexJob) {
     return <EflexOutboundModal job={eflexJob} onClose={() => setEflexJob(null)} />;
+  }
+  if (relocationJob) {
+    return <RelocationModal job={relocationJob} onClose={() => setRelocationJob(null)} />;
+  }
+  if (exportJob) {
+    return <ExportScheduleModal job={exportJob} onClose={() => setExportJob(null)} />;
   }
   return null;
 }
@@ -176,6 +338,14 @@ const manifest = {
       type: 'password',
       description: 'Bearer 토큰 또는 세션 쿠키 값. 백엔드 관리자에게 문의.',
     },
+    // 회사 정식 명칭 — 파렛트 적재리스트 등 산출물의 '업체명' 칸에 자동 채워짐.
+    {
+      key: 'companyFullName',
+      label: '회사 정식 명칭',
+      type: 'text',
+      default: '주식회사 투비네트웍스글로벌',
+      description: '파렛트 적재리스트 등 산출물의 "업체명" 칸에 자동 삽입되는 정식 명칭.',
+    },
     // 이플렉스 반출 수령 정보 (admin 프론트와 동일 default)
     { key: 'eflexReceiverName', label: '이플렉스 반출 수령자명', type: 'text', default: '투비네트웍스글로벌' },
     { key: 'eflexPhone',        label: '이플렉스 반출 연락처',   type: 'text', default: '010-5011-1337' },
@@ -189,10 +359,85 @@ const manifest = {
       default: true,
       description: '체크 시 실제 백엔드로 전송하지 않고 요청 body 만 로그. 검증 후 체크 해제하여 실요청으로 전환하세요.',
     },
+    // 출고예정 (applyStep4Schedule) 수취인 기본값 — exportProducts 각 item 공통 적용.
+    // 어드민 프론트는 주문 row 에서 파생하지만 Electron 은 주문 정보가 없어 고정값 사용.
+    { key: 'exportReceiverName',  label: '출고예정 수취인명',   type: 'text', default: '투비네트웍스글로벌' },
+    { key: 'exportReceiverPhone', label: '출고예정 수취인 연락처', type: 'text', default: '010-5011-1337' },
+    { key: 'exportReceiverContact', label: '출고예정 수취인 이메일', type: 'text', default: '' },
+    { key: 'exportReceiverAddress', label: '출고예정 수취인 주소', type: 'text', default: '경기 용인시 처인구 포곡읍 성산로 434' },
+    { key: 'exportReceiverMemo',  label: '출고예정 배송 메모',  type: 'text', default: '' },
+    {
+      key: 'exportPartnerName',
+      label: '출고예정 파트너명',
+      type: 'text',
+      default: '쿠팡로켓',
+      description: '백엔드 erp_partner.partner_name 과 정확히 일치해야 partner_code 매칭이 됨. 오타·띄어쓰기 금지.',
+    },
+    {
+      key: 'exportCategoryCode',
+      label: '출고예정 카테고리 코드',
+      type: 'text',
+      default: 'G',
+      description: '상품코드 접두어와 동일 (G, F 등). 쿠팡 출고예정은 보통 G.',
+    },
+    {
+      key: 'coupangWarehouses',
+      label: '쿠팡 창고 관리',
+      type: 'custom',
+      description: '출고예정 모달에서 엑셀 "물류센터" 값 → 연락처/주소 자동 매칭에 사용. 최초 실행 시 seed 가 주입되며, 이후 언제든 추가·수정·삭제 가능.',
+      render: ({ value, onChange }) => (
+        React.createElement(CoupangWarehousesManageButton, { value, onChange })
+      ),
+    },
+    {
+      key: 'exportScheduleTestMode',
+      label: '출고예정 테스트 모드',
+      type: 'boolean',
+      default: true,
+      description: '체크 시 실제 ERP 로 전송하지 않고 요청 body 만 콘솔에 로그. 검증 후 체크 해제하여 실요청으로 전환하세요.',
+    },
+    // 재고이동 기본 창고 태그 — 모달에서 덮어쓸 수 있음
+    { key: 'relocationFromTagDefault', label: '재고이동 기본 From 창고 태그', type: 'text', default: 'GJ' },
+    { key: 'relocationToTagDefault',   label: '재고이동 기본 To 창고 태그',   type: 'text', default: 'GT' },
+    {
+      key: 'relocationTestMode',
+      label: '재고이동 테스트 모드',
+      type: 'boolean',
+      default: true,
+      description: '체크 시 실제 WMS 로 전송하지 않고 요청 body 만 콘솔에 로그. 검증 후 체크 해제하여 실요청으로 전환하세요.',
+    },
   ],
 
   activate(ctx) {
     const disposables = [];
+
+    // 쿠팡 창고 seed 주입 — 설정에 coupangWarehouses 가 비어있으면 1회 seed 로 채움.
+    (async () => {
+      try {
+        const api = window.electronAPI;
+        if (!api) return;
+        const cur = await api.loadSettings();
+        const curSettings = cur?.settings || {};
+        const curPlugins = curSettings.plugins || {};
+        const mine = curPlugins.tbnws || {};
+        if (Array.isArray(mine.coupangWarehouses) && mine.coupangWarehouses.length > 0) return;
+        await api.saveSettings({
+          schemaVersion: cur?.schemaVersion || 1,
+          settings: {
+            ...curSettings,
+            plugins: {
+              ...curPlugins,
+              tbnws: { ...mine, coupangWarehouses: COUPANG_WAREHOUSES_SEED },
+            },
+          },
+        });
+        window.dispatchEvent(new Event('settings-changed'));
+        // eslint-disable-next-line no-console
+        console.info(`[tbnws] coupangWarehouses seed 주입 (${COUPANG_WAREHOUSES_SEED.length}건)`);
+      } catch (err) {
+        console.warn('[tbnws] coupangWarehouses seed 주입 실패', err);
+      }
+    })();
 
     // NewJobModal 에 풀필 재고 동기화 체크박스 기여.
     disposables.push(
@@ -226,20 +471,71 @@ const manifest = {
         id: 'tbnws.eflex.outbound',
         title: '이플렉스 출고',
         icon: '🚚',
-        variant: 'primary',
+        variant: 'success',
         scope: 'work.tab.tbnws.actions',
         order: 50,
+        when: (whenCtx) => whenCtx?.job?.pluginData?.tbnws?.workSeq != null,
         handler: (args) => {
-          if (!args?.job) {
-            alert('활성 작업이 없습니다.');
-            return;
+          const job = args?.job;
+          if (!job) { alert('활성 작업이 없습니다.'); return; }
+          if (job?.pluginData?.tbnws?.eflexRequested) {
+            const ok = window.confirm(
+              '이 작업은 이미 이플렉스 출고가 요청된 상태입니다.\n'
+              + '정말 다시 요청하시겠습니까? (중복 전송 될 수 있음)',
+            );
+            if (!ok) return;
           }
           window.dispatchEvent(new CustomEvent(EFLEX_OPEN_EVENT, {
-            detail: { job: args.job },
+            detail: { job },
           }));
         },
       }),
     );
+
+    // 재고이동 등록 버튼 — 투비 재고조정 탭.
+    disposables.push(
+      ctx.registerCommand({
+        id: 'tbnws.relocation.create',
+        title: '재고이동 등록',
+        icon: '📦',
+        variant: 'info',
+        scope: 'work.tab.tbnws.actions',
+        order: 60,
+        when: (whenCtx) => whenCtx?.job?.pluginData?.tbnws?.workSeq != null,
+        handler: (args) => {
+          const job = args?.job;
+          if (!job) { alert('활성 작업이 없습니다.'); return; }
+          window.dispatchEvent(new CustomEvent(RELOCATION_OPEN_EVENT, {
+            detail: { job },
+          }));
+        },
+      }),
+    );
+
+    // 출고예정 등록 버튼 — 투비 재고조정 탭.
+    disposables.push(
+      ctx.registerCommand({
+        id: 'tbnws.exportSchedule.create',
+        title: '출고예정 등록',
+        icon: '📅',
+        variant: 'warning',
+        scope: 'work.tab.tbnws.actions',
+        order: 70,
+        when: (whenCtx) => whenCtx?.job?.pluginData?.tbnws?.workSeq != null,
+        handler: (args) => {
+          const job = args?.job;
+          if (!job) { alert('활성 작업이 없습니다.'); return; }
+          window.dispatchEvent(new CustomEvent(EXPORT_SCHEDULE_OPEN_EVENT, {
+            detail: { job },
+          }));
+        },
+      }),
+    );
+
+    // "startWork 재시도" 커맨드는 제거됨.
+    // 백엔드 startWork 는 기존 workSeq 반환하지만 SKU 를 재초기화하는 파괴적 동작이라
+    // 어드민이 이미 Step4/5 진행했으면 오히려 작업을 망가뜨림.
+    // 원격 import 시점에 workDetail 로 po-tbnws.xlsx 를 이미 재구성하므로 수동 재시도 불필요.
 
     // job.pre-create 훅 — options.tbnws.refetchFulfillment 가 true 면
     // 풀필 재고 동기화 API 를 호출하고 완료 대기.
@@ -362,6 +658,242 @@ const manifest = {
             alert(`확정수량 반영 완료: ${parts.join(' · ')}`);
           }
         },
+      }),
+    );
+
+    /**
+     * 달력 원격 병합 — GET work.listByMonth 로 DB 의 coupang_inbound_work 를 가져와
+     * 로컬 manifest 목록과 자연키 (date, vendor, round) 기준으로 merge.
+     *
+     * 원칙:
+     *   - 로컬은 항상 source of truth. workSeq 는 기존 값 우선 (원격이 덮지 않음).
+     *   - 원격에만 있는 작업은 `remote: true` 플래그로 달력에 표시. 클릭 시 로컬 skeleton 생성.
+     *   - 네트워크·인증 실패는 로컬 표시를 망치면 안 되므로 try/catch 로 로컬 그대로 반환.
+     */
+    const fetchRemoteWorks = async (year, month, vendor) => {
+      const key = `${year}-${month}-${vendor || ''}`;
+      const now = Date.now();
+      if (monthCache.key === key && (now - monthCache.ts) < MONTH_CACHE_TTL_MS) {
+        return monthCache.works;
+      }
+      const res = await ctx.ipcInvoke('work.listByMonth', {
+        year, month, vendor: vendor || null,
+      });
+      if (!res?.success || !Array.isArray(res.works)) {
+        if (res && !res.success) {
+          console.info('[tbnws] 원격 달력 조회 실패 — 로컬만 표시:', res.error);
+        }
+        monthCache = { key, works: [], ts: now };
+        return [];
+      }
+      monthCache = { key, works: res.works, ts: now };
+      return res.works;
+    };
+
+    disposables.push(
+      ctx.registerHook(KNOWN_HOOKS.CALENDAR_LIST_MONTH, async (payload) => {
+        const { year, month, vendor, byDate } = payload || {};
+        const merged = { ...(byDate || {}) };
+        try {
+          const works = await fetchRemoteWorks(year, month, vendor);
+          if (works.length === 0) return merged;
+
+          // 자연키 기반 group — 같은 (date, vendor, round) 은 1건으로 계수.
+          // vendor 는 소문자 정규화 + regex 검증 통과한 것만 (invalid 는 skip).
+          // 백엔드 필터를 신뢰하지 않고 클라이언트에서 한 번 더 vendor 필터 (방어적).
+          const vendorFilter = vendor ? toVendorId(vendor) : null;
+          const keysByDate = new Map();
+          for (const w of works) {
+            const date = String(w.inbound_date || '').slice(0, 10);
+            const v = toVendorId(w.category);
+            const round = Number(w.round) || 1;
+            if (!DATE_RE.test(date) || !VENDOR_RE.test(v)) continue;
+            if (vendorFilter && v !== vendorFilter) continue;
+            if (!keysByDate.has(date)) keysByDate.set(date, new Set());
+            keysByDate.get(date).add(`${v}|${round}`);
+          }
+          for (const [date, set] of keysByDate) {
+            if (!merged[date]) {
+              // 원격 전용 — 점 표시만, 미완료 가정
+              merged[date] = { count: set.size, hasIncomplete: true, remoteOnly: true };
+            }
+            // 로컬 있는 날짜는 카운트 합산 대신 그대로 유지 (정확 카운트는 day panel 에서 처리)
+          }
+        } catch (err) {
+          console.warn('[tbnws] calendar.list-month 병합 실패', err);
+        }
+        return merged;
+      }),
+    );
+
+    disposables.push(
+      ctx.registerHook(KNOWN_HOOKS.CALENDAR_LIST_DAY, async (payload) => {
+        const { date, vendor, jobs } = payload || {};
+        const localJobs = Array.isArray(jobs) ? jobs.slice() : [];
+        try {
+          const y = Number(String(date || '').slice(0, 4));
+          const m = Number(String(date || '').slice(5, 7));
+          if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return localJobs;
+
+          const works = await fetchRemoteWorks(y, m, vendor);
+          const todaysWorks = works.filter(
+            (w) => String(w.inbound_date || '').slice(0, 10) === date,
+          );
+          if (todaysWorks.length === 0) return localJobs;
+
+          // 로컬 자연키 인덱스
+          const byKey = new Map();
+          for (const j of localJobs) byKey.set(`${j.vendor}|${j.sequence}`, j);
+
+          // 방어적 vendor 필터 (백엔드 미필터 대응).
+          const vendorFilter = vendor ? toVendorId(vendor) : null;
+          for (const w of todaysWorks) {
+            const v = toVendorId(w.category);
+            const round = Number(w.round) || 1;
+            if (!VENDOR_RE.test(v)) continue;
+            if (vendorFilter && v !== vendorFilter) continue;
+            const k = `${v}|${round}`;
+            const existing = byKey.get(k);
+            const tbnwsMeta = toTbnwsMeta(w);
+            if (existing) {
+              // 로컬 있음 — tbnws 메타만 주입. 기존 값 (특히 workSeq) 이 우선.
+              const prev = (existing.pluginData && existing.pluginData.tbnws) || {};
+              existing.pluginData = {
+                ...(existing.pluginData || {}),
+                tbnws: { ...tbnwsMeta, ...prev },
+              };
+            } else {
+              const skeleton = toRemoteJobSkeleton(w);
+              if (skeleton) byKey.set(k, skeleton);
+            }
+          }
+
+          return Array.from(byKey.values()).sort((a, b) => {
+            const v = (a.vendor || '').localeCompare(b.vendor || '');
+            return v !== 0 ? v : (a.sequence - b.sequence);
+          });
+        } catch (err) {
+          console.warn('[tbnws] calendar.list-day 병합 실패', err);
+          return localJobs;
+        }
+      }),
+    );
+
+    /**
+     * job.remote-import 훅 — 달력의 원격(☁) 카드 클릭 시 CalendarView 가 호출.
+     *
+     * 플로우:
+     *   1) jobs.create 로 로컬 skeleton 생성 (plugin='tbnws', sequence 명시)
+     *   2) workSeq 있으면:
+     *      a) GET /…/{workSeq}/poFile      → po.xlsx 저장
+     *      b) GET /…/workDetail?work_seq=X → skuList 로 po-tbnws.xlsx 재구성
+     *   3) manifest 에 pluginData 주입 + source 기록
+     *
+     * workDetail 은 읽기 전용 — 어드민에서 수정한 값 그대로 보존됨.
+     * (startWork 재호출은 파괴적 재초기화라 피함).
+     */
+    disposables.push(
+      ctx.registerHook(KNOWN_HOOKS.REMOTE_JOB_IMPORT, async (payload) => {
+        const remoteJob = payload?.job;
+        if (!remoteJob?.date || !remoteJob?.vendor || remoteJob.sequence == null) {
+          throw new Error('원격 job 정보 부족 (date/vendor/sequence 필요)');
+        }
+        const api = ctx.electronAPI;
+        const workSeq = remoteJob?.pluginData?.tbnws?.workSeq;
+
+        // 1) 로컬 skeleton
+        const created = await api.jobs.create(remoteJob.date, remoteJob.vendor, {
+          plugin: 'tbnws',
+          sequence: remoteJob.sequence,
+        });
+        if (!created?.success) {
+          throw new Error(created?.error || 'jobs.create 실패');
+        }
+
+        let poSaved = false;
+        let tbnwsSaved = false;
+        let dlFileName = null;
+
+        if (workSeq != null) {
+          // 2a) PO 파일 다운로드 → po.xlsx
+          const dl = await ctx.ipcInvoke('work.downloadPoFile', { workSeq });
+          if (dl?.success && dl.data) {
+            const resolved = await api.resolveJobPath(
+              remoteJob.date, remoteJob.vendor, remoteJob.sequence, 'po.xlsx',
+            );
+            if (resolved?.success) {
+              const w = await api.writeFile(resolved.path, dl.data);
+              if (w?.success) {
+                poSaved = true;
+                dlFileName = dl.fileName || null;
+                const bytes = dl.data.byteLength ?? dl.data.length;
+                const suffix = dl.converted ? ' (CSV→XLSX 변환)' : '';
+                console.info(`[tbnws] 원격 PO 다운로드 완료${suffix} (${bytes} bytes, ${dl.fileName})`);
+              } else {
+                console.warn('[tbnws] po.xlsx 저장 실패:', w?.error);
+              }
+            }
+          } else {
+            console.warn('[tbnws] PO 파일 다운로드 실패:', dl?.error);
+          }
+
+          // 2b) workDetail 조회 → skuList 로 po-tbnws.xlsx 재구성
+          const detail = await ctx.ipcInvoke('work.fetchDetail', { workSeq });
+          // DEBUG: 응답 키 구조 덤프 (필드 매핑 조정용). 안정화 후 제거.
+          if (detail?.success) {
+            console.info('[tbnws] workDetail 응답 구조:', {
+              workKeys: detail.work ? Object.keys(detail.work).sort() : null,
+              skuListLen: detail.skuList?.length,
+              skuSample: detail.skuList?.[0],
+              logisticsListLen: detail.logisticsList?.length,
+              logisticsSample: detail.logisticsList?.[0],
+              logisticsCenterSample: detail.logisticsCenterList?.[0],
+              logisticsPackageSample: detail.logisticsPackageList?.[0],
+            });
+          }
+          if (detail?.success && Array.isArray(detail.skuList) && detail.skuList.length > 0) {
+            try {
+              const logiMap = buildLogisticsMap(detail.logisticsList);
+              const normalized = detail.skuList.map((row) => normalizeSkuRow(row, logiMap));
+              const aoa = buildAoa(normalized);
+              const raw = buildWorkbookBuffer(aoa);
+              const ab = raw.buffer
+                ? raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
+                : raw;
+              const outBuffer = await applyPoStyle(ab);
+              const resolved = await api.resolveJobPath(
+                remoteJob.date, remoteJob.vendor, remoteJob.sequence, 'po-tbnws.xlsx',
+              );
+              if (resolved?.success) {
+                const w = await api.writeFile(resolved.path, outBuffer);
+                if (w?.success) {
+                  tbnwsSaved = true;
+                  console.info(`[tbnws] po-tbnws.xlsx 재구성 완료 (${normalized.length}행)`);
+                } else {
+                  console.warn('[tbnws] po-tbnws.xlsx 저장 실패:', w?.error);
+                }
+              }
+            } catch (err) {
+              console.warn('[tbnws] po-tbnws 재구성 실패', err);
+            }
+          } else if (detail && !detail.success) {
+            console.warn('[tbnws] workDetail 조회 실패:', detail.error);
+          }
+        }
+
+        // 3) manifest 업데이트 — pluginData + source
+        const sourceFlag = poSaved && tbnwsSaved ? 'remote'
+                        : poSaved                ? 'remote-partial'
+                        :                          'remote-no-file';
+        const patch = {
+          pluginData: remoteJob.pluginData || {},
+          source: sourceFlag,
+        };
+        if (dlFileName) patch.sourceFileName = dlFileName;
+        const upd = await api.jobs.updateManifest(
+          remoteJob.date, remoteJob.vendor, remoteJob.sequence, patch,
+        );
+        return upd?.manifest || created.manifest;
       }),
     );
 

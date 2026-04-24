@@ -19,7 +19,6 @@ export default function TransportApp({ params }) {
   const [groups, setGroups] = useState([]);
   const [defaults, setDefaults] = useState({});
   const [originList, setOriginList] = useState([]);
-  const [rentalList, setRentalList] = useState([]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -40,7 +39,6 @@ export default function TransportApp({ params }) {
     setGroups(res.groups || []);
     setDefaults(res.defaults || {});
     setOriginList(res.originList || []);
-    setRentalList(res.rentalList || []);
   }, [date, vendor, sequence]);
 
   useEffect(() => { load(); }, [load]);
@@ -94,7 +92,6 @@ export default function TransportApp({ params }) {
           groups={groups}
           defaults={defaults}
           originList={originList}
-          rentalList={rentalList}
           saving={saving}
           onSave={handleSave}
           onCancel={handleCancel}

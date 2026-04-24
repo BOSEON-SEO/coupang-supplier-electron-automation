@@ -95,6 +95,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('eflex:recordOutbound', date, vendor, sequence, payload),
   },
 
+  // ── 파렛트 적재리스트 xlsx 생성 (transport.json + confirmation.xlsx) ──
+  //   options.companyName: 산출물의 '업체명' 칸에 들어갈 회사 정식 명칭.
+  palletList: {
+    generate: (date, vendor, sequence, options) =>
+      ipcRenderer.invoke('palletList:generate', date, vendor, sequence, options),
+  },
+
   // ── 작업 파일 갱신 이벤트 (confirmation/po/po-tbnws 등 자동 재로드용) ──
   //   renderer 가 해당 job·파일명 매칭되는 이벤트 받으면 현재 열린 탭 갱신.
   onJobFileUpdated: (callback) => {

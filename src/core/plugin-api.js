@@ -275,6 +275,21 @@ export const KNOWN_HOOKS = Object.freeze({
   JOB_COMPLETED: 'job.completed',             // payload: { job } — 완료 처리 직후
   PHASE_ENTER: 'phase.enter',                 // payload: { job, from, to } — phase 진입
   PHASE_LEAVE: 'phase.leave',                 // payload: { job, from, to } — phase 이탈
+
+  // ── 달력 merge (원격 DB 조회 결과 병합) ──
+  //   플러그인이 원격 work 레코드를 가져와 로컬 manifest 목록과 병합.
+  //   로컬은 항상 source of truth (로컬 우선), 원격에만 있는 작업은 remote-only skeleton 으로 추가됨.
+  CALENDAR_LIST_MONTH: 'calendar.list-month', // payload: { year, month, vendor, byDate } → merged byDate 반환
+  CALENDAR_LIST_DAY:   'calendar.list-day',   // payload: { date, vendor, jobs }          → merged jobs 반환
+
+  // ── 원격 작업을 로컬로 import ──
+  //   `remote: true` 카드 클릭 시 CalendarView 가 호출. 플러그인이:
+  //     1) jobs.create 로 로컬 skeleton 생성
+  //     2) 원본 PO 파일 다운로드 → po.xlsx 저장
+  //     3) manifest 에 pluginData 주입 + source 기록
+  //   핸들러 미등록 시 remote 카드 클릭이 작동 안 함.
+  //   payload: { job } (remote skeleton) → 완성된 로컬 manifest 반환.
+  REMOTE_JOB_IMPORT: 'job.remote-import',
 });
 
 // ═══════════════════════════════════════════════════════════════════

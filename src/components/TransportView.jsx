@@ -17,7 +17,7 @@ import React, { useMemo, useState } from 'react';
  */
 
 export default function TransportView({
-  groups, defaults, originList = [], rentalList = [],
+  groups, defaults, originList = [],
   saving, onSave, onCancel,
 }) {
   const [overrides, setOverrides] = useState({});
@@ -62,16 +62,16 @@ export default function TransportView({
   const removeBoxRow = (wh, rowKey, idx) =>
     mutateBoxes(wh, rowKey, (rows) => rows.filter((_, i) => i !== idx));
 
-  // ── 밀크런: 팔레트 목록 조작 ──
+  // ── 밀크런: 팔레트 블록 조작 ──
+  // v3 이후 팔레트는 `{presetName}` 만 가지며 번호는 idx+1 로 자동 표기.
+  // 실제 치수/렌탈사는 settings 의 palletPresetList 에서 lookup.
   const getPallets = (wh) => getAssign(wh)?.pallets || [];
   const setPallets = (wh, next) => patchAssign(wh, { pallets: next });
-  const addPallet = (wh) => setPallets(wh, [...getPallets(wh), {
-    width: defaults.palletWidth ?? '',
-    height: defaults.palletHeight ?? '',
-    depth: defaults.palletDepth ?? '',
-    count: defaults.palletCount ?? '',
-    rentalId: defaults.rentalId ?? '',
-  }]);
+  const addPallet = (wh) => {
+    // 신규 팔레트 추가 시 첫 프리셋 자동 선택 (없으면 빈 값).
+    const firstPreset = Array.isArray(defaults?.palletPresets) && defaults.palletPresets[0]?.name || '';
+    setPallets(wh, [...getPallets(wh), { presetName: firstPreset, boxCount: '' }]);
+  };
   const updatePallet = (wh, idx, patch) => {
     const cur = getPallets(wh);
     setPallets(wh, cur.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
@@ -82,7 +82,30 @@ export default function TransportView({
     setPallets(wh, cur.filter((_, i) => i !== idx));
   };
 
-  // ── 밀크런: SKU 비고 ──
+  // ── 밀크런: SKU 팔레트 배정 조작 (쉽먼트 skuBoxes 와 대칭) ──
+  const mutatePalletAssign = (wh, rowKey, updater) => {
+    setOverrides((prev) => {
+      const base = { ...(initial[wh] || {}), ...(prev[wh] || {}) };
+      const curSkuPallets = base.skuPallets || {};
+      const curRows = curSkuPallets[rowKey] || [];
+      const nextRows = updater(curRows);
+      return {
+        ...prev,
+        [wh]: {
+          ...base,
+          skuPallets: { ...curSkuPallets, [rowKey]: nextRows },
+        },
+      };
+    });
+  };
+  const addPalletAssignRow = (wh, rowKey) =>
+    mutatePalletAssign(wh, rowKey, (rows) => [...rows, { palletNo: '', qty: '' }]);
+  const updatePalletAssignRow = (wh, rowKey, idx, patch) =>
+    mutatePalletAssign(wh, rowKey, (rows) => rows.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  const removePalletAssignRow = (wh, rowKey, idx) =>
+    mutatePalletAssign(wh, rowKey, (rows) => rows.filter((_, i) => i !== idx));
+
+  // ── SKU 비고 — 밀크런/쉽먼트 공통 ──
   const setNote = (wh, rowKey, text) => {
     const cur = getAssign(wh);
     patchAssign(wh, { skuNotes: { ...(cur.skuNotes || {}), [rowKey]: text } });
@@ -114,12 +137,17 @@ export default function TransportView({
         entry.originId = String(a.originId ?? '');
         entry.totalBoxes = String(a.totalBoxes ?? '');
         entry.pallets = (a.pallets || []).map((p) => ({
-          width:    String(p.width    ?? ''),
-          height:   String(p.height   ?? ''),
-          depth:    String(p.depth    ?? ''),
-          count:    String(p.count    ?? ''),
-          rentalId: String(p.rentalId ?? ''),
+          presetName: String(p.presetName ?? ''),
+          boxCount:   String(p.boxCount   ?? ''),
         }));
+        // SKU 별 팔레트 배정 — 쉽먼트 skuBoxes 와 동일 구조 (palletNo + qty)
+        entry.skuPallets = {};
+        for (const sku of g.skus) {
+          const rows = (a.skuPallets?.[sku.rowKey] || [])
+            .map((p) => ({ palletNo: String(p.palletNo ?? '').trim(), qty: Number(p.qty) || 0 }))
+            .filter((p) => p.palletNo !== '' && p.qty > 0);
+          if (rows.length) entry.skuPallets[sku.rowKey] = rows;
+        }
       }
 
       // 비고는 쉽먼트/밀크런 공통 저장
@@ -188,7 +216,6 @@ export default function TransportView({
               defaults={defaults}
               collapsed={!!collapsed[g.warehouse]}
               originList={originList}
-              rentalList={rentalList}
               onToggleCollapse={() => setCollapsed((p) => ({ ...p, [g.warehouse]: !p[g.warehouse] }))}
               onTypeChange={(t) => patchAssign(g.warehouse, { transportType: t })}
               onField={(k, v) => patchAssign(g.warehouse, { [k]: v })}
@@ -200,6 +227,9 @@ export default function TransportView({
               onPalletAdd={() => addPallet(g.warehouse)}
               onPalletUpdate={(idx, patch) => updatePallet(g.warehouse, idx, patch)}
               onPalletRemove={(idx) => removePallet(g.warehouse, idx)}
+              onPalletAssignAdd={(rowKey) => addPalletAssignRow(g.warehouse, rowKey)}
+              onPalletAssignUpdate={(rowKey, idx, patch) => updatePalletAssignRow(g.warehouse, rowKey, idx, patch)}
+              onPalletAssignRemove={(rowKey, idx) => removePalletAssignRow(g.warehouse, rowKey, idx)}
               onNote={(rowKey, text) => setNote(g.warehouse, rowKey, text)}
             />
           ))}
@@ -219,10 +249,11 @@ export default function TransportView({
 // ──────────────────────────────────────────────────────────────
 function WarehouseCard({
   group, assignment, defaults, collapsed,
-  originList, rentalList,
+  originList,
   onToggleCollapse, onTypeChange, onField,
   onBoxRowAdd, onBoxRowUpdate, onBoxRowRemove,
   onPalletAdd, onPalletUpdate, onPalletRemove,
+  onPalletAssignAdd, onPalletAssignUpdate, onPalletAssignRemove,
   onNote,
 }) {
   const type = assignment.transportType || '쉽먼트';
@@ -258,8 +289,8 @@ function WarehouseCard({
           {isMilkrun ? (
             <MilkrunSettings
               assignment={assignment}
+              defaults={defaults}
               originList={originList}
-              rentalList={rentalList}
               onField={onField}
               onPalletAdd={onPalletAdd}
               onPalletUpdate={onPalletUpdate}
@@ -280,6 +311,9 @@ function WarehouseCard({
             onBoxRowAdd={onBoxRowAdd}
             onBoxRowUpdate={onBoxRowUpdate}
             onBoxRowRemove={onBoxRowRemove}
+            onPalletAssignAdd={onPalletAssignAdd}
+            onPalletAssignUpdate={onPalletAssignUpdate}
+            onPalletAssignRemove={onPalletAssignRemove}
             onNote={onNote}
           />
         </>
@@ -290,94 +324,110 @@ function WarehouseCard({
 
 // ──────────────────────────────────────────────────────────────
 function MilkrunSettings({
-  assignment, originList, rentalList,
+  assignment, defaults, originList,
   onField, onPalletAdd, onPalletUpdate, onPalletRemove,
 }) {
   const pallets = assignment.pallets || [];
+  const presets = Array.isArray(defaults?.palletPresets) ? defaults.palletPresets : [];
+  const hasPresets = presets.length > 0;
 
   return (
     <div className="tcard__settings tcard__settings--milkrun">
-      <label className="tcard__field">
-        <span>출고지</span>
-        <select
-          className="stock-adjust-input transport-input--text"
-          value={assignment.originId ?? ''}
-          onChange={(e) => onField('originId', e.target.value)}
-        >
-          <option value="">(미지정)</option>
-          {originList.map((it) => (
-            <option key={it.location_seq} value={it.location_seq}>
-              {it.location_name || it.location_seq}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* 상단 row — 출고지 + 총박스수 */}
+      <div className="tcard__settings-row">
+        <label className="tcard__field">
+          <span>출고지</span>
+          <select
+            className="stock-adjust-input transport-input--text"
+            value={assignment.originId ?? ''}
+            onChange={(e) => onField('originId', e.target.value)}
+          >
+            <option value="">(미지정)</option>
+            {originList.map((it) => (
+              <option key={it.location_seq} value={it.location_seq}>
+                {it.location_name || it.location_seq}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label className="tcard__field tcard__field--num">
-        <span>총 박스수</span>
-        <input
-          type="number"
-          min="0"
-          className="stock-adjust-input"
-          value={assignment.totalBoxes ?? ''}
-          onChange={(e) => onField('totalBoxes', e.target.value)}
-        />
-      </label>
+        <label className="tcard__field tcard__field--num">
+          <span>총 박스수</span>
+          <input
+            type="number"
+            min="0"
+            className="stock-adjust-input"
+            value={assignment.totalBoxes ?? ''}
+            onChange={(e) => onField('totalBoxes', e.target.value)}
+          />
+        </label>
+      </div>
 
-      <div className="tcard__pallet-list">
-        <span className="tcard__pallet-label">팔레트</span>
-        {pallets.map((p, idx) => (
-          <div key={idx} className="tcard__pallet-row">
-            <input
-              type="number" min="0" placeholder="가로"
-              className="stock-adjust-input tcard__pallet-dim"
-              value={p.width ?? ''}
-              onChange={(e) => onPalletUpdate(idx, { width: e.target.value })}
-            />
-            <span className="tcard__pallet-x">×</span>
-            <input
-              type="number" min="0" placeholder="세로"
-              className="stock-adjust-input tcard__pallet-dim"
-              value={p.height ?? ''}
-              onChange={(e) => onPalletUpdate(idx, { height: e.target.value })}
-            />
-            <span className="tcard__pallet-x">×</span>
-            <input
-              type="number" min="0" placeholder="높이"
-              className="stock-adjust-input tcard__pallet-dim"
-              value={p.depth ?? ''}
-              onChange={(e) => onPalletUpdate(idx, { depth: e.target.value })}
-            />
-            <span className="tcard__pallet-unit">cm</span>
-            <input
-              type="number" min="0" placeholder="수량"
-              className="stock-adjust-input tcard__pallet-count"
-              value={p.count ?? ''}
-              onChange={(e) => onPalletUpdate(idx, { count: e.target.value })}
-            />
-            <select
-              className="stock-adjust-input tcard__pallet-rental"
-              value={p.rentalId ?? ''}
-              onChange={(e) => onPalletUpdate(idx, { rentalId: e.target.value })}
-            >
-              <option value="">(렌탈사 미지정)</option>
-              {rentalList.map((it) => (
-                <option key={it.id} value={it.id}>{it.id}</option>
-              ))}
-            </select>
-            {pallets.length > 1 && (
-              <button
-                type="button"
-                className="box-cell__remove"
-                onClick={() => onPalletRemove(idx)}
-                title="이 팔레트 제거"
-              >×</button>
-            )}
-          </div>
-        ))}
-        <button type="button" className="box-cell__add" onClick={onPalletAdd}>
-          + 팔레트 추가
-        </button>
+      {/* 하단 row — 팔레트 블록 carousel */}
+      <div className="tcard__pallet-section">
+        <div className="tcard__pallet-section-head">
+          <span className="tcard__pallet-label">팔레트</span>
+          {!hasPresets && (
+            <span className="tcard__pallet-warn">
+              ⚠ 팔레트 프리셋이 설정되지 않았습니다. 설정 → 운송 분배 기본값 → 팔레트 프리셋 관리에서 추가하세요.
+            </span>
+          )}
+        </div>
+        <div className="tcard__pallet-strip">
+          {pallets.map((p, idx) => {
+            const preset = presets.find((pr) => pr.name === p.presetName);
+            return (
+              <div key={idx} className="tcard__pallet-block">
+                <div className="tcard__pallet-block-head">
+                  <span className="tcard__pallet-no">#{idx + 1}</span>
+                  {pallets.length > 1 && (
+                    <button
+                      type="button"
+                      className="box-cell__remove tcard__pallet-remove"
+                      onClick={() => onPalletRemove(idx)}
+                      title="이 팔레트 제거"
+                    >×</button>
+                  )}
+                </div>
+                <select
+                  className="stock-adjust-input tcard__pallet-preset"
+                  value={p.presetName ?? ''}
+                  onChange={(e) => onPalletUpdate(idx, { presetName: e.target.value })}
+                  disabled={!hasPresets}
+                >
+                  <option value="">(프리셋 선택)</option>
+                  {presets.map((pr) => (
+                    <option key={pr.name} value={pr.name}>{pr.name}</option>
+                  ))}
+                </select>
+                <label className="tcard__pallet-boxcount">
+                  <span>박스 수량</span>
+                  <input
+                    type="number" min="0" placeholder="0"
+                    className="stock-adjust-input"
+                    value={p.boxCount ?? ''}
+                    onChange={(e) => onPalletUpdate(idx, { boxCount: e.target.value })}
+                  />
+                </label>
+                {preset && (
+                  <div className="tcard__pallet-meta">
+                    <div>{preset.width} × {preset.height} × {preset.depth} cm</div>
+                    {preset.rentalId && <div className="tcard__pallet-rental-label">{preset.rentalId}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            className="tcard__pallet-add"
+            onClick={onPalletAdd}
+            disabled={!hasPresets}
+            title={hasPresets ? '팔레트 추가' : '프리셋이 설정돼야 추가할 수 있습니다'}
+          >
+            + 팔레트 추가
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -443,12 +493,18 @@ function ShipmentSettings({ assignment, defaults, onField }) {
 function SkuTable({
   group, assignment, isMilkrun,
   onBoxRowAdd, onBoxRowUpdate, onBoxRowRemove,
+  onPalletAssignAdd, onPalletAssignUpdate, onPalletAssignRemove,
   onNote,
 }) {
   const boxCount = Number(assignment.boxCount) || 0;
   const boxNumbers = Array.from({ length: boxCount }, (_, i) => i + 1);
 
-  const renderAssignCell = (sku) => {
+  // 밀크런 — 팔레트 블록 개수 기반 번호 배열
+  const palletList = Array.isArray(assignment.pallets) ? assignment.pallets : [];
+  const palletNumbers = palletList.map((_, i) => i + 1);
+  const palletCount = palletNumbers.length;
+
+  const renderBoxAssignCell = (sku) => {
     const rows = assignment.skuBoxes?.[sku.rowKey] || [];
     // 쉽먼트 기본 1줄 — 저장된 게 없으면 빈 행 하나 보여주기
     const displayRows = rows.length > 0 ? rows : [{ boxNo: '', qty: '' }];
@@ -510,9 +566,73 @@ function SkuTable({
     );
   };
 
+  // 밀크런 팔레트 배정 셀 — 쉽먼트 박스 배정과 동일 UX, 번호 선택 → 수량 입력.
+  // 팔레트 블록이 1개 이상이어야 노출.
+  const renderPalletAssignCell = (sku) => {
+    const rows = assignment.skuPallets?.[sku.rowKey] || [];
+    const displayRows = rows.length > 0 ? rows : [{ palletNo: '', qty: '' }];
+    return (
+      <div className="box-cell">
+        {displayRows.map((p, idx) => (
+          <div key={idx} className="box-cell__row">
+            <select
+              className="box-cell__num box-cell__num--no"
+              value={p.palletNo ?? ''}
+              onChange={(e) => {
+                if (rows.length === 0) {
+                  onPalletAssignAdd(sku.rowKey);
+                  onPalletAssignUpdate(sku.rowKey, 0, { palletNo: e.target.value });
+                } else {
+                  onPalletAssignUpdate(sku.rowKey, idx, { palletNo: e.target.value });
+                }
+              }}
+              disabled={palletCount === 0}
+            >
+              <option value="">{palletCount === 0 ? '(팔레트 설정 필요)' : '팔레트#'}</option>
+              {palletNumbers.map((n) => (
+                <option key={n} value={n}>팔레트 {n}</option>
+              ))}
+            </select>
+            <input
+              type="number" min="0" placeholder="수량"
+              className="box-cell__num box-cell__num--qty"
+              value={p.qty ?? ''}
+              onChange={(e) => {
+                if (rows.length === 0) {
+                  onPalletAssignAdd(sku.rowKey);
+                  onPalletAssignUpdate(sku.rowKey, 0, { qty: e.target.value });
+                } else {
+                  onPalletAssignUpdate(sku.rowKey, idx, { qty: e.target.value });
+                }
+              }}
+              disabled={palletCount === 0}
+            />
+            {rows.length > 0 && rows.length > 1 && (
+              <button
+                type="button"
+                className="box-cell__remove"
+                onClick={() => onPalletAssignRemove(sku.rowKey, idx)}
+                title="이 행 제거"
+              >×</button>
+            )}
+          </div>
+        ))}
+        {palletCount > 0 && (
+          <button type="button" className="box-cell__add" onClick={() => onPalletAssignAdd(sku.rowKey)}>
+            + 팔레트 행 추가
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const sumFor = (sku) => {
     const rows = assignment.skuBoxes?.[sku.rowKey] || [];
     return rows.reduce((s, b) => s + (Number(b.qty) || 0), 0);
+  };
+  const palletSumFor = (sku) => {
+    const rows = assignment.skuPallets?.[sku.rowKey] || [];
+    return rows.reduce((s, p) => s + (Number(p.qty) || 0), 0);
   };
 
   const renderNoteCell = (sku) => (
@@ -534,7 +654,11 @@ function SkuTable({
           <th>상품명</th>
           <th className="col-num">확정</th>
           {isMilkrun ? (
-            <th className="col-note">비고</th>
+            <>
+              <th className="col-boxes">팔레트 배정</th>
+              <th className="col-sum">배정합</th>
+              <th className="col-note">비고</th>
+            </>
           ) : (
             <>
               <th className="col-boxes">박스 배정</th>
@@ -546,11 +670,12 @@ function SkuTable({
       </thead>
       <tbody>
         {group.skus.map((sku) => {
-          const sum = isMilkrun ? 0 : sumFor(sku);
+          const sum = isMilkrun ? palletSumFor(sku) : sumFor(sku);
           const diff = sum - sku.confirmed_qty;
-          const statusClass = !isMilkrun
-            ? (diff === 0 && sum > 0 ? 'is-ok' : diff > 0 ? 'is-over' : diff < 0 ? 'is-short' : 'is-none')
-            : '';
+          const statusClass = diff === 0 && sum > 0 ? 'is-ok'
+                            : diff > 0                ? 'is-over'
+                            : diff < 0                ? 'is-short'
+                            :                           'is-none';
           return (
             <tr key={sku.rowKey}>
               <td className="col-po">{sku.coupang_order_seq}</td>
@@ -558,10 +683,18 @@ function SkuTable({
               <td className="col-name" title={sku.sku_name}>{sku.sku_name}</td>
               <td className="col-num">{sku.confirmed_qty}</td>
               {isMilkrun ? (
-                <td className="col-note">{renderNoteCell(sku)}</td>
+                <>
+                  <td className="col-boxes">{renderPalletAssignCell(sku)}</td>
+                  <td className={`col-sum ${statusClass}`}>
+                    {sum}/{sku.confirmed_qty}
+                    {sum > 0 && diff === 0 && <span className="tcard__sum-mark"> ✓</span>}
+                    {sum > 0 && diff !== 0 && <span className="tcard__sum-mark"> ({diff > 0 ? '+' : ''}{diff})</span>}
+                  </td>
+                  <td className="col-note">{renderNoteCell(sku)}</td>
+                </>
               ) : (
                 <>
-                  <td className="col-boxes">{renderAssignCell(sku)}</td>
+                  <td className="col-boxes">{renderBoxAssignCell(sku)}</td>
                   <td className={`col-sum ${statusClass}`}>
                     {sum}/{sku.confirmed_qty}
                     {sum > 0 && diff === 0 && <span className="tcard__sum-mark"> ✓</span>}

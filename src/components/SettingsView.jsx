@@ -76,17 +76,21 @@ const FIELDS = [
     primaryField: 'location_name',
     secondaryField: 'location_address',
   },
-  { section: '운송 분배 기본값', key: 'transportRental',        label: '팔레트 렌탈사',     type: 'list-select', listKey: 'transportRentalList', modalTitle: '팔레트 렌탈사 관리',
-    listFields: [
-      { key: 'id', label: '렌탈사 이름', required: true, placeholder: '렌탈사 이름' },
-    ],
-  },
   { section: '운송 분배 기본값', key: 'transportBoxes',         label: '기본 박스 수',      type: 'text' },
   { section: '운송 분배 기본값', key: 'transportWeight',        label: '기본 중량(kg)',     type: 'text' },
-  { section: '운송 분배 기본값', key: 'transportPallets',       label: '기본 팔레트 수',    type: 'text' },
-  { section: '운송 분배 기본값', key: 'transportPalletWidth',   label: '팔레트 가로(cm)',   type: 'text' },
-  { section: '운송 분배 기본값', key: 'transportPalletHeight',  label: '팔레트 세로(cm)',   type: 'text' },
-  { section: '운송 분배 기본값', key: 'transportPalletDepth',   label: '팔레트 높이(cm)',   type: 'text' },
+  // 팔레트 프리셋 — 밀크런 팔레트 블록의 '프리셋' 드롭다운에 노출됨.
+  { section: '운송 분배 기본값', key: 'palletPreset',           label: '팔레트 프리셋',     type: 'list-select',
+    listKey: 'palletPresetList', modalTitle: '팔레트 프리셋 관리',
+    listFields: [
+      { key: 'name',     label: '팔레트명', required: true, placeholder: '예: 아주팔레트 대' },
+      { key: 'width',    label: '가로(cm)', required: true, placeholder: '1100' },
+      { key: 'height',   label: '세로(cm)', required: true, placeholder: '1100' },
+      { key: 'depth',    label: '높이(cm)', required: true, placeholder: '1500' },
+      { key: 'rentalId', label: '렌탈사', placeholder: '예: 아주팔레트' },
+    ],
+    idField: 'name',
+    primaryField: 'name',
+  },
   { section: '운송 분배 기본값', key: 'milkrunProductType',    label: '밀크런 상품종류',    type: 'text' },
 
   // ── 쉽먼트 생성 기본값 ──

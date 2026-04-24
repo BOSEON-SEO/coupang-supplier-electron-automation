@@ -41,15 +41,34 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     const api = window.electronAPI?.jobs;
     if (!api) return;
     const res = await api.listMonth(year, month, activeVendor || undefined);
-    if (res?.success) setByDate(res.byDate || {});
-  }, [year, month, activeVendor]);
+    const baseByDate = res?.success ? (res.byDate || {}) : {};
+    // 플러그인 merge — 원격 작업 있는 날짜를 달력에 표시. 실패는 로컬만 표시.
+    try {
+      const merged = await runHook(KNOWN_HOOKS.CALENDAR_LIST_MONTH, {
+        year, month, vendor: activeVendor || null, byDate: baseByDate,
+      });
+      setByDate(merged && typeof merged === 'object' ? merged : baseByDate);
+    } catch (err) {
+      console.warn('[calendar.list-month hook]', err);
+      setByDate(baseByDate);
+    }
+  }, [year, month, activeVendor, runHook]);
 
   const loadDay = useCallback(async () => {
     const api = window.electronAPI?.jobs;
     if (!api || !selectedDate) return;
     const res = await api.list(selectedDate, activeVendor || undefined);
-    if (res?.success) setJobsForDay(res.jobs || []);
-  }, [selectedDate, activeVendor]);
+    const baseJobs = res?.success ? (res.jobs || []) : [];
+    try {
+      const merged = await runHook(KNOWN_HOOKS.CALENDAR_LIST_DAY, {
+        date: selectedDate, vendor: activeVendor || null, jobs: baseJobs,
+      });
+      setJobsForDay(Array.isArray(merged) ? merged : baseJobs);
+    } catch (err) {
+      console.warn('[calendar.list-day hook]', err);
+      setJobsForDay(baseJobs);
+    }
+  }, [selectedDate, activeVendor, runHook]);
 
   useEffect(() => { loadMonth(); }, [loadMonth]);
   useEffect(() => { loadDay(); }, [loadDay]);
@@ -213,6 +232,37 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
     }
   }, [createJobManifest, loadMonth, loadDay, onOpenJob, runHook]);
 
+  // remote-only 작업 (로컬 manifest 없음) 을 열 때 — 플러그인 훅에 위임.
+  // tbnws 플러그인이 REMOTE_JOB_IMPORT 훅에서 skeleton 생성 + PO 다운로드 + pluginData 주입.
+  const [importing, setImporting] = useState(false);
+  const openJobSmart = useCallback(async (job) => {
+    if (!job?.remote) {
+      onOpenJob(job);
+      return;
+    }
+    if (importing) return;
+    const ok = window.confirm(
+      `원격 작업 (${job.vendor} ${job.sequence}차 · ${job.date}) 을 이 PC 로 가져옵니다.\n`
+      + '원본 PO 파일을 서버에서 다운로드합니다. 계속하시겠습니까?',
+    );
+    if (!ok) return;
+    setImporting(true);
+    try {
+      const imported = await runHook(KNOWN_HOOKS.REMOTE_JOB_IMPORT, { job });
+      if (!imported) {
+        alert('원격 작업 import 핸들러를 찾을 수 없습니다.\n(tbnws 플러그인이 활성화돼 있어야 합니다.)');
+        return;
+      }
+      await loadMonth();
+      await loadDay();
+      onOpenJob(imported);
+    } catch (err) {
+      alert(`원격 작업 불러오기 실패: ${err?.message || err}`);
+    } finally {
+      setImporting(false);
+    }
+  }, [onOpenJob, loadMonth, loadDay, runHook, importing]);
+
   // 해당 날짜·activeVendor 의 기존 차수 목록 (중복 방지용)
   const usedSequences = activeVendor
     ? jobsForDay
@@ -297,8 +347,16 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
                 <span className="calendar-grid__day">{d}</span>
                 {info && (
                   <span
-                    className={`calendar-grid__badge${info.hasIncomplete ? ' is-incomplete' : ''}`}
-                    title={`${info.count}건${info.hasIncomplete ? ' (미완료 포함)' : ''}`}
+                    className={
+                      'calendar-grid__badge'
+                      + (info.hasIncomplete ? ' is-incomplete' : '')
+                      + (info.remoteOnly ? ' is-remote-only' : '')
+                    }
+                    title={
+                      `${info.count}건`
+                      + (info.hasIncomplete ? ' (미완료 포함)' : '')
+                      + (info.remoteOnly ? ' · 원격 DB 작업' : '')
+                    }
                   >
                     {info.count}
                   </span>
@@ -330,8 +388,8 @@ export default function CalendarView({ onOpenJob, vendors, activeVendor }) {
                   key={`${job.vendor}-${job.sequence}`}
                   job={job}
                   vendorName={vendors?.find((v) => v.id === job.vendor)?.name}
-                  onClick={() => onOpenJob(job)}
-                  onDelete={async (j) => {
+                  onClick={() => openJobSmart(job)}
+                  onDelete={job.remote ? null : async (j) => {
                     const res = await window.electronAPI.jobs.delete(j.date, j.vendor, j.sequence);
                     if (!res?.success) {
                       alert(`삭제 실패: ${res?.error || 'unknown'}`);

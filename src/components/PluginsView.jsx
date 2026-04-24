@@ -316,6 +316,19 @@ function PluginDetailModal({ plugin, onClose }) {
 function PluginSettingField({ field, value, onChange }) {
   const effective = value !== undefined ? value : field.default;
 
+  if (field.type === 'custom' && typeof field.render === 'function') {
+    return (
+      <div className="plugin-settings__row">
+        {field.label && <label className="plugin-settings__label">{field.label}</label>}
+        {field.render({
+          value: effective,
+          onChange: (next) => onChange(field.key, next),
+        })}
+        {field.description && <div className="plugin-settings__hint">{field.description}</div>}
+      </div>
+    );
+  }
+
   if (field.type === 'boolean') {
     return (
       <label className="plugin-settings__row plugin-settings__row--toggle">

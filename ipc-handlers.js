@@ -1619,15 +1619,11 @@ function registerIpcHandlers({
         originId:     pick('transportOrigin'),
         rentalId:     pick('transportRental'),
         totalBoxes:   pick('transportBoxes'),
-        palletCount:  pick('transportPallets'),
-        palletWidth:  pick('transportPalletWidth'),
-        palletHeight: pick('transportPalletHeight'),
-        palletDepth:  pick('transportPalletDepth'),
         fakeInvoices,
       };
 
       const originList = Array.isArray(defaults.transportOriginList) ? defaults.transportOriginList : [];
-      const rentalList = Array.isArray(defaults.transportRentalList) ? defaults.transportRentalList : [];
+      const palletPresets = Array.isArray(defaults.palletPresetList) ? defaults.palletPresetList : [];
 
       // 기존 저장값 로드
       let saved = {};
@@ -1641,12 +1637,10 @@ function registerIpcHandlers({
 
       const defaultTypeFallback = defaults.defaultTransport || '쉽먼트';
 
+      // 신규 팔레트 초기값 — 프리셋이 있으면 첫 번째 자동 선택, 박스수는 빈 값.
       const defaultPallet = () => ({
-        width:    defTransport.palletWidth  ?? '',
-        height:   defTransport.palletHeight ?? '',
-        depth:    defTransport.palletDepth  ?? '',
-        count:    defTransport.palletCount  ?? '',
-        rentalId: defTransport.rentalId     ?? '',
+        presetName: palletPresets[0]?.name || '',
+        boxCount: '',
       });
 
       const groups = Array.from(byWh.values())
@@ -1667,17 +1661,23 @@ function registerIpcHandlers({
               boxInvoices: Array.isArray(s.boxInvoices) ? s.boxInvoices : [],
 
               // 밀크런 전용
-              originId:   s.originId   ?? defTransport.originId,
-              totalBoxes: s.totalBoxes ?? defTransport.totalBoxes,
-              pallets:    Array.isArray(s.pallets) && s.pallets.length
+              originId:    s.originId   ?? defTransport.originId,
+              totalBoxes:  s.totalBoxes ?? defTransport.totalBoxes,
+              pallets:     Array.isArray(s.pallets) && s.pallets.length
                 ? s.pallets
                 : [defaultPallet()],
-              skuNotes:   s.skuNotes   || {},
+              skuPallets:  s.skuPallets || {},
+              skuNotes:    s.skuNotes   || {},
             },
           };
         });
 
-      return { success: true, groups, defaults: defTransport, originList, rentalList };
+      return {
+        success: true,
+        groups,
+        defaults: { ...defTransport, palletPresets },
+        originList,
+      };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1746,6 +1746,261 @@ function registerIpcHandlers({
 
       return { success: true, path: transportPath, confirmationPatched };
     } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * 파렛트 적재리스트 xlsx 생성 — transport.json + confirmation.xlsx 결합.
+   *
+   * 양식 (시트 1개 = 팔레트 1개):
+   *   A1:I1   "쿠팡 파렛트 적재리스트"
+   *   A3:E3   "총파렛트수 ( N ) - 해당파렛트번호 ( i )     /"
+   *   F3:H3   "박스수량 ( {boxCount} ) BOX"
+   *   A4:D4   "입고예정일자 (YYYY.MM.DD)"     E4 = "    /"
+   *   F4:H4   "입고처 ( {센터명} )"
+   *   A5:I5   "업체명 ( {companyName} )"
+   *   A6:I6   "발주번호 (콤마 join)"
+   *   row 8   헤더: NO(A) / 상품명(B-H 병합) / 수량(I)
+   *   row 9..38   데이터 30 슬롯 (NO 1..30 자동, 그 팔레트의 SKU 행만 채움)
+   *
+   * 시트명: 첫 팔레트는 센터명, 같은 센터 둘째 이후는 "센터명 (2)" 식.
+   *
+   * @param {object} options { companyName: string }
+   */
+  ipcMain.handle('palletList:generate', async (_e, date, vendor, sequence, options) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    const dir = jobDir(dataDir, date, vendor, sequence);
+    const transportPath = path.join(dir, 'transport.json');
+    const confPath = path.join(dir, 'confirmation.xlsx');
+    if (!fs.existsSync(transportPath)) {
+      return { success: false, error: 'transport.json 이 없습니다. 운송분배를 먼저 저장하세요.' };
+    }
+    if (!fs.existsSync(confPath)) {
+      return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
+    }
+    try {
+      const transportData = JSON.parse(fs.readFileSync(transportPath, 'utf-8'));
+      const assignments = transportData?.assignments || {};
+
+      // ── confirmation.xlsx 에서 rowKey → SKU 정보 매핑 (transport:load 와 동일 규칙) ──
+      const wbConf = XLSX.readFile(confPath, { cellDates: false, cellStyles: false });
+      const wsConf = wbConf.Sheets[wbConf.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(wsConf, { header: 1, defval: '' });
+      const header = aoa[0] || [];
+      const colIdx = {};
+      header.forEach((h, i) => { colIdx[String(h ?? '').trim()] = i; });
+      const iOrder = colIdx['발주번호'];
+      const iWh = colIdx['물류센터'];
+      const iBarcode = colIdx['상품바코드'];
+      const iName = colIdx['상품이름'];
+      const iQty = colIdx['확정수량'];
+
+      // rowKey → { coupang_order_seq, sku_name, warehouse, confirmed_qty, sku_barcode }
+      // + 센터별 발주번호 집합 (ordersByWarehouse) — '발주번호' 칸은 팔레트 단위가 아니라
+      //   해당 센터에 들어오는 모든 발주번호를 표기함 (원본 양식 규칙).
+      const skuByKey = new Map();
+      const ordersByWarehouse = new Map();
+      for (let r = 1; r < aoa.length; r += 1) {
+        const row = aoa[r] || [];
+        const wh = String(row[iWh] ?? '').trim();
+        const orderSeq = String(row[iOrder] ?? '');
+        const barcode = String(row[iBarcode] ?? '');
+        if (!wh || !orderSeq || !barcode) continue;
+        const rowKey = `${orderSeq}|${barcode}|${r}`;
+        skuByKey.set(rowKey, {
+          coupang_order_seq: orderSeq,
+          sku_name: String(row[iName] ?? ''),
+          warehouse: wh,
+          confirmed_qty: Number(row[iQty]) || 0,
+          sku_barcode: barcode,
+        });
+        if (!ordersByWarehouse.has(wh)) ordersByWarehouse.set(wh, new Set());
+        ordersByWarehouse.get(wh).add(orderSeq);
+      }
+
+      // ── 워크북 빌드 ──
+      const wb = new ExcelJS.Workbook();
+      const companyName = String(options?.companyName || '').trim() || '주식회사 투비네트웍스글로벌';
+      const dateDot = String(date).replace(/-/g, '.');
+
+      // 시트명 충돌 회피용 카운터
+      const sheetNameCount = new Map();
+      const uniqueSheetName = (base) => {
+        const n = (sheetNameCount.get(base) || 0) + 1;
+        sheetNameCount.set(base, n);
+        return n === 1 ? base : `${base} (${n})`;
+      };
+
+      let totalSheets = 0;
+      const skippedCenters = [];
+
+      for (const [warehouse, a] of Object.entries(assignments)) {
+        if (!a || a.transportType !== '밀크런') continue;
+        const pallets = Array.isArray(a.pallets) ? a.pallets : [];
+        if (!pallets.length) {
+          skippedCenters.push({ warehouse, reason: '팔레트 0개' });
+          continue;
+        }
+        const skuPallets = a.skuPallets || {};
+
+        // 팔레트번호 → 그 팔레트에 들어가는 SKU 행 목록 [{rowKey, qty}]
+        const sheetItemsByPalletNo = new Map();
+        for (let i = 1; i <= pallets.length; i += 1) sheetItemsByPalletNo.set(String(i), []);
+        for (const [rowKey, rows] of Object.entries(skuPallets)) {
+          if (!Array.isArray(rows)) continue;
+          for (const r of rows) {
+            const palletNo = String(r.palletNo ?? '').trim();
+            const qty = Number(r.qty) || 0;
+            if (!palletNo || qty <= 0) continue;
+            if (!sheetItemsByPalletNo.has(palletNo)) sheetItemsByPalletNo.set(palletNo, []);
+            sheetItemsByPalletNo.get(palletNo).push({ rowKey, qty });
+          }
+        }
+
+        const totalPallets = pallets.length;
+        // 센터 전체 발주번호 (팔레트 무관하게 동일 표기)
+        const centerOrders = Array.from(ordersByWarehouse.get(warehouse) || []);
+        const centerOrdersStr = centerOrders.join(',');
+
+        // 스타일 상수
+        const BORDER_LINE = { style: 'thin', color: { argb: 'FF000000' } };
+        const BORDER_ALL = { top: BORDER_LINE, bottom: BORDER_LINE, left: BORDER_LINE, right: BORDER_LINE };
+        const BORDER_TB = { top: BORDER_LINE, bottom: BORDER_LINE };
+        const BORDER_LTB = { top: BORDER_LINE, bottom: BORDER_LINE, left: BORDER_LINE };
+        const BORDER_RTB = { top: BORDER_LINE, bottom: BORDER_LINE, right: BORDER_LINE };
+        const GREY_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD0CECE' } };
+        const FONT_DEFAULT = { size: 11 };
+        const FONT_BOLD = { size: 11, bold: true };
+
+        for (let i = 1; i <= totalPallets; i += 1) {
+          const pallet = pallets[i - 1];
+          const items = sheetItemsByPalletNo.get(String(i)) || [];
+          const sheetName = uniqueSheetName(warehouse).slice(0, 31); // Excel 시트명 31자 제한
+          const ws = wb.addWorksheet(sheetName);
+
+          // 컬럼 폭
+          ws.getColumn(1).width = 6;
+          for (let c = 2; c <= 8; c += 1) ws.getColumn(c).width = 12;
+          ws.getColumn(9).width = 10;
+
+          // 1행: 제목
+          ws.mergeCells('A1:I1');
+          ws.getCell('A1').value = '쿠팡 파렛트 적재리스트';
+          ws.getCell('A1').font = { bold: true, size: 16 };
+          ws.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+          ws.getRow(1).height = 28;
+
+          // 3행: 총파렛트수 / 박스수량 (bold)
+          ws.mergeCells('A3:E3');
+          ws.getCell('A3').value = `총파렛트수 ( ${totalPallets} ) - 해당파렛트번호 ( ${i} )     /`;
+          ws.mergeCells('F3:H3');
+          ws.getCell('F3').value = `박스수량 ( ${pallet?.boxCount ?? ''} ) BOX`;
+
+          // 4행: 입고예정일자 / 구분자 / 입고처
+          ws.mergeCells('A4:D4');
+          ws.getCell('A4').value = `입고예정일자 (${dateDot})`;
+          ws.getCell('E4').value = '    /';
+          ws.mergeCells('F4:H4');
+          ws.getCell('F4').value = `입고처 ( ${warehouse} )`;
+
+          // 5행: 업체명
+          ws.mergeCells('A5:I5');
+          ws.getCell('A5').value = `업체명 ( ${companyName} )`;
+
+          // 6행: 발주번호 — 해당 센터에 들어오는 모든 발주번호 (팔레트 무관)
+          ws.mergeCells('A6:I6');
+          ws.getCell('A6').value = `발주번호 (${centerOrdersStr})`;
+
+          // 3~6행 전체 bold
+          for (let r = 3; r <= 6; r += 1) {
+            ws.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
+              cell.font = FONT_BOLD;
+            });
+          }
+
+          // 8행 헤더 — NO / (상품명 빈 라벨) / 수량, 회색 배경 + 테두리
+          ws.getCell('A8').value = 'NO';
+          ws.mergeCells('B8:H8');
+          ws.getCell('I8').value = '수량';
+          // 양끝 (A, I) 은 사방 테두리 + 회색
+          ['A8', 'I8'].forEach((addr) => {
+            const c = ws.getCell(addr);
+            c.font = FONT_BOLD;
+            c.alignment = { horizontal: 'center', vertical: 'middle' };
+            c.fill = GREY_FILL;
+            c.border = BORDER_ALL;
+          });
+          // B8~H8 병합 영역 — top/bottom border + 회색
+          for (let col = 2; col <= 8; col += 1) {
+            const c = ws.getRow(8).getCell(col);
+            c.border = BORDER_TB;
+            c.fill = GREY_FILL;
+            if (col === 2) c.font = FONT_BOLD;
+            else c.font = FONT_DEFAULT;
+          }
+          ws.getRow(8).height = 20;
+
+          // 9~38행 데이터 30 슬롯
+          for (let slot = 0; slot < 30; slot += 1) {
+            const rowNum = 9 + slot;
+            // NO (A)
+            const aCell = ws.getCell(`A${rowNum}`);
+            aCell.value = slot + 1;
+            aCell.alignment = { horizontal: 'center', vertical: 'middle' };
+            aCell.font = FONT_DEFAULT;
+            aCell.border = BORDER_ALL;
+
+            // 상품명 영역 (B~H 병합)
+            ws.mergeCells(`B${rowNum}:H${rowNum}`);
+            const it = items[slot];
+            const bCell = ws.getCell(`B${rowNum}`);
+            if (it) {
+              const sku = skuByKey.get(it.rowKey);
+              bCell.value = sku?.sku_name ?? '';
+            }
+            bCell.font = FONT_DEFAULT;
+            bCell.alignment = { vertical: 'middle' };
+            // B: left+top+bottom, C~G: top+bottom, H: right+top+bottom
+            for (let col = 2; col <= 8; col += 1) {
+              const cc = ws.getRow(rowNum).getCell(col);
+              if (col === 2) cc.border = BORDER_LTB;
+              else if (col === 8) cc.border = BORDER_RTB;
+              else cc.border = BORDER_TB;
+            }
+
+            // 수량 (I)
+            const iCell = ws.getCell(`I${rowNum}`);
+            if (it) iCell.value = it.qty;
+            iCell.alignment = { horizontal: 'center', vertical: 'middle' };
+            iCell.font = FONT_DEFAULT;
+            iCell.border = BORDER_ALL;
+          }
+
+          totalSheets += 1;
+        }
+      }
+
+      if (totalSheets === 0) {
+        return {
+          success: false,
+          error: '밀크런으로 지정된 센터의 팔레트가 없습니다. 운송분배에서 팔레트를 추가하세요.',
+        };
+      }
+
+      const outPath = path.join(dir, 'pallet-loading-list.xlsx');
+      await wb.xlsx.writeFile(outPath);
+
+      return {
+        success: true,
+        path: outPath,
+        sheetCount: totalSheets,
+        skippedCenters,
+      };
+    } catch (err) {
+      console.error('[palletList:generate]', err);
       return { success: false, error: err.message };
     }
   });

@@ -154,6 +154,42 @@ export default function ResultView({
     appendLog?.('info', `[다운로드] ${res.path}`);
   }, [job, appendLog]);
 
+  // 파렛트 적재리스트 생성 + 다운로드 다이얼로그
+  // 산출물은 jobDir/pallet-loading-list.xlsx 에 항상 저장되고, 사용자에게도 saveAs 제공.
+  const handleGeneratePalletList = useCallback(async () => {
+    const api = window.electronAPI;
+    if (!api || !job) return;
+    try {
+      // 회사명: TBNWS 플러그인 설정의 companyFullName
+      const sRes = await api.loadSettings();
+      const companyName = sRes?.settings?.plugins?.tbnws?.companyFullName
+                       || '주식회사 투비네트웍스글로벌';
+      const res = await api.palletList.generate(
+        job.date, job.vendor, job.sequence, { companyName },
+      );
+      if (!res?.success) {
+        appendLog?.('error', `파렛트 적재리스트 생성 실패: ${res?.error || 'unknown'}`);
+        alert(`파렛트 적재리스트 생성 실패: ${res?.error || 'unknown'}`);
+        return;
+      }
+      appendLog?.('info', `[파렛트 적재리스트] ${res.sheetCount}개 시트 생성 → ${res.path}`);
+      reload(); // 파일 목록 갱신
+
+      const dateCompact = String(job.date).replace(/-/g, '');
+      const seq = String(job.sequence).padStart(2, '0');
+      const defaultName = `${job.vendor}-${dateCompact}-${seq}-pallet-loading-list.xlsx`;
+      const dl = await api.saveFileAs(res.path, defaultName);
+      if (dl?.canceled) return;
+      if (!dl?.success) {
+        appendLog?.('error', `다운로드 실패: ${dl?.error ?? 'unknown'}`);
+        return;
+      }
+      appendLog?.('info', `[다운로드] ${dl.path}`);
+    } catch (err) {
+      appendLog?.('error', `파렛트 적재리스트 예외: ${err?.message || err}`);
+    }
+  }, [job, appendLog, reload]);
+
   // 업로드 히스토리 — manifest 에서 절대 경로로 보관된 파일을 saveFileAs 로 다운로드
   const handleDownloadHistory = useCallback(async (entry) => {
     const api = window.electronAPI;
@@ -269,7 +305,7 @@ export default function ResultView({
     else onDownloadShipmentDocs?.();
   }, [job, milkrunDocs, shipmentDocs, onDownloadMilkrunDocs, onDownloadShipmentDocs]);
 
-  // ── 업로드·밀크런·쉽먼트·이플렉스 이력을 단일 타임라인으로 병합 ──
+  // ── 업로드·밀크런·쉽먼트·이플렉스·재고이동·출고예정 이력을 단일 타임라인으로 병합 ──
   const mergedHistory = useMemo(() => {
     const items = [];
     if (Array.isArray(job?.uploadHistory)) {
@@ -284,6 +320,13 @@ export default function ResultView({
     if (Array.isArray(job?.eflexHistory)) {
       for (const h of job.eflexHistory) items.push({ type: '이플렉스', ...h });
     }
+    const pd = job?.pluginData?.tbnws || {};
+    if (Array.isArray(pd.relocationHistory)) {
+      for (const h of pd.relocationHistory) items.push({ type: '재고이동', ...h });
+    }
+    if (Array.isArray(pd.exportScheduleHistory)) {
+      for (const h of pd.exportScheduleHistory) items.push({ type: '출고예정', ...h });
+    }
     items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     return items;
   }, [job]);
@@ -293,6 +336,8 @@ export default function ResultView({
     if (t === '밀크런')   return 'result-type-badge result-type-badge--milkrun';
     if (t === '쉽먼트')   return 'result-type-badge result-type-badge--shipment';
     if (t === '이플렉스') return 'result-type-badge result-type-badge--eflex';
+    if (t === '재고이동') return 'result-type-badge result-type-badge--relocation';
+    if (t === '출고예정') return 'result-type-badge result-type-badge--export';
     return 'result-type-badge';
   };
 
@@ -427,6 +472,13 @@ export default function ResultView({
                 🚛 밀크런 서류 {milkrunDocs.length > 0 && <span className="result-view__dim">({milkrunDocs.length}회)</span>}
               </h4>
               <div className="result-view__section-actions">
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={handleGeneratePalletList}
+                  disabled={loading}
+                  title="transport.json 의 밀크런 분배 + confirmation.xlsx 를 결합해 팔레트별 적재리스트 xlsx 생성"
+                >📦 파렛트 적재리스트</button>
                 <button
                   type="button"
                   className="btn btn--phase-milkrun btn--sm"
