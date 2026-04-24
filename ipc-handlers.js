@@ -1522,6 +1522,140 @@ function registerIpcHandlers({
     return { success: true };
   });
 
+  // ─────────────────────────────────────────────────────────────
+  // 운송분배 스키마 v4 — assignment.lots 기반 (혼합 센터 지원)
+  //
+  //   assignment = {
+  //     lots: [
+  //       { id, type: '쉽먼트'|'밀크런',
+  //         // 쉽먼트: boxCount, boxInvoices[]
+  //         // 밀크런: originId, totalBoxes, pallets[]
+  //         items: [{ rowKey, qty, boxNo?|palletNo? }],
+  //       },
+  //     ],
+  //     skuNotes: { [rowKey]: string },
+  //   }
+  //
+  //   기존 v3 (단일 transportType 기반) 은 load 시점에 자동 마이그레이션.
+  // ─────────────────────────────────────────────────────────────
+
+  function makeLotId() {
+    return `lot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  /** v3 old schema → v4 new schema. 이미 v4 면 그대로 반환. */
+  function migrateAssignment(old) {
+    if (!old || typeof old !== 'object') {
+      return { lots: [], skuNotes: {} };
+    }
+    if (Array.isArray(old.lots)) {
+      return { lots: old.lots, skuNotes: old.skuNotes || {} };
+    }
+    const type = old.transportType || '쉽먼트';
+    const lot = { id: makeLotId(), type, items: [] };
+    if (type === '쉽먼트') {
+      lot.boxCount = Number(old.boxCount) || 0;
+      lot.boxInvoices = Array.isArray(old.boxInvoices) ? old.boxInvoices.slice() : [];
+      for (const [rowKey, rows] of Object.entries(old.skuBoxes || {})) {
+        for (const r of rows) {
+          lot.items.push({
+            rowKey,
+            qty: Number(r.qty) || 0,
+            boxNo: String(r.boxNo || ''),
+          });
+        }
+      }
+    } else if (type === '밀크런') {
+      lot.originId = String(old.originId || '');
+      lot.totalBoxes = String(old.totalBoxes || '');
+      lot.pallets = Array.isArray(old.pallets) ? old.pallets : [];
+      for (const [rowKey, rows] of Object.entries(old.skuPallets || {})) {
+        for (const r of rows) {
+          lot.items.push({
+            rowKey,
+            qty: Number(r.qty) || 0,
+            palletNo: String(r.palletNo || ''),
+          });
+        }
+      }
+    }
+    return { lots: [lot], skuNotes: old.skuNotes || {} };
+  }
+
+  /**
+   * UI 호환 — lots 기반 assignment 를 old(v3) 필드들로 평탄화해 반환.
+   * TransportView 가 기존 구조(transportType/skuBoxes/skuPallets/...) 로 렌더하기 위함.
+   * Phase 2 에서 UI 가 lots 를 직접 소비하도록 바뀌면 제거 예정.
+   *
+   * 규칙: 첫 lot 를 센터 기본 transportType 과 설정 기준으로 사용하고,
+   *       items 는 모든 lot 에서 통합해 skuBoxes / skuPallets 로 풀어냄.
+   */
+  function flattenAssignmentForUi(assignment) {
+    const lots = Array.isArray(assignment?.lots) ? assignment.lots : [];
+    const skuNotes = assignment?.skuNotes || {};
+    const base = {
+      transportType: '쉽먼트',
+      boxCount: 0,
+      skuBoxes: {},
+      boxInvoices: [],
+      originId: '',
+      totalBoxes: '',
+      pallets: [{ presetName: '', boxCount: '' }],
+      skuPallets: {},
+      skuNotes,
+    };
+    if (lots.length === 0) return base;
+    const first = lots[0];
+    base.transportType = first.type || '쉽먼트';
+    if (first.type === '쉽먼트') {
+      base.boxCount = Number(first.boxCount) || 0;
+      base.boxInvoices = Array.isArray(first.boxInvoices) ? first.boxInvoices : [];
+    } else if (first.type === '밀크런') {
+      base.originId = String(first.originId || '');
+      base.totalBoxes = String(first.totalBoxes || '');
+      base.pallets = Array.isArray(first.pallets) && first.pallets.length
+        ? first.pallets
+        : [{ presetName: '', boxCount: '' }];
+    }
+    for (const lot of lots) {
+      for (const it of lot.items || []) {
+        if (lot.type === '쉽먼트') {
+          (base.skuBoxes[it.rowKey] ||= []).push({
+            boxNo: String(it.boxNo || ''),
+            qty: Number(it.qty) || 0,
+          });
+        } else if (lot.type === '밀크런') {
+          (base.skuPallets[it.rowKey] ||= []).push({
+            palletNo: String(it.palletNo || ''),
+            qty: Number(it.qty) || 0,
+          });
+        }
+      }
+    }
+    return base;
+  }
+
+  /**
+   * save 시점 — UI 가 주는 old(v3) 포맷을 v4 로 변환해 디스크에 저장.
+   *
+   * Phase 1 한정: **lots (v4) + old(v3) 필드** 를 함께 저장해 호환성 유지.
+   *   - 신규 내부 참조/향후 UI: `assignment.lots`
+   *   - 기존 renderer / python / 다른 IPC 코드: `assignment.transportType`, `skuBoxes`, ...
+   *   Phase 2 에서 renderer·python 이 lots 를 직접 소비하게 되면 legacy 필드 제거 예정.
+   */
+  function serializeAssignmentForSave(uiData) {
+    if (!uiData || typeof uiData !== 'object') {
+      return { lots: [], skuNotes: {} };
+    }
+    const migrated = Array.isArray(uiData.lots)
+      ? { lots: uiData.lots, skuNotes: uiData.skuNotes || {} }
+      : migrateAssignment(uiData);
+    return {
+      ...migrated,
+      ...flattenAssignmentForUi(migrated),
+    };
+  }
+
   /**
    * transport:load — confirmation.xlsx 를 읽어 "밀크런" 행만 물류센터별로 그룹핑.
    * 각 그룹에 벤더설정 기본값 + 이미 저장된 transport.json 을 병합한 초기값을 얹어 반환.
@@ -1647,28 +1781,24 @@ function registerIpcHandlers({
         .sort((a, b) => a.warehouse.localeCompare(b.warehouse))
         .map((g) => {
           const s = saved[g.warehouse] || {};
-          const transportType = s.transportType ?? g.defaultType ?? defaultTypeFallback;
+          // v3(old) / v4(lots) 둘 다 수용 — migrate 후 UI 호환 필드로 평탄화.
+          const migrated = migrateAssignment(s);
+          const flat = flattenAssignmentForUi(migrated);
+
+          // 최초 로드 (저장 기록 없음) 면서 default 값으로 초기화 필요한 경우 보강.
+          if (migrated.lots.length === 0) {
+            const defaultType = g.defaultType || defaultTypeFallback;
+            flat.transportType = defaultType;
+            flat.originId = defTransport.originId || '';
+            flat.totalBoxes = defTransport.totalBoxes || '';
+            flat.pallets = [defaultPallet()];
+          }
+
           return {
             warehouse: g.warehouse,
             total_confirmed: g.total_confirmed,
             skus: g.skus,
-            assignment: {
-              transportType,
-
-              // 쉽먼트 전용
-              boxCount:    s.boxCount    ?? 0,
-              skuBoxes:    s.skuBoxes    || {},
-              boxInvoices: Array.isArray(s.boxInvoices) ? s.boxInvoices : [],
-
-              // 밀크런 전용
-              originId:    s.originId   ?? defTransport.originId,
-              totalBoxes:  s.totalBoxes ?? defTransport.totalBoxes,
-              pallets:     Array.isArray(s.pallets) && s.pallets.length
-                ? s.pallets
-                : [defaultPallet()],
-              skuPallets:  s.skuPallets || {},
-              skuNotes:    s.skuNotes   || {},
-            },
+            assignment: { ...flat, lots: migrated.lots }, // lots 도 함께 노출 (Phase 2 UI 용)
           };
         });
 
@@ -1698,10 +1828,15 @@ function registerIpcHandlers({
       const dir = jobDir(dataDir, date, vendor, sequence);
       fs.mkdirSync(dir, { recursive: true });
       const transportPath = path.join(dir, 'transport.json');
+      // UI 는 여전히 old(v3) 필드로 주지만 디스크에는 v4(lots) 로 저장.
+      const converted = {};
+      for (const [wh, uiData] of Object.entries(assignments)) {
+        converted[wh] = serializeAssignmentForSave(uiData);
+      }
       const payload = {
-        schemaVersion: 3,
+        schemaVersion: 4,
         updatedAt: new Date().toISOString(),
-        assignments,
+        assignments: converted,
       };
       fs.writeFileSync(transportPath, JSON.stringify(payload, null, 2), 'utf-8');
 
@@ -1728,8 +1863,13 @@ function registerIpcHandlers({
                 const wh = String(ws.getCell(r, iWh).value ?? '').trim();
                 if (!wh) continue;
                 const a = assignments[wh];
-                if (a && a.transportType) {
-                  ws.getCell(r, iType).value = a.transportType;
+                // UI 가 old 포맷(transportType) 또는 new lots 둘 다 수용.
+                // 혼합 센터는 첫 lot 기준 (Phase 2 에서 SKU 단위 세밀화 예정).
+                const tt = a?.transportType
+                         || (Array.isArray(a?.lots) && a.lots[0]?.type)
+                         || '';
+                if (tt) {
+                  ws.getCell(r, iType).value = tt;
                   confirmationPatched += 1;
                 }
               }
@@ -1783,7 +1923,13 @@ function registerIpcHandlers({
     }
     try {
       const transportData = JSON.parse(fs.readFileSync(transportPath, 'utf-8'));
-      const assignments = transportData?.assignments || {};
+      // v3/v4 둘 다 수용 — flatten 필드로 기존 참조 그대로 유지.
+      const rawAsn = transportData?.assignments || {};
+      const assignments = {};
+      for (const wh of Object.keys(rawAsn)) {
+        const migrated = migrateAssignment(rawAsn[wh]);
+        assignments[wh] = { ...flattenAssignmentForUi(migrated), lots: migrated.lots };
+      }
 
       // ── confirmation.xlsx 에서 rowKey → SKU 정보 매핑 (transport:load 와 동일 규칙) ──
       const wbConf = XLSX.readFile(confPath, { cellDates: false, cellStyles: false });
@@ -2048,7 +2194,13 @@ function registerIpcHandlers({
         try { transport = JSON.parse(fs.readFileSync(transportPath, 'utf-8')); }
         catch { /* 무시 */ }
       }
-      const assignments = transport?.assignments || {};
+      // v3/v4 둘 다 수용 — migrate 후 UI 호환 필드로 평탄화해 기존 참조 그대로 동작.
+      const rawAsn = transport?.assignments || {};
+      const assignments = {};
+      for (const wh of Object.keys(rawAsn)) {
+        const migrated = migrateAssignment(rawAsn[wh]);
+        assignments[wh] = { ...flattenAssignmentForUi(migrated), lots: migrated.lots };
+      }
 
       // 스냅샷 로드
       let snapshot = { rows: {} };
@@ -2327,61 +2479,101 @@ function registerIpcHandlers({
         console.warn('[tbnwsCoupangExport:apply] fulfill patch 실패', err);
       }
 
-      // ── 3. transport.json 업데이트 (운송방법 / 박스 / 파렛트 / 송장 / 비고) ──
-      let transport = { schemaVersion: 3, updatedAt: new Date().toISOString(), assignments: {} };
+      // ── 3. transport.json 업데이트 — v4(lots) 구조로 ──
+      //   각 wh 의 assignment 는 최대 2개 lot 까지 유지 (쉽먼트 lot #1 + 밀크런 lot #1).
+      //   업로드 행을 해당 타입의 lot 에 배정. 기존 rowKey 가 다른 lot 에 있으면 제거.
+      //   한 SKU 는 한 lot 에만 들어가는 것으로 가정 (Phase 1 제약).
+      let transport = {};
       const transportPath = path.join(dir, 'transport.json');
       if (fs.existsSync(transportPath)) {
         try { transport = JSON.parse(fs.readFileSync(transportPath, 'utf-8')); }
         catch { /* 무시 */ }
       }
-      const assignments = transport.assignments || {};
+      const rawAsn = transport?.assignments || {};
+      const assignments = {};
+      for (const wh of Object.keys(rawAsn)) {
+        assignments[wh] = migrateAssignment(rawAsn[wh]); // v3 → v4 일괄 전환
+      }
+
       let transportPatched = 0;
       for (const u of uploads) {
-        const a = assignments[u.wh] || {
-          transportType: u.transportMethod || '쉽먼트',
-          skuTransportType: {},
-          skuBoxes: {},
-          skuPallets: {},
-          skuNotes: {},
-          boxInvoices: [],
-          pallets: [{ presetName: '', boxCount: '' }],
-        };
-        a.skuTransportType = a.skuTransportType || {};
-        a.skuBoxes = a.skuBoxes || {};
-        a.skuPallets = a.skuPallets || {};
+        if (!assignments[u.wh]) assignments[u.wh] = { lots: [], skuNotes: {} };
+        const a = assignments[u.wh];
+        a.lots = Array.isArray(a.lots) ? a.lots : [];
         a.skuNotes = a.skuNotes || {};
-        a.boxInvoices = Array.isArray(a.boxInvoices) ? a.boxInvoices : [];
 
-        if (u.transportMethod) a.skuTransportType[u.rowKey] = u.transportMethod;
+        // 이전 rowKey 배정을 모든 lot 에서 제거
+        for (const lot of a.lots) {
+          lot.items = (lot.items || []).filter((it) => it.rowKey !== u.rowKey);
+        }
+
         if (u.remark) a.skuNotes[u.rowKey] = u.remark;
-        else if (a.skuNotes[u.rowKey]) delete a.skuNotes[u.rowKey];
+        else delete a.skuNotes[u.rowKey];
 
-        // SKU 의 운송방법에 따라 박스 vs 팔레트 저장
         const isShipment = u.transportMethod === '쉽먼트';
         const isMilkrun = u.transportMethod === '밀크런';
-        if (isShipment && u.boxNo) {
-          a.skuBoxes[u.rowKey] = [{ boxNo: u.boxNo, qty: u.confirmedQty }];
-          if (u.invoiceNo) {
-            const idx = Number(u.boxNo) - 1;
-            if (Number.isInteger(idx) && idx >= 0) {
-              while (a.boxInvoices.length <= idx) a.boxInvoices.push('');
-              a.boxInvoices[idx] = u.invoiceNo;
+        if (!isShipment && !isMilkrun) {
+          transportPatched += 1;
+          continue;
+        }
+
+        // 해당 타입의 첫 lot 찾거나 생성
+        let lot = a.lots.find((l) => l.type === u.transportMethod);
+        if (!lot) {
+          if (isShipment) {
+            lot = {
+              id: makeLotId(), type: '쉽먼트',
+              boxCount: 0, boxInvoices: [],
+              items: [],
+            };
+          } else {
+            lot = {
+              id: makeLotId(), type: '밀크런',
+              originId: '', totalBoxes: '',
+              pallets: [{ presetName: '', boxCount: '' }],
+              items: [],
+            };
+          }
+          a.lots.push(lot);
+        }
+
+        if (isShipment) {
+          lot.items.push({
+            rowKey: u.rowKey,
+            qty: u.confirmedQty,
+            boxNo: u.boxNo || '',
+          });
+          if (u.boxNo) {
+            lot.boxCount = Math.max(Number(lot.boxCount) || 0, Number(u.boxNo) || 0);
+            if (u.invoiceNo) {
+              const idx = Number(u.boxNo) - 1;
+              if (Number.isInteger(idx) && idx >= 0) {
+                while (lot.boxInvoices.length <= idx) lot.boxInvoices.push('');
+                lot.boxInvoices[idx] = u.invoiceNo;
+              }
             }
           }
-        } else if (isShipment) {
-          delete a.skuBoxes[u.rowKey];
+        } else {
+          lot.items.push({
+            rowKey: u.rowKey,
+            qty: u.confirmedQty,
+            palletNo: u.palletNo || '',
+          });
         }
-        if (isMilkrun && u.palletNo) {
-          a.skuPallets[u.rowKey] = [{ palletNo: u.palletNo, qty: u.confirmedQty }];
-        } else if (isMilkrun) {
-          delete a.skuPallets[u.rowKey];
-        }
-        assignments[u.wh] = a;
         transportPatched += 1;
       }
-      transport.assignments = assignments;
-      transport.updatedAt = new Date().toISOString();
-      fs.writeFileSync(transportPath, JSON.stringify(transport, null, 2), 'utf-8');
+
+      // 빈 lot 정리 (모든 items 가 빠진 경우)
+      for (const wh of Object.keys(assignments)) {
+        const a = assignments[wh];
+        a.lots = (a.lots || []).filter((l) => (l.items || []).length > 0);
+      }
+
+      fs.writeFileSync(transportPath, JSON.stringify({
+        schemaVersion: 4,
+        updatedAt: new Date().toISOString(),
+        assignments,
+      }, null, 2), 'utf-8');
 
       // ── 4. 스냅샷 저장 — 창고수량 포함 모든 입력 필드 보관 ──
       const snapshot = {
