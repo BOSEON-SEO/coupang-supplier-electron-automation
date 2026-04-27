@@ -1789,9 +1789,17 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             <button
               type="button"
               className="btn btn--secondary btn--sm"
-              onClick={() => spreadsheetRef.current?.forceRerender()}
+              onClick={(e) => {
+                // 일반 클릭: 가벼운 redraw (window resize event 디스패치)
+                // Shift/Alt + 클릭: 강제 재파싱 (LuckyExcel 변환부터 다시)
+                if (e.shiftKey || e.altKey) {
+                  spreadsheetRef.current?.forceReparse();
+                } else {
+                  spreadsheetRef.current?.forceRerender();
+                }
+              }}
               disabled={!xlsxBuffer}
-              title="시트 렌더링이 깨졌을 때 다시 그리기"
+              title="시트 디자인이 깨졌을 때 다시 그리기 (Shift/Alt+클릭: 강제 재파싱)"
             >
               ↻ 렌더 새로고침
             </button>

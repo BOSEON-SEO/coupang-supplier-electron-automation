@@ -82,10 +82,27 @@ const SpreadsheetView = forwardRef(function SpreadsheetView(
     [onChange],
   );
 
-  // 외부에서 호출 가능한 명령들. 렌더 깨짐 복구용 force rerender —
-  // 단순 key 증가가 아니라 LuckyExcel 변환부터 다시 돌리도록 parseTrigger 증가.
+  // 외부에서 호출 가능한 명령들.
+  //
+  // forceRerender — 디자인/셀 깨짐 가벼운 복구.
+  //   luckysheet/fortune-sheet 는 window resize 이벤트를 듣고 canvas 를 redraw.
+  //   따라서 dispatchEvent('resize') 한 번이면 보통 깨짐 복구됨 (parseTrigger 안 씀).
+  //   여러 번 dispatch 해서 비동기 layout 모두 catch.
+  //
+  // forceReparse — 데이터 자체가 깨졌을 때 사용 (LuckyExcel 부터 재파싱).
+  //   resize redraw 로 안 풀리면 호출.
   useImperativeHandle(ref, () => ({
     forceRerender() {
+      // 다중 dispatch — 첫 호출은 즉시, 나머지는 next frame/short delay 에 backup.
+      const fire = () => {
+        try { window.dispatchEvent(new Event('resize')); } catch (_) { /* 무시 */ }
+      };
+      fire();
+      requestAnimationFrame(fire);
+      setTimeout(fire, 50);
+      setTimeout(fire, 200);
+    },
+    forceReparse() {
       setSheets(null);
       setError(null);
       setParseTrigger((t) => t + 1);
