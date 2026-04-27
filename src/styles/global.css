@@ -297,14 +297,12 @@ body {
 .btn--warning:hover { background: #c75900; }
 
 /* slot 버튼 — 플러그인 Command 렌더링.
- * line-height 는 주변 btn 과 동일하게 상속받아 높이 통일 (설정 안 하면 얇아짐). */
-.slot-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1.4;
+ * 핵심: display 를 따로 설정하지 않음 (btn 기본 inline-block 그대로 상속).
+ *   inline-flex 로 바꾸면 박스 메트릭이 미묘하게 달라져 옆 btn 과 높이가 안 맞음.
+ *   icon span 은 margin 으로 gap 만 추가. font/line-height 는 부모 btn 에서 상속. */
+.slot-btn__icon {
+  margin-right: 6px;
 }
-.slot-btn__icon { font-size: 14px; }
 .slot-btn.is-busy { opacity: 0.6; cursor: wait; }
 
 /* phase 액션 버튼 — 단계별 색상 구분 */
@@ -3503,6 +3501,32 @@ button.session-badge:disabled {
   margin-left: 6px;
   color: var(--color-primary);
   font-size: 11px;
+}
+
+.tbnws-adjust-summary__sep {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 4px;
+}
+
+.tbnws-adjust-summary__toggle {
+  padding: 3px 8px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.tbnws-adjust-summary__toggle:hover:not(:disabled) {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.tbnws-adjust-summary__toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 행 내부 toggle pill (출고여부 chip = toggle) */

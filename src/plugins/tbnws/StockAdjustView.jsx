@@ -177,12 +177,16 @@ export default function TbnwsStockAdjustView({
     }));
   }, [tbnwsRows, rowIndexMap]);
 
-  // 초기 입력값 — 출고수량 = requested_qty, 반출수량 = fulfillment_export_qty
+  // 초기 입력값 — 출고수량 = requested_qty (단, 출고여부 'N' 이면 0 강제).
+  // confirmation 빌더와 동일 규칙 — '불가능' 표시된 행에 데이터상 requested_qty 가
+  // 남아 있어도 화면 default 출고수량은 0 으로 보여 사용자가 토글 안 해도 정합.
   const initialConfirmed = useMemo(() => {
     const map = {};
     for (const g of grouped) {
       for (const r of g.rows) {
-        if (r.rowIndex != null) map[r.rowIndex] = String(r.requested_qty ?? 0);
+        if (r.rowIndex == null) continue;
+        const isUnshippable = String(r.export_yn ?? '').trim() === 'N';
+        map[r.rowIndex] = String(isUnshippable ? 0 : (r.requested_qty ?? 0));
       }
     }
     return map;
@@ -223,6 +227,14 @@ export default function TbnwsStockAdjustView({
   const toggleGroup = (code) => {
     setExpanded((prev) => ({ ...prev, [code]: !prev[code] }));
   };
+
+  // 전체 펼치기/접기 — visibleGrouped 가 아닌 grouped 전체 대상.
+  const expandAll = useCallback(() => {
+    const next = {};
+    for (const g of grouped) next[g.productCode] = true;
+    setExpanded(next);
+  }, [grouped]);
+  const collapseAll = useCallback(() => setExpanded({}), []);
 
   // 요약 카운트 (현재 입력값 기준으로 재계산하면 UX 이상적이지만 초기 데이터 기반으로 일관성 유지)
   const counts = useMemo(() => {
@@ -342,6 +354,19 @@ export default function TbnwsStockAdjustView({
           >
             ✓ 출고 가능 {counts.ok}
           </button>
+          <span className="tbnws-adjust-summary__sep" />
+          <button
+            type="button"
+            className="tbnws-adjust-summary__toggle"
+            onClick={expandAll}
+            title="모든 그룹 펼치기"
+          >⌄ 전체 펼치기</button>
+          <button
+            type="button"
+            className="tbnws-adjust-summary__toggle"
+            onClick={collapseAll}
+            title="모든 그룹 접기"
+          >⌃ 전체 접기</button>
         </div>
 
         {/* 그룹 카드들 */}
