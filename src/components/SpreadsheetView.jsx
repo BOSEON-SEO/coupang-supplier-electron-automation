@@ -25,44 +25,42 @@ function buildSheetsFromXlsxBuffer(buffer) {
     if (!ws) return;
     const ref = ws['!ref'];
     if (!ref) {
-      // 빈 시트라도 자리 차지하도록 최소 형태로 등록
       sheets.push({
-        name, order: idx, data: [[null]], row: 1, column: 1,
+        name, order: idx, celldata: [], row: 50, column: 26,
         frozen: { type: 'row' }, config: {},
       });
       return;
     }
     const range = XLSX.utils.decode_range(ref);
-    const rows = range.e.r + 1;
-    const cols = range.e.c + 1;
+    const rowCount = range.e.r + 1;
+    const colCount = range.e.c + 1;
 
-    const data = [];
+    // fortune-sheet 는 celldata 형식을 우선 인식.
+    // [{r, c, v: cellObj}, ...] — 채워진 셀만. 헤더 행은 비어있어도 스타일 적용.
+    const celldata = [];
     for (let r = 0; r <= range.e.r; r += 1) {
-      const row = [];
       for (let c = 0; c <= range.e.c; c += 1) {
         const addr = XLSX.utils.encode_cell({ r, c });
         const cell = ws[addr];
-        if (!cell || cell.v == null || cell.v === '') {
-          // 빈 셀 — 헤더 행이면 스타일만 적용된 빈 cell, 아니면 null
-          if (r === 0) {
-            row.push({ ...HEADER_STYLE });
-          } else {
-            row.push(null);
-          }
+        const isEmpty = !cell || cell.v == null || cell.v === '';
+
+        if (isEmpty) {
+          // 헤더 행이면 빈 셀에도 스타일을 깔아두기 위해 등록
+          if (r === 0) celldata.push({ r, c, v: { ...HEADER_STYLE } });
           continue;
         }
+
         const cellObj = {
           v: cell.v,
           m: cell.w != null ? String(cell.w) : String(cell.v),
           ct: cellTypeFromValue(cell.v, cell.t),
         };
         if (r === 0) Object.assign(cellObj, HEADER_STYLE);
-        row.push(cellObj);
+        celldata.push({ r, c, v: cellObj });
       }
-      data.push(row);
     }
 
-    // !cols (열 너비) 가져와 luckysheet config.columnlen 으로 변환
+    // !cols (열 너비) → luckysheet config.columnlen 으로 변환
     const columnlen = {};
     if (Array.isArray(ws['!cols'])) {
       ws['!cols'].forEach((c, i) => {
@@ -72,7 +70,11 @@ function buildSheetsFromXlsxBuffer(buffer) {
     }
 
     sheets.push({
-      name, order: idx, data, row: rows, column: cols,
+      name, order: idx,
+      celldata,
+      // 시트 표시 영역은 데이터 + 여유 (사용자가 아래에 행 추가 가능하도록)
+      row: Math.max(rowCount + 10, 50),
+      column: Math.max(colCount, 26),
       frozen: { type: 'row' },
       config: Object.keys(columnlen).length > 0 ? { columnlen } : {},
     });
