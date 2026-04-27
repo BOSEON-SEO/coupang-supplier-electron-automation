@@ -5,7 +5,7 @@ import StockAdjustApp from './StockAdjustApp';
 import TransportApp from './TransportApp';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
-import { resolveEntitlements } from './core/entitlements';
+import { resolveEntitlementsFromLicense } from './core/entitlements';
 import './styles/global.css';
 
 // hash 기반 라우팅 — 새 BrowserWindow 도 같은 index.html 을 재사용
@@ -35,10 +35,14 @@ function PopupShell({ children, vendor }) {
   useEffect(() => {
     let cancelled = false;
     const reload = async () => {
-      const res = await window.electronAPI?.loadSettings();
+      const [sRes, lRes] = await Promise.all([
+        window.electronAPI?.loadSettings?.(),
+        window.electronAPI?.license?.get?.(),
+      ]);
       if (cancelled) return;
-      const settings = res?.settings || {};
-      const ents = resolveEntitlements(settings);
+      const settings = sRes?.settings || {};
+      const license = lRes?.license || null;
+      const ents = resolveEntitlementsFromLicense(license, settings);
       setEntitlements(ents);
       const perPluginEnabled = {};
       const ps = settings?.plugins || {};
@@ -54,11 +58,13 @@ function PopupShell({ children, vendor }) {
       setReady(true);
     };
     reload();
-    const onChanged = () => reload();
-    window.addEventListener('settings-changed', onChanged);
+    const onSettings = () => reload();
+    const offLicense = window.electronAPI?.license?.onChanged?.(() => reload());
+    window.addEventListener('settings-changed', onSettings);
     return () => {
       cancelled = true;
-      window.removeEventListener('settings-changed', onChanged);
+      window.removeEventListener('settings-changed', onSettings);
+      if (typeof offLicense === 'function') offLicense();
     };
   }, [vendor]);
 

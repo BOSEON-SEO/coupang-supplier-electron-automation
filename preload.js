@@ -174,6 +174,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(`plugin:${pluginId}:${channel}`, ...args);
   },
 
+  // ── 라이선스 ──
+  license: {
+    get: () => ipcRenderer.invoke('license:get'),
+    activate: (id, serial) => ipcRenderer.invoke('license:activate', { id, serial }),
+    reverify: () => ipcRenderer.invoke('license:reverify'),
+    clear: () => ipcRenderer.invoke('license:clear'),
+    onChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('license-changed', handler);
+      return () => ipcRenderer.removeListener('license-changed', handler);
+    },
+  },
+
   // ── 위험 동작 ──
   confirmDangerous: (actionName) => ipcRenderer.invoke('action:confirmDangerous', actionName),
 

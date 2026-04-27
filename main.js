@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { registerIpcHandlers } = require('./ipc-handlers');
 const { loadPluginMainHalves } = require('./plugin-main-loader');
+const { registerLicenseIpc } = require('./license-service');
 
 // 쿠팡 서플라이어 사이트 진입 URL
 const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
@@ -559,6 +560,20 @@ app.whenReady().then(() => {
 
   // 플러그인 main-half 로드 — src/plugins/*/main.js 자동 스캔
   loadPluginMainHalves({ ipcMain, app, dataDir: DATA_DIR });
+
+  // 라이선스 IPC — entitlements gating 의 source. license-changed 이벤트는
+  // 모든 BrowserWindow 의 webContents 로 브로드캐스트해 renderer 가 즉시 반영.
+  registerLicenseIpc({
+    ipcMain,
+    dataDir: DATA_DIR,
+    broadcast: (channel, payload) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (w && !w.isDestroyed()) {
+          try { w.webContents.send(channel, payload); } catch (_) { /* 무시 */ }
+        }
+      }
+    },
+  });
 
   // ── WebContentsView 제어 IPC ────────────────────────────
   ipcMain.handle('webview:setVendor', (_e, vendorId) => {

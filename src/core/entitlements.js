@@ -1,24 +1,39 @@
 /**
  * 현재 활성화된 entitlement 플래그 목록.
  *
- * 출시 단계에서는 라이선스 서버가 JWT 토큰에 담아 발급한 값으로 대체됨.
- * 현재는 글로벌 설정의 "플러그인 활성화" 토글로 on/off:
- *   - on  → DEV_ENTITLEMENTS (모든 플러그인 로드)
- *   - off → 빈 배열 (entitlement 없는 'hello' 처럼 무조건 로드되는 것만 남음 —
- *           하지만 배포 시점엔 hello 도 entitlement 요구하게 변경 예정)
+ * v1 라이선스 흐름:
+ *   - license dto 의 status 가 'valid' 또는 'near-expiry' 이면 그 entitlements 사용
+ *   - 그 외 (unlicensed/invalid/expired) 는 빈 배열 — 플러그인 로드 안 됨
+ *   - 단, settings.pluginsMenuEnabled = true 이면 dev override 로 DEV_ENTITLEMENTS 폴백.
+ *     출시 빌드에서는 이 토글 비활성화 또는 라벨 변경 ("개발자: 라이선스 무시").
  */
 
 export const DEV_ENTITLEMENTS = Object.freeze(['core', 'hello', 'tbnws.plugin']);
 
+const ACTIVE_STATUSES = new Set(['valid', 'near-expiry']);
+
 /**
- * settings 객체를 받아 현재 entitlements 배열 반환.
- * off 토글을 기본값(키 없음)으로 판단하면 플러그인이 로드되므로,
- * 출시 단계엔 default=false 로 변경할 것.
- *
- * @param {{ pluginsMenuEnabled?: boolean } | null | undefined} settings
+ * @param {{status?:string, entitlements?:string[]} | null | undefined} license  license dto
+ * @param {{ pluginsMenuEnabled?: boolean } | null | undefined} settings  글로벌 설정
  * @returns {string[]}
  */
+export function resolveEntitlementsFromLicense(license, settings) {
+  if (license && ACTIVE_STATUSES.has(license.status) && Array.isArray(license.entitlements)) {
+    return license.entitlements.slice();
+  }
+  // dev override — 라이선스 없거나 만료여도 토글 켜져있으면 모든 플러그인 활성.
+  if (settings && settings.pluginsMenuEnabled) {
+    return DEV_ENTITLEMENTS.slice();
+  }
+  return [];
+}
+
+/**
+ * 기존 호출자 호환용 래퍼. license 없이 settings 만 보고 판단 (legacy).
+ * 새 코드는 resolveEntitlementsFromLicense 를 직접 사용.
+ *
+ * @deprecated license dto 를 받는 resolveEntitlementsFromLicense 사용.
+ */
 export function resolveEntitlements(settings) {
-  const enabled = !!(settings && settings.pluginsMenuEnabled);
-  return enabled ? DEV_ENTITLEMENTS.slice() : [];
+  return resolveEntitlementsFromLicense(null, settings);
 }

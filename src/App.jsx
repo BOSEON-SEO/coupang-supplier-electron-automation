@@ -9,7 +9,7 @@ import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
 import { PluginProvider, ViewOutlet } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
-import { resolveEntitlements } from './core/entitlements';
+import { resolveEntitlementsFromLicense } from './core/entitlements';
 import { KNOWN_VIEW_ROLES } from './core/plugin-api';
 import { runHook } from './core/plugin-registry';
 import { KNOWN_HOOKS } from './core/plugin-api';
@@ -79,11 +79,37 @@ export default function App() {
   }, [reloadGlobalSettings]);
   const pluginsMenuEnabled = !!globalSettings.pluginsMenuEnabled;
 
+  // ── 라이선스 ─────────────────────────────────────────────
+  //   main process 의 license-service 가 source of truth. 부팅 직후 한 번 fetch +
+  //   'license-changed' 이벤트로 갱신 (activate/reverify/clear 시).
+  //   v1: license 가 'valid'/'near-expiry' 일 때만 entitlements 활성. 그 외엔
+  //   pluginsMenuEnabled 토글이 켜져있을 때 dev override (개발용).
+  const [license, setLicense] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electronAPI?.license?.get?.();
+        if (!cancelled && res?.success) setLicense(res.license || null);
+      } catch (_) { /* 무시 */ }
+    })();
+    const off = window.electronAPI?.license?.onChanged?.((dto) => {
+      setLicense(dto || null);
+    });
+    return () => {
+      cancelled = true;
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
   // ── 플러그인 로드 ─────────────────────────────────────────
-  // entitlements 는 글로벌 설정(pluginsMenuEnabled) 으로 on/off.
+  // entitlements = license dto + globalSettings 합산.
   // perPluginEnabled 는 개별 플러그인 on/off (settings.plugins.<id>.enabled).
-  // 설정 변경 → globalSettings 갱신 → 재계산 → useEffect 재실행 → unload + load.
-  const entitlements = useMemo(() => resolveEntitlements(globalSettings), [globalSettings]);
+  // license/settings 변경 → 재계산 → useEffect 재실행 → unload + load.
+  const entitlements = useMemo(
+    () => resolveEntitlementsFromLicense(license, globalSettings),
+    [license, globalSettings],
+  );
   const perPluginEnabled = useMemo(() => {
     const out = {};
     const ps = globalSettings?.plugins || {};
