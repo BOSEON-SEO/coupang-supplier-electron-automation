@@ -1714,7 +1714,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: 1004;
   padding: 20px;
 }
 .eflex-overlay__card {
