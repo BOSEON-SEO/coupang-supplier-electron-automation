@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Workbook } from '@fortune-sheet/react';
 import '@fortune-sheet/react/dist/index.css';
 import LuckyExcel from 'luckyexcel';
@@ -11,8 +11,14 @@ import LuckyExcel from 'luckyexcel';
  *   - fileName: string (변환 시 사용, 기본 'data.xlsx')
  *   - onChange: (sheets: Sheet[]) => void — 편집 시 호출
  *   - readOnly: boolean
+ *
+ * ref 메서드:
+ *   - forceRerender(): FortuneSheet 인스턴스 재마운트 (렌더 깨짐 복구용)
  */
-export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, onReady, readOnly }) {
+const SpreadsheetView = forwardRef(function SpreadsheetView(
+  { xlsxBuffer, fileName, onChange, onReady, readOnly },
+  ref,
+) {
   const [sheets, setSheets] = useState(null);
   const [error, setError] = useState(null);
   const [key, setKey] = useState(0);
@@ -74,6 +80,14 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, onRead
     [onChange],
   );
 
+  // 외부에서 호출 가능한 명령들. 렌더 깨짐 복구용 force rerender.
+  useImperativeHandle(ref, () => ({
+    forceRerender() {
+      setKey((k) => k + 1);
+      ignoreUntilRef.current = Date.now() + 1000;
+    },
+  }), []);
+
   if (error) {
     return <div className="spreadsheet-empty spreadsheet-error">{error}</div>;
   }
@@ -97,4 +111,6 @@ export default function SpreadsheetView({ xlsxBuffer, fileName, onChange, onRead
       />
     </div>
   );
-}
+});
+
+export default SpreadsheetView;

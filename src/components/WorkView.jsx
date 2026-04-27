@@ -206,6 +206,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
   const loadedPathRef = useRef(loadedPath);
   const jobRef = useRef(job);
   const latestSheetsRef = useRef(null);
+  const spreadsheetRef = useRef(null); // SpreadsheetView 외부 명령용 (forceRerender 등)
   const lastShipmentResultRef = useRef(null); // 마지막 쉽먼트 스크립트의 result payload
   const lastMilkrunDocsResultRef = useRef(null); // 마지막 밀크런 서류 다운 스크립트의 result payload
   const lastShipmentDocsResultRef = useRef(null); // 마지막 쉽먼트 서류 다운 스크립트의 result payload
@@ -1788,6 +1789,15 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
             <button
               type="button"
               className="btn btn--secondary btn--sm"
+              onClick={() => spreadsheetRef.current?.forceRerender()}
+              disabled={!xlsxBuffer}
+              title="시트 렌더링이 깨졌을 때 다시 그리기"
+            >
+              ↻ 렌더 새로고침
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
               onClick={() => handleDownload(activeTab === 'confirmation' ? 'confirmation' : 'po')}
               disabled={!job || !xlsxBuffer}
               title="현재 탭 파일을 xlsx 로 다운로드"
@@ -1830,6 +1840,7 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
       ) : (
         <div className="workview-table-section">
           <SpreadsheetView
+            ref={spreadsheetRef}
             xlsxBuffer={xlsxBuffer}
             fileName="po.xlsx"
             onChange={handleSheetChange}
