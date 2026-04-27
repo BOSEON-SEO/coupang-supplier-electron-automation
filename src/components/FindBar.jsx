@@ -1,5 +1,29 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { setReserveTop } from '../lib/webviewReserve';
+
+/**
+ * Shadow DOM 포털 — 안의 컨텐츠가 main page 의 findInPage 매칭에서 제외됨.
+ * findInPage 는 same-document 텍스트만 매칭하는데, Shadow root 안은 separate
+ * tree 라 격리됨. 자기 query 가 결과로 잡히는 문제 회피용.
+ */
+function ShadowPortal({ children }) {
+  const hostRef = useRef(null);
+  const [shadow, setShadow] = useState(null);
+  useEffect(() => {
+    if (hostRef.current && !shadow) {
+      const root = hostRef.current.attachShadow({ mode: 'open' });
+      // shadow 내부에 호스트 페이지 스타일 시트 일부 주입 — 글로벌 className 사용 가능하도록.
+      // 실용적으로는 명시 style 속성 + 외부 ::part 로 처리. 여기선 inline style 만 신뢰.
+      setShadow(root);
+    }
+  }, [shadow]);
+  return (
+    <span ref={hostRef} style={{ display: 'contents' }}>
+      {shadow && createPortal(children, shadow)}
+    </span>
+  );
+}
 
 // FindBar 높이(36px) + 상단 여유 8px + 하단 여유 4px
 const WEBVIEW_FIND_RESERVE = 48;
@@ -168,20 +192,35 @@ export default function FindBar() {
       role="search"
       style={{ top: pos.top, right: pos.right }}
     >
-      <input
-        ref={inputRef}
-        type="text"
-        placeholder="찾기"
-        value={query}
-        onChange={handleChange}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            step(!e.shiftKey);
-          }
-        }}
-        className="find-bar__input"
-      />
+      {/*
+       * input 을 Shadow DOM 안에 두어 자기 query 가 findInPage 결과로 잡히는 문제 회피.
+       * 클래스 네임은 shadow 내부에서 동작 안 하므로 inline style 로 적용.
+       */}
+      <ShadowPortal>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="찾기"
+          value={query}
+          onChange={handleChange}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              step(!e.shiftKey);
+            }
+          }}
+          style={{
+            border: 'none',
+            outline: 'none',
+            padding: '4px 8px',
+            fontSize: '13px',
+            width: '180px',
+            background: 'transparent',
+            color: 'inherit',
+            font: 'inherit',
+          }}
+        />
+      </ShadowPortal>
       <span className="find-bar__count">
         {query
           ? (result.total > 0 ? `${result.current}/${result.total}` : '0/0')
