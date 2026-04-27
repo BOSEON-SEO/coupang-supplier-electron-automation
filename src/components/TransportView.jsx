@@ -297,34 +297,17 @@ function getWhFrom(map, wh) {
   return map[wh] || { lots: [], skuNotes: {} };
 }
 
-function initLotsByWh(groups, defaults) {
+function initLotsByWh(groups /* , defaults */) {
+  // 저장된 lot 만 normalize 해서 그대로 반환. 없으면 빈 배열 — 사용자가
+  // '+ 쉽먼트' / '+ 밀크런' 버튼으로 직접 lot 을 만들도록 유도.
   const out = {};
   for (const g of groups) {
     const asn = g.assignment || {};
     const savedLots = Array.isArray(asn.lots) ? asn.lots : [];
-    if (savedLots.length > 0) {
-      out[g.warehouse] = {
-        lots: savedLots.map(normalizeLot),
-        skuNotes: asn.skuNotes || {},
-      };
-    } else {
-      // 저장 이력 없음 — defaultType 기준 lot 하나 자동 생성하되, items 는 비워둠
-      // (사용자가 + 버튼 or AddLotModal 을 통해 담게 유도).
-      // 단, 초기 진입이 편하도록 SKU 를 전부 포함하는 lot 를 미리 만든다.
-      const defaultType = (asn.transportType === TYPES.MILKRUN) ? TYPES.MILKRUN : TYPES.SHIPMENT;
-      const items = (g.skus || []).map((s) =>
-        defaultType === TYPES.SHIPMENT
-          ? { rowKey: s.rowKey, qty: s.confirmed_qty, boxNo: '' }
-          : { rowKey: s.rowKey, qty: s.confirmed_qty, palletNo: '' },
-      );
-      const lot = defaultType === TYPES.SHIPMENT
-        ? buildDefaultShipmentLot(items)
-        : buildDefaultMilkrunLot(defaults, items);
-      out[g.warehouse] = {
-        lots: [lot],
-        skuNotes: asn.skuNotes || {},
-      };
-    }
+    out[g.warehouse] = {
+      lots: savedLots.map(normalizeLot).filter(Boolean),
+      skuNotes: asn.skuNotes || {},
+    };
   }
   return out;
 }
