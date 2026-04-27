@@ -94,7 +94,22 @@ function toExtendedRow(r) {
 function normalizeSkuRow(r, logiMap) {
   const productCode = r.tobe_product_code ?? r.product_code ?? '';
   const center = r.departure_warehouse ?? r.logistics_center ?? '';
-  const logi = logiMap ? logiMap.get(`${productCode}|${center}`) : null;
+  const orderSeq = String(r.coupang_order_seq ?? r.order_no ?? '').trim();
+
+  // 매칭 우선순위:
+  //   ① precise (productCode + center + orderSeq) — logi 가 발주별로 분리된 경우
+  //   ② loose 후보 1개만 — 같은 (pc, lc) 의 발주가 1개뿐이면 그대로 사용
+  //   ③ loose 후보 여러 개 — null 처리 후 distributeLooseLogi 에서 비례 분배
+  let logi = null;
+  let matchedPrecise = false;
+  if (logiMap?.precise && orderSeq) {
+    const exact = logiMap.precise.get(`${productCode}|${center}|${orderSeq}`);
+    if (exact) { logi = exact; matchedPrecise = true; }
+  }
+  if (!logi && logiMap?.loose) {
+    const candidates = logiMap.loose.get(`${productCode}|${center}`) || [];
+    if (candidates.length === 1) logi = candidates[0]; // 단일 후보만 안전
+  }
 
   // 바코드 일치 로컬 계산 (startWork 의 enrichStep2Defaults 와 동일 규칙).
   const skuBarcode = String(r.sku_barcode ?? '').trim();
@@ -110,7 +125,6 @@ function normalizeSkuRow(r, logiMap) {
     sku_name:                r.sku_name ?? '',
     sku_barcode:             r.sku_barcode ?? '',
     order_quantity:          r.order_quantity ?? r.ordered_qty ?? 0,
-    // 확정수량: 물류 단위 confirmed_qty 우선, 없으면 requested_qty, 그 다음 sku level
     requested_qty:           logi?.confirmed_qty ?? logi?.requested_qty
                               ?? r.requested_qty ?? r.confirmed_qty ?? 0,
     fulfillment_export_qty:  logi?.fulfillment_export_qty ?? r.fulfillment_export_qty ?? 0,
@@ -124,20 +138,91 @@ function normalizeSkuRow(r, logiMap) {
     rtn_barcode_matched:     r.rtn_barcode_matched ?? r.barcode_matched ?? barcodeMatched,
     export_yn:               r.export_yn ?? '',
     stock_remarks:           r.stock_remarks ?? logi?.logistics_remarks ?? '',
+    // 비례 분배 후처리용 임시 필드
+    _logiKey:                `${productCode}|${center}`,
+    _matchedPrecise:         matchedPrecise,
   };
 }
 
-/** logisticsList 를 (product_code, logistics_center) 키로 인덱싱. */
+/**
+ * logisticsList 를 두 가지 키로 인덱싱.
+ *
+ *   precise: (productCode, center, orderSeq) — logi 가 발주별로 분리된 경우
+ *   loose:   (productCode, center) → [logi 후보들] — 합산본/단일 케이스
+ *
+ * 백엔드가 logi 를 발주별로 주는지 합산본으로 주는지에 무관하게 동작.
+ */
 function buildLogisticsMap(logisticsList) {
-  const m = new Map();
-  if (!Array.isArray(logisticsList)) return m;
+  const precise = new Map();
+  const loose = new Map();
+  if (!Array.isArray(logisticsList)) return { precise, loose };
   for (const l of logisticsList) {
     const pc = l?.product_code ?? '';
     const lc = l?.logistics_center ?? '';
     if (!pc || !lc) continue;
-    m.set(`${pc}|${lc}`, l);
+    const ord = String(l?.coupang_order_seq ?? l?.order_no ?? '').trim();
+    if (ord) precise.set(`${pc}|${lc}|${ord}`, l);
+    const lk = `${pc}|${lc}`;
+    if (!loose.has(lk)) loose.set(lk, []);
+    loose.get(lk).push(l);
   }
-  return m;
+  return { precise, loose };
+}
+
+/**
+ * normalizeSkuRow 후처리 — precise 매칭 안 된 행들에 대해 발주별 비례 분배.
+ *
+ * 백엔드의 logisticsList 가 (productCode, center) 단위 합산본일 때:
+ *   같은 (pc, lc) 그룹 안의 여러 발주 행이 normalizeSkuRow 단독으론 모두 같은
+ *   합산값을 받아 합계가 부풀려짐. 이 함수가 order_quantity 비례로 재분배.
+ *
+ * precise 매칭으로 이미 정확한 logi 를 받은 행은 건드리지 않음.
+ */
+function distributeLooseLogi(normalized, logiMap) {
+  if (!logiMap?.loose || !normalized?.length) {
+    if (normalized) for (const r of normalized) { delete r._logiKey; delete r._matchedPrecise; }
+    return;
+  }
+  // precise 매칭 안 된 행만 (pc, lc) 그룹핑
+  const groups = new Map();
+  for (const r of normalized) {
+    if (r._matchedPrecise) continue;
+    const k = r._logiKey;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  for (const [k, rows] of groups) {
+    if (rows.length <= 1) continue; // 단일이면 normalizeSkuRow 의 loose 매칭이 이미 정확
+    const candidates = logiMap.loose.get(k) || [];
+    if (candidates.length === 0) continue;
+    // 같은 (pc, lc) 의 모든 logi 후보를 합쳐서 총량 계산 (대부분 합산본 1개임)
+    const totalConfirmed = candidates.reduce(
+      (s, l) => s + Number(l.confirmed_qty ?? l.requested_qty ?? 0), 0,
+    );
+    const totalExport = candidates.reduce(
+      (s, l) => s + Number(l.fulfillment_export_qty ?? 0), 0,
+    );
+    const sumOrders = rows.reduce((s, r) => s + Number(r.order_quantity || 0), 0);
+    if (sumOrders <= 0) continue;
+
+    let allocC = 0; let allocE = 0;
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      const ratio = Number(r.order_quantity || 0) / sumOrders;
+      const isLast = i === rows.length - 1;
+      const conf = isLast ? (totalConfirmed - allocC) : Math.floor(totalConfirmed * ratio);
+      const exp = isLast ? (totalExport - allocE) : Math.floor(totalExport * ratio);
+      r.requested_qty = conf;
+      r.fulfillment_export_qty = exp;
+      allocC += conf;
+      allocE += exp;
+    }
+  }
+  // 임시 필드 정리
+  for (const r of normalized) {
+    delete r._logiKey;
+    delete r._matchedPrecise;
+  }
 }
 
 /** 응답 배열 → AOA (header + rows) */
@@ -884,6 +969,9 @@ const manifest = {
             try {
               const logiMap = buildLogisticsMap(detail.logisticsList);
               const normalized = detail.skuList.map((row) => normalizeSkuRow(row, logiMap));
+              // 같은 (상품코드, 센터) 그룹의 발주들이 logi 합산값으로 부풀려지는 문제 보정 —
+              // order_quantity 비례로 confirmed/export 재분배 (precise 매칭은 그대로 유지).
+              distributeLooseLogi(normalized, logiMap);
               const aoa = buildAoa(normalized);
               const raw = buildWorkbookBuffer(aoa);
               const ab = raw.buffer
