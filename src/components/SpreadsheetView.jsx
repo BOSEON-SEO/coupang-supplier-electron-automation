@@ -22,6 +22,8 @@ const SpreadsheetView = forwardRef(function SpreadsheetView(
   const [sheets, setSheets] = useState(null);
   const [error, setError] = useState(null);
   const [key, setKey] = useState(0);
+  // forceRerender 가 useEffect 재실행을 트리거해 LuckyExcel 변환부터 다시 돌리도록
+  const [parseTrigger, setParseTrigger] = useState(0);
   const ignoreUntilRef = useRef(0);
 
   useEffect(() => {
@@ -70,7 +72,7 @@ const SpreadsheetView = forwardRef(function SpreadsheetView(
     } catch (err) {
       setError(`xlsx 파싱 실패: ${err.message}`);
     }
-  }, [xlsxBuffer, fileName]);
+  }, [xlsxBuffer, fileName, parseTrigger]);
 
   const handleChange = useCallback(
     (data) => {
@@ -80,11 +82,14 @@ const SpreadsheetView = forwardRef(function SpreadsheetView(
     [onChange],
   );
 
-  // 외부에서 호출 가능한 명령들. 렌더 깨짐 복구용 force rerender.
+  // 외부에서 호출 가능한 명령들. 렌더 깨짐 복구용 force rerender —
+  // 단순 key 증가가 아니라 LuckyExcel 변환부터 다시 돌리도록 parseTrigger 증가.
   useImperativeHandle(ref, () => ({
     forceRerender() {
-      setKey((k) => k + 1);
-      ignoreUntilRef.current = Date.now() + 1000;
+      setSheets(null);
+      setError(null);
+      setParseTrigger((t) => t + 1);
+      ignoreUntilRef.current = Date.now() + 2000;
     },
   }), []);
 
