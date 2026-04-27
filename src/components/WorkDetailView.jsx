@@ -19,9 +19,12 @@ import PhaseStepper from './PhaseStepper';
  * pixel 값 transition 이라 양방향 모두 부드럽게.
  */
 export default function WorkDetailView({
-  job, vendor, workOpen, onToggleWork, onCloseWork,
+  job, vendor, vendors, workOpen, onToggleWork, onCloseWork,
   onJobUpdated, onBackToCalendar,
 }) {
+  // 표시용 vendor 이름 — vendors.json 의 name. 없으면 id fallback.
+  const vendorMeta = (vendors || []).find((v) => v.id === job?.vendor);
+  const vendorName = vendorMeta?.name || job?.vendor || '';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [availableHeight, setAvailableHeight] = useState(0);
@@ -71,7 +74,7 @@ export default function WorkDetailView({
 
   const handleComplete = useCallback(async () => {
     if (!job) return;
-    if (!window.confirm(`${job.vendor} ${job.sequence}차 작업을 완료 처리하시겠습니까?`)) return;
+    if (!window.confirm(`${vendorName} ${job.sequence}차 작업을 완료 처리하시겠습니까?`)) return;
     setBusy(true);
     setError('');
     const api = window.electronAPI;
@@ -82,7 +85,7 @@ export default function WorkDetailView({
       return;
     }
     onJobUpdated?.(res.manifest);
-  }, [job, onJobUpdated]);
+  }, [job, onJobUpdated, vendorName]);
 
   if (!job) {
     return (
@@ -107,7 +110,7 @@ export default function WorkDetailView({
           ← 달력
         </button>
         <div className="work-detail-header__title">
-          <span className="work-detail-header__vendor">{job.vendor}</span>
+          <span className="work-detail-header__vendor" title={`vendor id: ${job.vendor}`}>{vendorName}</span>
           <span className="work-detail-header__sep">·</span>
           <span>{job.date}</span>
           <span className="work-detail-header__sep">·</span>

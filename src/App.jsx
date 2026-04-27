@@ -216,6 +216,7 @@ export default function App() {
             <WorkDetailView
               job={activeJob}
               vendor={vendor}
+              vendors={vendors}
               workOpen={workOpen}
               onToggleWork={() => setWorkOpen((o) => !o)}
               onCloseWork={() => setWorkOpen(false)}
