@@ -1988,14 +1988,17 @@ function registerIpcHandlers({
         const orderSeq = String(row[iOrder] ?? '');
         const barcode = String(row[iBarcode] ?? '');
         if (!wh || !orderSeq || !barcode) continue;
+        const qty = Number(row[iQty]) || 0;
         const rowKey = `${orderSeq}|${barcode}|${r}`;
         skuByKey.set(rowKey, {
           coupang_order_seq: orderSeq,
           sku_name: String(row[iName] ?? ''),
           warehouse: wh,
-          confirmed_qty: Number(row[iQty]) || 0,
+          confirmed_qty: qty,
           sku_barcode: barcode,
         });
+        // 발주번호 표기는 출고 가능 행만 — 확정수량 0(재고없음·출고불가) 행은 제외.
+        if (qty <= 0) continue;
         if (!ordersByWarehouse.has(wh)) ordersByWarehouse.set(wh, new Set());
         ordersByWarehouse.get(wh).add(orderSeq);
       }

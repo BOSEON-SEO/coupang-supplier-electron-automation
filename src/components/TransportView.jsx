@@ -65,15 +65,17 @@ export default function TransportView({
   saving, onSave, onCancel,
 }) {
   // lotsByWh: { [wh]: {lots, skuNotes} }
-  const [lotsByWh, setLotsByWh] = useState(() => initLotsByWh(groups, defaults));
+  const [lotsByWh, setLotsByWh] = useState(() => initLotsByWh(groups));
   const [collapsedWh, setCollapsedWh] = useState({});
   const [expandedLotId, setExpandedLotId] = useState(null);
   const [addModal, setAddModal] = useState(null); // { wh, type }
 
-  // groups 가 재갱신되면 (load 새로) 재초기화
+  // groups 재갱신 시 재초기화. dep 에 defaults 를 넣으면 부모가 매 렌더마다 새
+  // 객체로 내려보낼 때 사용자 입력 도중 setLotsByWh 가 호출되어 입력이
+  // saved 값으로 되돌아가는 버그 발생 → groups 만 dep.
   useEffect(() => {
-    setLotsByWh(initLotsByWh(groups, defaults));
-  }, [groups, defaults]);
+    setLotsByWh(initLotsByWh(groups));
+  }, [groups]);
 
   const getWh = (wh) => lotsByWh[wh] || { lots: [], skuNotes: {} };
   const patchWh = (wh, patch) => {
