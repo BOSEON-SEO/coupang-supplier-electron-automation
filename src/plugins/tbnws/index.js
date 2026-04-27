@@ -60,7 +60,9 @@ function toExtendedRow(r) {
     ['SKU 이름',       r.sku_name ?? ''],
     ['SKU 바코드',     r.sku_barcode ?? ''],
     ['발주수량',       orderQty],
-    ['확정수량',       requestedQty],
+    // 확정수량 = 출고수량(requested_qty) + 반출수량(fulfillment_export_qty) 합산.
+    // 이 값이 confirmation·발주확정·쿠팡업로드 단계로 그대로 흘러감.
+    ['확정수량',       requestedQty + fulfillExportQty],
     ['반출수량',       fulfillExportQty],  // 풀필에서 반출해야 할 수량 (백엔드 fulfillment_export_qty)
     ['물류센터',       r.departure_warehouse ?? ''],
     ['매입가',         purchasePrice],
@@ -77,41 +79,12 @@ function toExtendedRow(r) {
 }
 
 /**
- * workDetail 응답의 skuList 원소를 startWork 응답 (CoupangOrderFormCheck) 과
- * 동일한 형태로 정규화.
+ * workDetail 응답의 skuList 원소를 17컬럼 양식 (po-tbnws.xlsx) 행으로 정규화.
  *
- * 주의:
- *   - DB 컬럼명 (`order_no`, `product_code`, `ordered_qty`, `logistics_center`,
- *     `delivery_price`, `stock_tobe`, `stock_fulfillment`, `tobe_barcode`) 과
- *     startWork 계산 컬럼명 (`rtn_*`) 모두 수용.
- *   - "확정수량"·"반출수량"은 **물류 단위**(logisticsList) 에 저장되므로
- *     (product_code, logistics_center) 기준으로 병합. sku level 은 보통 null.
- *   - `rtn_barcode_matched` 는 startWork 에서 enrich 되는 계산 필드이므로 로컬 계산.
- *
- * @param {object} r         skuList 원소
- * @param {Map<string, object>} [logiMap] key='product_code|logistics_center' 인덱스
+ * 어드민 응답의 sku 행이 이미 step2 결과를 다 담고 있어 (requested_qty,
+ * fulfillment_export_qty, export_yn 등) 별도 logi 매칭 불필요.
  */
-function normalizeSkuRow(r, logiMap) {
-  const productCode = r.tobe_product_code ?? r.product_code ?? '';
-  const center = r.departure_warehouse ?? r.logistics_center ?? '';
-  const orderSeq = String(r.coupang_order_seq ?? r.order_no ?? '').trim();
-
-  // 매칭 우선순위:
-  //   ① precise (productCode + center + orderSeq) — logi 가 발주별로 분리된 경우
-  //   ② loose 후보 1개만 — 같은 (pc, lc) 의 발주가 1개뿐이면 그대로 사용
-  //   ③ loose 후보 여러 개 — null 처리 후 distributeLooseLogi 에서 비례 분배
-  let logi = null;
-  let matchedPrecise = false;
-  if (logiMap?.precise && orderSeq) {
-    const exact = logiMap.precise.get(`${productCode}|${center}|${orderSeq}`);
-    if (exact) { logi = exact; matchedPrecise = true; }
-  }
-  if (!logi && logiMap?.loose) {
-    const candidates = logiMap.loose.get(`${productCode}|${center}`) || [];
-    if (candidates.length === 1) logi = candidates[0]; // 단일 후보만 안전
-  }
-
-  // 바코드 일치 로컬 계산 (startWork 의 enrichStep2Defaults 와 동일 규칙).
+function normalizeSkuRow(r) {
   const skuBarcode = String(r.sku_barcode ?? '').trim();
   const tobeBarcode = String(r.rtn_tobe_barcode ?? r.tobe_barcode ?? '').trim();
   const barcodeMatched = tobeBarcode
@@ -120,15 +93,14 @@ function normalizeSkuRow(r, logiMap) {
 
   return {
     coupang_order_seq:       r.coupang_order_seq ?? r.order_no ?? '',
-    tobe_product_code:       productCode,
+    tobe_product_code:       r.tobe_product_code ?? r.product_code ?? '',
     sku_id:                  r.sku_id ?? '',
     sku_name:                r.sku_name ?? '',
     sku_barcode:             r.sku_barcode ?? '',
     order_quantity:          r.order_quantity ?? r.ordered_qty ?? 0,
-    requested_qty:           logi?.confirmed_qty ?? logi?.requested_qty
-                              ?? r.requested_qty ?? r.confirmed_qty ?? 0,
-    fulfillment_export_qty:  logi?.fulfillment_export_qty ?? r.fulfillment_export_qty ?? 0,
-    departure_warehouse:     center,
+    requested_qty:           r.requested_qty ?? 0,
+    fulfillment_export_qty:  r.fulfillment_export_qty ?? 0,
+    departure_warehouse:     r.departure_warehouse ?? r.logistics_center ?? '',
     purchase_price:          r.purchase_price ?? 0,
     rtn_sku_delivery_price:  r.rtn_sku_delivery_price ?? r.sku_delivery_price
                               ?? r.delivery_price ?? 0,
@@ -137,92 +109,87 @@ function normalizeSkuRow(r, logiMap) {
     rtn_tobe_barcode:        tobeBarcode,
     rtn_barcode_matched:     r.rtn_barcode_matched ?? r.barcode_matched ?? barcodeMatched,
     export_yn:               r.export_yn ?? '',
-    stock_remarks:           r.stock_remarks ?? logi?.logistics_remarks ?? '',
-    // 비례 분배 후처리용 임시 필드
-    _logiKey:                `${productCode}|${center}`,
-    _matchedPrecise:         matchedPrecise,
+    stock_remarks:           r.stock_remarks ?? '',
   };
 }
 
 /**
- * logisticsList 를 두 가지 키로 인덱싱.
+ * 다운받은 PO buffer 의 헤더만 빌리고, 행은 어드민 응답 skuList 로 새로 빌드.
  *
- *   precise: (productCode, center, orderSeq) — logi 가 발주별로 분리된 경우
- *   loose:   (productCode, center) → [logi 후보들] — 합산본/단일 케이스
+ * 다운받은 PO 는 step1 raw (확정수량 = 발주수량) 라 어드민 결과 반영 X.
+ * 응답의 sku 행이 이미 step2 결과를 다 담고 있어 그대로 헤더 컬럼에 매핑.
  *
- * 백엔드가 logi 를 발주별로 주는지 합산본으로 주는지에 무관하게 동작.
+ * 매핑 룰: PO 헤더 컬럼명 → sku 응답 필드.
+ *
+ * @param {ArrayBuffer | Uint8Array} poBuffer  다운받은 PO buffer
+ * @param {Array} skuList                       workDetail.skuList
+ * @returns {ArrayBuffer}  새 xlsx buffer
  */
-function buildLogisticsMap(logisticsList) {
-  const precise = new Map();
-  const loose = new Map();
-  if (!Array.isArray(logisticsList)) return { precise, loose };
-  for (const l of logisticsList) {
-    const pc = l?.product_code ?? '';
-    const lc = l?.logistics_center ?? '';
-    if (!pc || !lc) continue;
-    const ord = String(l?.coupang_order_seq ?? l?.order_no ?? '').trim();
-    if (ord) precise.set(`${pc}|${lc}|${ord}`, l);
-    const lk = `${pc}|${lc}`;
-    if (!loose.has(lk)) loose.set(lk, []);
-    loose.get(lk).push(l);
+function buildPoFromSkuList(poBuffer, skuList) {
+  const wb = XLSX.read(poBuffer, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws || !ws['!ref']) {
+    throw new Error('PO 원본의 시트를 읽을 수 없음');
   }
-  return { precise, loose };
-}
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  if (aoa.length === 0) {
+    throw new Error('PO 원본의 행이 비어있음');
+  }
+  const header = aoa[0].map((h) => String(h).trim());
 
-/**
- * normalizeSkuRow 후처리 — precise 매칭 안 된 행들에 대해 발주별 비례 분배.
- *
- * 백엔드의 logisticsList 가 (productCode, center) 단위 합산본일 때:
- *   같은 (pc, lc) 그룹 안의 여러 발주 행이 normalizeSkuRow 단독으론 모두 같은
- *   합산값을 받아 합계가 부풀려짐. 이 함수가 order_quantity 비례로 재분배.
- *
- * precise 매칭으로 이미 정확한 logi 를 받은 행은 건드리지 않음.
- */
-function distributeLooseLogi(normalized, logiMap) {
-  if (!logiMap?.loose || !normalized?.length) {
-    if (normalized) for (const r of normalized) { delete r._logiKey; delete r._matchedPrecise; }
-    return;
-  }
-  // precise 매칭 안 된 행만 (pc, lc) 그룹핑
-  const groups = new Map();
-  for (const r of normalized) {
-    if (r._matchedPrecise) continue;
-    const k = r._logiKey;
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(r);
-  }
-  for (const [k, rows] of groups) {
-    if (rows.length <= 1) continue; // 단일이면 normalizeSkuRow 의 loose 매칭이 이미 정확
-    const candidates = logiMap.loose.get(k) || [];
-    if (candidates.length === 0) continue;
-    // 같은 (pc, lc) 의 모든 logi 후보를 합쳐서 총량 계산 (대부분 합산본 1개임)
-    const totalConfirmed = candidates.reduce(
-      (s, l) => s + Number(l.confirmed_qty ?? l.requested_qty ?? 0), 0,
-    );
-    const totalExport = candidates.reduce(
-      (s, l) => s + Number(l.fulfillment_export_qty ?? 0), 0,
-    );
-    const sumOrders = rows.reduce((s, r) => s + Number(r.order_quantity || 0), 0);
-    if (sumOrders <= 0) continue;
+  // 헤더 컬럼명 → sku 응답 필드 lookup.
+  // 응답에 없으면 빈 셀 또는 기본값.
+  const cellFor = (sku) => {
+    const dateOnly = (s) => {
+      if (!s) return '';
+      const v = String(s).trim();
+      const m = v.match(/^(\d{4}-\d{2}-\d{2})/);
+      return m ? m[1] : v;
+    };
+    const reqQty = Number(sku.requested_qty) || 0;
+    const expQty = Number(sku.fulfillment_export_qty) || 0;
+    return {
+      '발주번호':      sku.order_no ?? '',
+      '발주유형':      sku.order_kind ?? '',
+      '발주현황':      sku.order_status ?? '',
+      'SKU ID':        sku.sku_id ?? '',
+      'SKU 이름':      sku.sku_name ?? '',
+      'SKU Barcode':   sku.sku_barcode ?? '',
+      'SKU 바코드':    sku.sku_barcode ?? '',
+      '물류센터':      sku.logistics_center ?? '',
+      '입고예정일':    dateOnly(sku.expected_arrival_date),
+      '발주일':        dateOnly(sku.order_date),
+      '발주수량':      Number(sku.ordered_qty) || 0,
+      '확정수량':      reqQty + expQty,
+      '입고수량':      0,
+      '매입유형':      sku.purchase_type ?? '',
+      '면세여부':      sku.tax_exemption ?? '',
+      '면세':          sku.tax_exemption ?? '',
+      '매입가':        Number(sku.purchase_price) || 0,
+      '공급가':        Number(sku.supply_price) || 0,
+      '부가세':        Number(sku.vat) || 0,
+      'VAT':           Number(sku.vat) || 0,
+      '총매입금':      Number(sku.total_purchase_amount) || 0,
+      'SKU 납품가':    Number(sku.delivery_price) || 0,
+      'XDOCK':         sku.xdock ?? '',
+      'Xdock':         sku.xdock ?? '',
+      'X-Dock':        sku.xdock ?? '',
+    };
+  };
 
-    let allocC = 0; let allocE = 0;
-    for (let i = 0; i < rows.length; i += 1) {
-      const r = rows[i];
-      const ratio = Number(r.order_quantity || 0) / sumOrders;
-      const isLast = i === rows.length - 1;
-      const conf = isLast ? (totalConfirmed - allocC) : Math.floor(totalConfirmed * ratio);
-      const exp = isLast ? (totalExport - allocE) : Math.floor(totalExport * ratio);
-      r.requested_qty = conf;
-      r.fulfillment_export_qty = exp;
-      allocC += conf;
-      allocE += exp;
-    }
+  const newAoa = [header];
+  for (const sku of skuList) {
+    const map = cellFor(sku);
+    const row = header.map((h) => (h in map ? map[h] : ''));
+    newAoa.push(row);
   }
-  // 임시 필드 정리
-  for (const r of normalized) {
-    delete r._logiKey;
-    delete r._matchedPrecise;
-  }
+
+  const newWs = XLSX.utils.aoa_to_sheet(newAoa);
+  // 컬럼 폭은 원본의 !cols 가 있으면 그대로 유지.
+  if (Array.isArray(ws['!cols'])) newWs['!cols'] = ws['!cols'];
+  const newWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(newWb, newWs, wb.SheetNames[0]);
+  return XLSX.write(newWb, { type: 'array', bookType: 'xlsx' });
 }
 
 /** 응답 배열 → AOA (header + rows) */
@@ -929,49 +896,82 @@ const manifest = {
         let dlFileName = null;
 
         if (workSeq != null) {
-          // 2a) PO 파일 다운로드 → po.xlsx
+          // 2a) PO 파일 다운로드 — buffer 만 받고 즉시 write 안 함.
+          //     workDetail 받은 후 normalized 로 확정수량 patch 한 다음 저장한다.
           const dl = await ctx.ipcInvoke('work.downloadPoFile', { workSeq });
+          let poBuffer = null;
           if (dl?.success && dl.data) {
-            const resolved = await api.resolveJobPath(
-              remoteJob.date, remoteJob.vendor, remoteJob.sequence, 'po.xlsx',
-            );
-            if (resolved?.success) {
-              const w = await api.writeFile(resolved.path, dl.data);
-              if (w?.success) {
-                poSaved = true;
-                dlFileName = dl.fileName || null;
-                const bytes = dl.data.byteLength ?? dl.data.length;
-                const suffix = dl.converted ? ' (CSV→XLSX 변환)' : '';
-                console.info(`[tbnws] 원격 PO 다운로드 완료${suffix} (${bytes} bytes, ${dl.fileName})`);
-              } else {
-                console.warn('[tbnws] po.xlsx 저장 실패:', w?.error);
-              }
-            }
+            poBuffer = dl.data;
+            dlFileName = dl.fileName || null;
+            const bytes = dl.data.byteLength ?? dl.data.length;
+            const suffix = dl.converted ? ' (CSV→XLSX 변환)' : '';
+            console.info(`[tbnws] 원격 PO 다운로드 완료${suffix} (${bytes} bytes, ${dl.fileName})`);
           } else {
             console.warn('[tbnws] PO 파일 다운로드 실패:', dl?.error);
           }
 
-          // 2b) workDetail 조회 → skuList 로 po-tbnws.xlsx 재구성
+          // 2b) workDetail 조회 → normalized 생성 (logi 매칭 + 분배).
           const detail = await ctx.ipcInvoke('work.fetchDetail', { workSeq });
-          // DEBUG: 응답 키 구조 덤프 (필드 매핑 조정용). 안정화 후 제거.
           if (detail?.success) {
             console.info('[tbnws] workDetail 응답 구조:', {
               workKeys: detail.work ? Object.keys(detail.work).sort() : null,
               skuListLen: detail.skuList?.length,
-              skuSample: detail.skuList?.[0],
+              skuList: detail.skuList,
               logisticsListLen: detail.logisticsList?.length,
-              logisticsSample: detail.logisticsList?.[0],
+              logisticsList: detail.logisticsList,
               logisticsCenterSample: detail.logisticsCenterList?.[0],
               logisticsPackageSample: detail.logisticsPackageList?.[0],
             });
+          } else if (detail) {
+            console.warn('[tbnws] workDetail 조회 실패:', detail.error);
           }
-          if (detail?.success && Array.isArray(detail.skuList) && detail.skuList.length > 0) {
+
+          const skuList = (detail?.success && Array.isArray(detail.skuList))
+            ? detail.skuList : [];
+
+          // 2c) po.xlsx — 다운받은 PO 의 헤더만 쓰고 행은 응답 skuList 로 빌드.
+          //     다운받은 raw PO 는 확정수량=발주수량인 step1 상태라 안 쓰고,
+          //     어드민 결과를 그대로 가진 sku 응답으로 새로 만든다.
+          if (poBuffer && skuList.length > 0) {
             try {
-              const logiMap = buildLogisticsMap(detail.logisticsList);
-              const normalized = detail.skuList.map((row) => normalizeSkuRow(row, logiMap));
-              // 같은 (상품코드, 센터) 그룹의 발주들이 logi 합산값으로 부풀려지는 문제 보정 —
-              // order_quantity 비례로 confirmed/export 재분배 (precise 매칭은 그대로 유지).
-              distributeLooseLogi(normalized, logiMap);
+              const newPo = buildPoFromSkuList(poBuffer, skuList);
+              const resolved = await api.resolveJobPath(
+                remoteJob.date, remoteJob.vendor, remoteJob.sequence, 'po.xlsx',
+              );
+              if (resolved?.success) {
+                const w = await api.writeFile(resolved.path, newPo);
+                if (w?.success) {
+                  poSaved = true;
+                  console.info(`[tbnws] po.xlsx 빌드 완료 (${skuList.length}행)`);
+                } else {
+                  console.warn('[tbnws] po.xlsx 저장 실패:', w?.error);
+                }
+              }
+            } catch (err) {
+              console.warn('[tbnws] po.xlsx 빌드 실패 — raw 그대로 저장', err);
+              const resolved = await api.resolveJobPath(
+                remoteJob.date, remoteJob.vendor, remoteJob.sequence, 'po.xlsx',
+              );
+              if (resolved?.success) {
+                const w = await api.writeFile(resolved.path, poBuffer);
+                if (w?.success) poSaved = true;
+              }
+            }
+          } else if (poBuffer) {
+            // skuList 가 비어있으면 그냥 raw 저장.
+            const resolved = await api.resolveJobPath(
+              remoteJob.date, remoteJob.vendor, remoteJob.sequence, 'po.xlsx',
+            );
+            if (resolved?.success) {
+              const w = await api.writeFile(resolved.path, poBuffer);
+              if (w?.success) poSaved = true;
+            }
+          }
+
+          // 2d) po-tbnws.xlsx 빌드 + write.
+          if (skuList.length > 0) {
+            try {
+              const normalized = skuList.map((row) => normalizeSkuRow(row));
               const aoa = buildAoa(normalized);
               const raw = buildWorkbookBuffer(aoa);
               const ab = raw.buffer
@@ -993,8 +993,6 @@ const manifest = {
             } catch (err) {
               console.warn('[tbnws] po-tbnws 재구성 실패', err);
             }
-          } else if (detail && !detail.success) {
-            console.warn('[tbnws] workDetail 조회 실패:', detail.error);
           }
         }
 

@@ -1386,6 +1386,7 @@ function registerIpcHandlers({
           rowIndex: r.rowIndex,
           coupang_order_seq: String(r.coupang_order_seq ?? ''),
           departure_warehouse: String(r.departure_warehouse ?? ''),
+          sku_id: String(r.sku_id ?? ''),
           order_quantity: orderQty,
           confirmed_qty: r.confirmed_qty === '' || r.confirmed_qty == null
             ? orderQty

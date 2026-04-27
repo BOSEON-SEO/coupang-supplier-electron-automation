@@ -136,12 +136,15 @@ export default function TbnwsStockAdjustView({
     return () => { cancelled = true; };
   }, [date, vendor, sequence]);
 
-  // core groups → rowIndex 조인 맵
+  // core groups → rowIndex 조인 맵.
+  // 키에 sku_id 포함 — 같은 (orderSeq, warehouse) 에 다른 SKU 가 들어있는데
+  // sku_barcode 까지 동일한 데이터(예: 캐논처럼 모든 SKU 가 같은 바코드)에서
+  // 키 충돌로 한 행이 다른 SKU 의 rowIndex 를 가져가던 버그 방지.
   const rowIndexMap = useMemo(() => {
     const map = new Map();
     for (const g of coreGroups || []) {
       for (const r of g.rows || []) {
-        const key = `${r.coupang_order_seq}|${r.departure_warehouse}|${g.sku_barcode}`;
+        const key = `${r.coupang_order_seq}|${r.departure_warehouse}|${r.sku_id || g.sku_id}`;
         map.set(key, r.rowIndex);
       }
     }
@@ -152,7 +155,7 @@ export default function TbnwsStockAdjustView({
     if (!tbnwsRows) return [];
     const byProduct = new Map();
     for (const r of tbnwsRows) {
-      const key = `${r.coupang_order_seq}|${r.departure_warehouse}|${r.sku_barcode}`;
+      const key = `${r.coupang_order_seq}|${r.departure_warehouse}|${r.sku_id}`;
       const rowIndex = rowIndexMap.get(key) ?? null;
       const productCode = r.tobe_product_code || r.sku_id || '(분류없음)';
       const entry = byProduct.get(productCode) || {
@@ -177,15 +180,15 @@ export default function TbnwsStockAdjustView({
     }));
   }, [tbnwsRows, rowIndexMap]);
 
-  // 초기 입력값 — 출고수량 = requested_qty (단, 출고여부 'N' 이면 0 강제).
-  // confirmation 빌더와 동일 규칙 — '불가능' 표시된 행에 데이터상 requested_qty 가
-  // 남아 있어도 화면 default 출고수량은 0 으로 보여 사용자가 토글 안 해도 정합.
+  // 초기 입력값 — 출고수량 = requested_qty (단, 출고불가 행은 0 강제).
+  // po-tbnws 빌더가 출고여부를 'Y'/'N' 이 아니라 '가능'/'불가능' 으로 저장하므로
+  // statusClass 와 동일 룰로 판정.
   const initialConfirmed = useMemo(() => {
     const map = {};
     for (const g of grouped) {
       for (const r of g.rows) {
         if (r.rowIndex == null) continue;
-        const isUnshippable = String(r.export_yn ?? '').trim() === 'N';
+        const isUnshippable = statusClass(r.export_yn) === 'danger';
         map[r.rowIndex] = String(isUnshippable ? 0 : (r.requested_qty ?? 0));
       }
     }
