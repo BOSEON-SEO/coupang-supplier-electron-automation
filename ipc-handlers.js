@@ -2337,12 +2337,16 @@ function registerIpcHandlers({
       // 센터 그룹 경계 추적 + preview 용 rows 축적.
       //
       // 같은 SKU 가 운송분배에서 여러 박스/파렛트로 나뉘면 여러 엑셀 행으로 분할.
-      // 분할 행 규칙 (WMS 와 합의):
-      //   - 식별 키 (물류센터/발주번호/상품코드/SKU Barcode) → 모든 행 유지
-      //   - 신청수량/반출/창고수량 → 첫 분할 행에만 (= SKU 총량, 헤더 행)
-      //   - 확정수량 → 모든 분할 행에 박스별 적재량 (= per-row, 합 = SKU 총량)
-      //   - 운송방법/박스/송장/파렛트 → 행마다 다름
-      //   - 상품명/비고 → 첫 분할 행에만
+      // 분할 행 규칙 (denormalized — 사람이 보기 좋도록 SKU 정보 모든 행에 반복):
+      //   - 센터 단위: 총 주문수량/총 풀필반출 → 센터 첫 행에만
+      //   - SKU 단위: 상품명/신청수량/반출/창고수량/비고 → 모든 분할 행에 반복 (같은 값)
+      //   - 박스 단위: 확정수량(박스 적재량)/운송방법/박스/송장/파렛트 → 행마다 다른 값
+      //   - 식별 키 (물류센터/발주번호/상품코드/SKU Barcode) → 모든 행 반복
+      //
+      // apply 측에서:
+      //   - SKU 단위 컬럼은 그룹의 첫 비어있지 않은 행 값만 사용 (반복돼도 무해)
+      //   - 확정수량은 모든 행 SUM
+      //   - 박스 단위는 행별 transportEntries 에 누적
       const previewRows = [];
       let prevWh = null;
       for (const d of dataRows) {
@@ -2391,22 +2395,22 @@ function registerIpcHandlers({
           const isFirstOfCenter = isFirstSplit && firstRowOfCenter;
 
           const rowValues = [
-            d.wh,                                              // 물류센터 — 모든 행 유지
+            d.wh,                                              // 물류센터 — 모든 행 (식별 키)
             isFirstOfCenter ? totals.totalReq : '',            // 총 주문수량 — 센터 첫 행만
             isFirstOfCenter ? totals.totalExport : '',         // 총 풀필반출 — 센터 첫 행만
-            d.orderSeq,                                        // 발주번호 — 모든 행 유지 (고유 id 매칭)
-            d.code,                                            // 상품코드 — 모든 행 유지
-            d.barcode,                                         // SKU Barcode — 모든 행 유지
-            isFirstSplit ? d.name : '',                        // 상품명 — 첫 분할 행에만
-            isFirstSplit ? d.reqQty : '',                      // 신청수량 — 첫 분할 행만 (SKU 총)
-            isFirstSplit ? exportQty : '',                     // 반출 — 첫 분할 행만 (SKU 총)
-            isFirstSplit ? warehouseQty : '',                  // 창고수량 — 첫 분할 행만
-            te.qty,                                            // 확정수량 — 모든 행 (박스 적재량)
+            d.orderSeq,                                        // 발주번호 — 모든 행 (식별 키)
+            d.code,                                            // 상품코드 — 모든 행 (식별 키)
+            d.barcode,                                         // SKU Barcode — 모든 행 (식별 키)
+            d.name,                                            // 상품명 — 모든 행 (denormalize)
+            d.reqQty,                                          // 신청수량 — 모든 행 (denormalize, SKU 총)
+            exportQty,                                         // 반출 — 모든 행 (denormalize, SKU 총)
+            warehouseQty,                                      // 창고수량 — 모든 행 (denormalize, SKU 총)
+            te.qty,                                            // 확정수량 — 행별 (박스 적재량, SUM = SKU 총)
             saved.transportMethod || te.lotType,               // 운송방법 — 행별
             te.boxNo,                                          // 박스번호 — 행별
             te.invoiceNo,                                      // 송장번호 — 행별
             te.palletNo,                                       // 파렛트번호 — 행별
-            isFirstSplit ? (saved.remark ?? '') : '',          // 비고 — 첫 분할 행만
+            saved.remark ?? '',                                // 비고 — 모든 행 (denormalize)
           ];
           const row = ws.addRow(rowValues);
           row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
