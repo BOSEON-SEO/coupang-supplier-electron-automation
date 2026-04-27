@@ -1,7 +1,84 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Workbook } from '@fortune-sheet/react';
 import '@fortune-sheet/react/dist/index.css';
-import LuckyExcel from 'luckyexcel';
+import * as XLSX from 'xlsx';
+
+// ─────────────────────────────────────────────────────────────────
+// xlsx → fortune-sheet sheets 직접 변환.
+// LuckyExcel 의존 제거 — LuckyExcel 이 ExcelJS 로 쓰인 파일의 일부 셀 값을
+// 못 잡아 빈 셀로 렌더되는 글리치가 있어서 SheetJS 로 직접 파싱.
+// ─────────────────────────────────────────────────────────────────
+const HEADER_STYLE = { bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
+
+function cellTypeFromValue(v, t) {
+  if (t === 'n') return { fa: 'General', t: 'n' };
+  if (t === 'd') return { fa: 'yyyy-mm-dd', t: 'd' };
+  if (t === 'b') return { fa: 'General', t: 'b' };
+  return { fa: 'General', t: 's' };
+}
+
+function buildSheetsFromXlsxBuffer(buffer) {
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: false, cellStyles: false });
+  const sheets = [];
+  wb.SheetNames.forEach((name, idx) => {
+    const ws = wb.Sheets[name];
+    if (!ws) return;
+    const ref = ws['!ref'];
+    if (!ref) {
+      // 빈 시트라도 자리 차지하도록 최소 형태로 등록
+      sheets.push({
+        name, order: idx, data: [[null]], row: 1, column: 1,
+        frozen: { type: 'row' }, config: {},
+      });
+      return;
+    }
+    const range = XLSX.utils.decode_range(ref);
+    const rows = range.e.r + 1;
+    const cols = range.e.c + 1;
+
+    const data = [];
+    for (let r = 0; r <= range.e.r; r += 1) {
+      const row = [];
+      for (let c = 0; c <= range.e.c; c += 1) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (!cell || cell.v == null || cell.v === '') {
+          // 빈 셀 — 헤더 행이면 스타일만 적용된 빈 cell, 아니면 null
+          if (r === 0) {
+            row.push({ ...HEADER_STYLE });
+          } else {
+            row.push(null);
+          }
+          continue;
+        }
+        const cellObj = {
+          v: cell.v,
+          m: cell.w != null ? String(cell.w) : String(cell.v),
+          ct: cellTypeFromValue(cell.v, cell.t),
+        };
+        if (r === 0) Object.assign(cellObj, HEADER_STYLE);
+        row.push(cellObj);
+      }
+      data.push(row);
+    }
+
+    // !cols (열 너비) 가져와 luckysheet config.columnlen 으로 변환
+    const columnlen = {};
+    if (Array.isArray(ws['!cols'])) {
+      ws['!cols'].forEach((c, i) => {
+        if (c?.wch) columnlen[i] = Math.max(60, Math.round(c.wch * 7));
+        else if (c?.wpx) columnlen[i] = c.wpx;
+      });
+    }
+
+    sheets.push({
+      name, order: idx, data, row: rows, column: cols,
+      frozen: { type: 'row' },
+      config: Object.keys(columnlen).length > 0 ? { columnlen } : {},
+    });
+  });
+  return sheets;
+}
 
 /**
  * FortuneSheet 기반 스프레드시트 뷰.
@@ -34,44 +111,20 @@ const SpreadsheetView = forwardRef(function SpreadsheetView(
 
     setError(null);
     try {
-      const file = new File([xlsxBuffer], fileName || 'data.xlsx', {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-
-      LuckyExcel.transformExcelToLucky(file, (exportJson) => {
-        if (exportJson?.sheets?.length) {
-          const prepared = exportJson.sheets.map((s, i) => {
-            const sheet = { ...s, order: i, frozen: { type: 'row' } };
-
-            // 첫 행(헤더) 스타일 주입: 배경색 + 볼드 + 글자색
-            if (sheet.data && Array.isArray(sheet.data) && sheet.data[0]) {
-              sheet.data[0] = sheet.data[0].map((cell) => {
-                if (!cell) return { bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
-                return { ...cell, bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
-              });
-            } else if (sheet.celldata && Array.isArray(sheet.celldata)) {
-              for (const cd of sheet.celldata) {
-                if (cd.r === 0 && cd.v) {
-                  cd.v = { ...cd.v, bg: '#e8eaf6', bl: 1, fc: '#1a237e' };
-                }
-              }
-            }
-
-            return sheet;
-          });
-          setSheets(prepared);
-          setKey((k) => k + 1);
-          // 마운트 직후 1초간 FortuneSheet 가 쏘는 onChange 무시
-          ignoreUntilRef.current = Date.now() + 1000;
-          // 편집 전에도 sheets 참조 가능하도록 부모에 즉시 전달
-          onReady?.(prepared);
-        } else {
-          setError('시트 데이터를 추출할 수 없습니다.');
-        }
-      });
+      const prepared = buildSheetsFromXlsxBuffer(xlsxBuffer);
+      if (!prepared.length) {
+        setError('시트가 없습니다.');
+        return;
+      }
+      setSheets(prepared);
+      setKey((k) => k + 1);
+      // 마운트 직후 1초간 FortuneSheet 가 쏘는 onChange 무시
+      ignoreUntilRef.current = Date.now() + 1000;
+      onReady?.(prepared);
     } catch (err) {
       setError(`xlsx 파싱 실패: ${err.message}`);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [xlsxBuffer, fileName, parseTrigger]);
 
   const handleChange = useCallback(
