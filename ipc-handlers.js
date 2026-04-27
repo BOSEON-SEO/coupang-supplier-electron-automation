@@ -2390,27 +2390,14 @@ function registerIpcHandlers({
         const warehouseQty = saved.warehouseQty ?? Math.max(0, d.reqQty - exportQty);
         const firstRowOfCenter = prevWh !== d.wh;
 
-        // 박스별 비례 분배 — 반출/창고수량을 박스 적재량(te.qty) 비율로 나눔.
-        // 합 = SKU 총 (Math.floor 잔량은 마지막 박스에 몰기).
-        const totalBoxQty = transportEntries.reduce((s, t) => s + (Number(t.qty) || 0), 0);
-        const allocations = transportEntries.map(() => ({ exportQty: 0, warehouseQty: 0 }));
-        if (totalBoxQty > 0) {
-          let allocE = 0; let allocW = 0;
-          for (let i = 0; i < transportEntries.length; i += 1) {
-            const isLast = i === transportEntries.length - 1;
-            const ratio = (Number(transportEntries[i].qty) || 0) / totalBoxQty;
-            const e = isLast ? (exportQty - allocE) : Math.floor(exportQty * ratio);
-            const w = isLast ? (warehouseQty - allocW) : Math.floor(warehouseQty * ratio);
-            allocations[i].exportQty = e;
-            allocations[i].warehouseQty = w;
-            allocE += e; allocW += w;
-          }
-        }
-
+        // 분할 행 표기 — 보기 편한 빈 셀 스타일.
+        //   식별 키 (센터/발주/상품코드/바코드): 모든 행 반복 (apply 매칭용)
+        //   SKU 단위 (상품명/신청/반출/창고/비고): 첫 분할 행에만, 나머지 빈 셀
+        //   박스 단위 (확정/운송/박스/송장/파렛트): 행마다 다른 값
+        // apply 는 SUM 으로 처리하므로 빈 셀(=0) + 첫행 값 = SKU 총 자동 보존.
         transportEntries.forEach((te, idx) => {
           const isFirstSplit = idx === 0;
           const isFirstOfCenter = isFirstSplit && firstRowOfCenter;
-          const alloc = allocations[idx];
 
           const rowValues = [
             d.wh,                                              // 물류센터 — 모든 행 (식별 키)
@@ -2419,16 +2406,16 @@ function registerIpcHandlers({
             d.orderSeq,                                        // 발주번호 — 모든 행 (식별 키)
             d.code,                                            // 상품코드 — 모든 행 (식별 키)
             d.barcode,                                         // SKU Barcode — 모든 행 (식별 키)
-            d.name,                                            // 상품명 — 모든 행 (denormalize)
-            d.reqQty,                                          // 신청수량 — 모든 행 (denormalize, SKU 총)
-            alloc.exportQty,                                   // 반출 — 박스별 비례 분배 (SUM = SKU 총)
-            alloc.warehouseQty,                                // 창고수량 — 박스별 비례 분배
+            isFirstSplit ? d.name : '',                        // 상품명 — 첫 분할 행만
+            isFirstSplit ? d.reqQty : '',                      // 신청수량 — 첫 분할 행만
+            isFirstSplit ? exportQty : '',                     // 반출 — 첫 분할 행만 (SKU 총)
+            isFirstSplit ? warehouseQty : '',                  // 창고수량 — 첫 분할 행만
             te.qty,                                            // 확정수량 — 행별 (박스 적재량)
             saved.transportMethod || te.lotType,               // 운송방법 — 행별
             te.boxNo,                                          // 박스번호 — 행별
             te.invoiceNo,                                      // 송장번호 — 행별
             te.palletNo,                                       // 파렛트번호 — 행별
-            saved.remark ?? '',                                // 비고 — 모든 행 (denormalize)
+            isFirstSplit ? (saved.remark ?? '') : '',          // 비고 — 첫 분할 행만
           ];
           const row = ws.addRow(rowValues);
           row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
@@ -2535,23 +2522,18 @@ function registerIpcHandlers({
 
       // 업로드 데이터 파싱 + 분할 행 그룹핑.
       //
-      // 분할 행 규칙 (다운로드와 동일, WMS 와 합의):
+      // 분할 행 규칙 (robust — 사용자가 행 복사해도 안전):
       //   - 식별 키: 물류센터 + 발주번호 + 상품코드 + SKU Barcode (= warehouseComposite)
-      //   - 신청수량 (denormalize): 모든 분할 행에 SKU 총 — 첫 비어있지 않은 행 값만 사용
-      //   - 반출수량 (per-box): 박스별 비례 분배 → 모든 행 SUM = SKU 총
-      //   - 창고수량 (per-box): 박스별 비례 분배 → 모든 행 SUM = SKU 총
-      //   - 확정수량 (per-box): 박스별 적재량 → 모든 행 SUM = SKU 총
-      //   - 운송방법 / 박스번호 / 송장번호 / 파렛트번호: 행별
-      //   - 비고: denormalize → 첫 비어있지 않은 행 값
+      //   - SKU-level 컬럼 (신청/반출/창고/상품명/비고): 첫 비어있지 않은 행 값만 사용 (first-wins)
+      //       → 빈 셀이든 모든 행에 같은 값 복사든 같은 결과. 행 복사 안전.
+      //   - 박스-level 컬럼 (확정/박스/송장/파렛트/운송방법): 행별 처리, 확정수량은 SUM
+      //       → 박스별로 다른 값을 채워야 한다는 룰만 사용자가 지키면 OK.
       //
       // 결과 구조:
       //   uploads[composite] = {
       //     ...lookup, wh,
-      //     reqQty,        // SKU 총 신청 (denormalize, 첫 행 값)
-      //     exportQty,     // SKU 총 반출 (모든 행 SUM)
-      //     warehouseQty,  // SKU 총 창고 (모든 행 SUM)
-      //     remark,
-      //     confirmedSum,  // SKU 총 확정 (모든 박스 qty SUM)
+      //     reqQty / exportQty / warehouseQty / remark  // SKU 총 (first-wins)
+      //     confirmedSum,                                // 박스별 적재 SUM (= SKU 총)
       //     transportEntries: [{ transportMethod, boxNo, invoiceNo, palletNo, qty }, ...]
       //   }
       const readNum = (v) => {
@@ -2575,33 +2557,32 @@ function registerIpcHandlers({
           uploadsByComposite.set(composite, {
             ...lookup,
             wh,
-            reqQty: null,           // denormalize → 첫 비어있지 않은 값
-            exportQty: 0,           // 모든 행 SUM
-            warehouseQty: 0,        // 모든 행 SUM
-            remark: '',             // denormalize → 첫 비어있지 않은 값
-            confirmedSum: 0,        // 모든 행 SUM
+            reqQty: null,           // SKU-level → first-wins
+            exportQty: null,        // SKU-level → first-wins
+            warehouseQty: null,     // SKU-level → first-wins
+            remark: '',             // SKU-level → first-wins
+            confirmedSum: 0,        // 박스-level → SUM
             transportEntries: [],
           });
         }
         const g = uploadsByComposite.get(composite);
 
-        // 신청수량 (denormalize): 첫 비어있지 않은 행 값만 사용
+        // SKU-level 컬럼들 — first-wins (빈 셀이든 복사된 같은 값이든 안전)
         const reqRaw = iReq != null ? readNum(row[iReq]) : null;
         if (g.reqQty == null && reqRaw != null) g.reqQty = reqRaw;
 
-        // 비고 (denormalize): 첫 비어있지 않은 값
+        const expRaw = iExport != null ? readNum(row[iExport]) : null;
+        if (g.exportQty == null && expRaw != null) g.exportQty = expRaw;
+
+        const whRaw = iWhQty != null ? readNum(row[iWhQty]) : null;
+        if (g.warehouseQty == null && whRaw != null) g.warehouseQty = whRaw;
+
         if (!g.remark && iRemark != null) {
           const rr = String(row[iRemark] ?? '').trim();
           if (rr) g.remark = rr;
         }
 
-        // 반출/창고수량: 박스별 비례 분배 → 모든 행 SUM
-        const expRaw = iExport != null ? readNum(row[iExport]) : null;
-        if (expRaw != null) g.exportQty += expRaw;
-        const whRaw = iWhQty != null ? readNum(row[iWhQty]) : null;
-        if (whRaw != null) g.warehouseQty += whRaw;
-
-        // 확정수량 (박스 적재량): 모든 행 SUM
+        // 확정수량 (박스 적재량) — 모든 행 SUM
         const boxQty = iConfirmed != null ? (readNum(row[iConfirmed]) ?? 0) : 0;
         g.confirmedSum += boxQty;
 
@@ -2618,9 +2599,11 @@ function registerIpcHandlers({
           });
         }
       }
-      // 신청수량 비어있는 그룹 → confirmedSum 으로 폴백.
+      // 빈 그룹 fallback
       for (const g of uploadsByComposite.values()) {
         if (g.reqQty == null) g.reqQty = g.confirmedSum || 0;
+        if (g.exportQty == null) g.exportQty = 0;
+        if (g.warehouseQty == null) g.warehouseQty = 0;
       }
       const uploads = Array.from(uploadsByComposite.values());
 
