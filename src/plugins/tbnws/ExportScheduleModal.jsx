@@ -45,12 +45,22 @@ export default function ExportScheduleModal({ job, onClose }) {
 
         const warehouseIndex = buildWarehouseIndex(settings.coupangWarehouses);
 
-        // 기본 제목 · 출고일 — RelocationModal 과 동일 규칙: `MMDD {쿠팡|캐논} n차`
+        // 기본 제목 · 출고일 — `MMDD {벤더이름} n차`
+        // 벤더 이름은 vendors.json 의 name 필드 (사용자가 설정한 표시명) 우선 사용.
+        // 없으면 하드코딩 매핑 (쿠팡/캐논) → 그래도 없으면 vendor id 그대로.
         const ymd = String(job.date || '').replace(/-/g, '');
         const mmdd = ymd.slice(4, 8);
-        const vendorLabel = VENDOR_LABEL[String(job.vendor || '').toLowerCase()]
-                         || job.vendor
-                         || '';
+        let vendorLabel = '';
+        try {
+          const vRes = await api.loadVendors();
+          const meta = (vRes?.vendors || []).find((v) => v.id === job.vendor);
+          if (meta?.name) vendorLabel = String(meta.name).trim();
+        } catch { /* 무시 */ }
+        if (!vendorLabel) {
+          vendorLabel = VENDOR_LABEL[String(job.vendor || '').toLowerCase()]
+                     || job.vendor
+                     || '';
+        }
         if (!cancelled) {
           setTitle(`${mmdd} ${vendorLabel} ${job.sequence || 1}차`);
           setExportDate(job.date || '');

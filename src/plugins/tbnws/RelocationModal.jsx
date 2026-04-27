@@ -55,12 +55,24 @@ export default function RelocationModal({ job, onClose }) {
           setToTag(dfTo);
         }
 
-        // title 자동: `{MMDD} {쿠팡|캐논} {round}차`
+        // title 자동: `{MMDD} {벤더이름} {round}차`
+        // 벤더 이름은 vendors.json 의 name 필드 우선, 없으면 하드코딩, 그래도 없으면 id.
         const ymd = String(job.date || '').replace(/-/g, '');
         const mmdd = ymd.slice(4, 8);
-        const vendorLabel = VENDOR_LABEL[String(job.vendor || '').toLowerCase()]
-                         || job.vendor
-                         || '';
+        let vendorLabel = '';
+        try {
+          const api2 = window.electronAPI;
+          if (api2?.loadVendors) {
+            const vRes = await api2.loadVendors();
+            const meta = (vRes?.vendors || []).find((v) => v.id === job.vendor);
+            if (meta?.name) vendorLabel = String(meta.name).trim();
+          }
+        } catch { /* 무시 */ }
+        if (!vendorLabel) {
+          vendorLabel = VENDOR_LABEL[String(job.vendor || '').toLowerCase()]
+                     || job.vendor
+                     || '';
+        }
         if (!cancelled) {
           setTitle(`${mmdd} ${vendorLabel} ${job.sequence || 1}차`);
           setDescription('');
