@@ -127,9 +127,19 @@ export default function TbnwsCoupangExportModal({ job, onClose }) {
         setStatus('');
         return;
       }
-      setStatus(
-        `반영 완료 — 확정수량 ${res.confirmedPatched}행 · 반출 ${res.fulfillPatched}행 · 운송 ${res.transportPatched}행`,
-      );
+      const baseMsg = `반영 완료 — 확정수량 ${res.confirmedPatched}행 · 반출 ${res.fulfillPatched}행 · 운송 ${res.transportPatched}행`;
+      if (res.mismatchCount > 0) {
+        const samples = (res.mismatchSamples || []).join('\n  ');
+        const more = res.mismatchCount > (res.mismatchSamples?.length || 0)
+          ? `\n  … 외 ${res.mismatchCount - (res.mismatchSamples?.length || 0)}건` : '';
+        alert(
+          `⚠ 수량 불일치 ${res.mismatchCount}개 SKU\n\n  ${samples}${more}\n\n` +
+          '신청수량 ≠ 박스 합계 인 행이 있습니다. 반영은 진행됐지만 데이터 확인 권장.',
+        );
+        setStatus(`${baseMsg} · ⚠ 수량 불일치 ${res.mismatchCount}건`);
+      } else {
+        setStatus(baseMsg);
+      }
       // 스냅샷 + 미리보기 새로고침
       try {
         const resolved = await api.resolveJobPath(

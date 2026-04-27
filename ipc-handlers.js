@@ -2334,63 +2334,87 @@ function registerIpcHandlers({
       ws.getColumn(7).width = 50;
       for (let c = 8; c <= 16; c += 1) ws.getColumn(c).width = 10;
 
-      // 센터 그룹 경계 추적 + preview 용 rows 축적
+      // 센터 그룹 경계 추적 + preview 용 rows 축적.
+      //
+      // 같은 SKU 가 운송분배에서 여러 박스/파렛트로 나뉘면 여러 엑셀 행으로 분할.
+      // 분할 행 규칙 (WMS 와 합의):
+      //   - 식별 키 (물류센터/발주번호/상품코드/SKU Barcode) → 모든 행 유지
+      //   - 신청수량/반출/창고수량 → 첫 분할 행에만 (= SKU 총량, 헤더 행)
+      //   - 확정수량 → 모든 분할 행에 박스별 적재량 (= per-row, 합 = SKU 총량)
+      //   - 운송방법/박스/송장/파렛트 → 행마다 다름
+      //   - 상품명/비고 → 첫 분할 행에만
       const previewRows = [];
       let prevWh = null;
       for (const d of dataRows) {
         const saved = savedRows[d.rowKey] || {};
         const centerAsn = assignments[d.wh] || {};
-        // 운송방법: confirmation 입고유형 우선, 없으면 transport.json SKU/센터 설정 순.
-        const transportMethod = saved.transportMethod
-                             ?? d.transportType
-                             ?? centerAsn?.skuTransportType?.[d.rowKey]
-                             ?? centerAsn?.transportType
-                             ?? '';
-        // 박스/파렛트/송장 — 고유 id (센터+발주+바코드) 로 운송분배에서 찾음. 첫 값만.
-        const firstBox = (centerAsn?.skuBoxes?.[d.rowKey] || [])[0];
-        const firstPallet = (centerAsn?.skuPallets?.[d.rowKey] || [])[0];
-        const boxNo = saved.boxNo ?? firstBox?.boxNo ?? '';
-        const palletNo = saved.palletNo ?? firstPallet?.palletNo ?? '';
-        const invoiceNo = saved.invoiceNo
-          ?? (boxNo && Array.isArray(centerAsn?.boxInvoices)
-                ? (centerAsn.boxInvoices[Number(boxNo) - 1] || '')
-                : '');
 
-        const isFirstOfCenter = prevWh !== d.wh;
+        // transport.json lots 에서 이 SKU(rowKey) 의 모든 배정 수집.
+        // 각 entry = { lotType, boxNo, palletNo, invoiceNo, qty }
+        // qty 는 박스별 적재량 — 확정수량 컬럼에 들어가는 값.
+        const transportEntries = [];
+        for (const lot of (centerAsn.lots || [])) {
+          for (const it of (lot.items || [])) {
+            if (it.rowKey !== d.rowKey) continue;
+            const entry = {
+              lotType: lot.type,
+              boxNo: '', palletNo: '', invoiceNo: '',
+              qty: Number(it.qty) || 0,
+            };
+            if (lot.type === '쉽먼트') {
+              entry.boxNo = String(it.boxNo || '');
+              if (entry.boxNo && Array.isArray(lot.boxInvoices)) {
+                entry.invoiceNo = lot.boxInvoices[Number(entry.boxNo) - 1] || '';
+              }
+            } else if (lot.type === '밀크런') {
+              entry.palletNo = String(it.palletNo || '');
+            }
+            transportEntries.push(entry);
+          }
+        }
+        // 운송분배 기록이 없으면 SKU 총량 1행 (분할 X). 박스/파렛트 비움.
+        if (transportEntries.length === 0) {
+          transportEntries.push({
+            lotType: d.transportType || '',
+            boxNo: '', palletNo: '', invoiceNo: '',
+            qty: d.reqQty,  // 분할 안 됐으니 SKU 총량 그대로
+          });
+        }
+
         const totals = totalsByWh.get(d.wh) || {};
         const exportQty = saved.fulfillExportQty ?? exportQtyByKey.get(d.warehouseComposite) ?? 0;
-        // 창고수량 = 신청수량 - 반출 (창고에서 실제 나와야 할 양)
         const warehouseQty = saved.warehouseQty ?? Math.max(0, d.reqQty - exportQty);
-        // 확정수량 기본 = 신청수량 (창고가 실측 후 편집)
-        const confirmedQty = saved.confirmedQty ?? d.reqQty;
+        const firstRowOfCenter = prevWh !== d.wh;
 
-        const rowValues = [
-          d.wh,
-          isFirstOfCenter ? totals.totalReq : '',
-          isFirstOfCenter ? totals.totalExport : '',
-          d.orderSeq,     // 발주번호 — 고유 id 매칭에 필요 (이전엔 빈 값이었음)
-          d.code,
-          d.barcode,
-          d.name,
-          d.reqQty,       // 신청수량 = confirmation 확정수량
-          exportQty,      // 반출 = po-tbnws 반출수량
-          warehouseQty,   // 창고수량 = 신청수량 - 반출
-          confirmedQty,   // 확정수량 = 신청수량 (기본)
-          transportMethod,
-          boxNo,
-          invoiceNo,
-          palletNo,
-          saved.remark ?? '',
-        ];
-        const row = ws.addRow(rowValues);
-        row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
-        // SKU Barcode 열은 숫자 보존 (numFmt "0")
-        row.getCell(6).numFmt = '0';
+        transportEntries.forEach((te, idx) => {
+          const isFirstSplit = idx === 0;
+          const isFirstOfCenter = isFirstSplit && firstRowOfCenter;
 
-        previewRows.push({
-          values: rowValues,
-          isFirstOfCenter,
+          const rowValues = [
+            d.wh,                                              // 물류센터 — 모든 행 유지
+            isFirstOfCenter ? totals.totalReq : '',            // 총 주문수량 — 센터 첫 행만
+            isFirstOfCenter ? totals.totalExport : '',         // 총 풀필반출 — 센터 첫 행만
+            d.orderSeq,                                        // 발주번호 — 모든 행 유지 (고유 id 매칭)
+            d.code,                                            // 상품코드 — 모든 행 유지
+            d.barcode,                                         // SKU Barcode — 모든 행 유지
+            isFirstSplit ? d.name : '',                        // 상품명 — 첫 분할 행에만
+            isFirstSplit ? d.reqQty : '',                      // 신청수량 — 첫 분할 행만 (SKU 총)
+            isFirstSplit ? exportQty : '',                     // 반출 — 첫 분할 행만 (SKU 총)
+            isFirstSplit ? warehouseQty : '',                  // 창고수량 — 첫 분할 행만
+            te.qty,                                            // 확정수량 — 모든 행 (박스 적재량)
+            saved.transportMethod || te.lotType,               // 운송방법 — 행별
+            te.boxNo,                                          // 박스번호 — 행별
+            te.invoiceNo,                                      // 송장번호 — 행별
+            te.palletNo,                                       // 파렛트번호 — 행별
+            isFirstSplit ? (saved.remark ?? '') : '',          // 비고 — 첫 분할 행만
+          ];
+          const row = ws.addRow(rowValues);
+          row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
+          row.getCell(6).numFmt = '0';
+
+          previewRows.push({ values: rowValues, isFirstOfCenter });
         });
+
         prevWh = d.wh;
       }
 
@@ -2399,7 +2423,8 @@ function registerIpcHandlers({
       return {
         success: true,
         path: outPath,
-        rowCount: dataRows.length,
+        rowCount: previewRows.length, // 분할된 실제 엑셀 행수
+        skuCount: dataRows.length,    // 중복 없는 SKU 수
         headers: HEADER,
         rows: previewRows,
       };
@@ -2486,8 +2511,34 @@ function registerIpcHandlers({
         });
       }
 
-      // 업로드 데이터 파싱
-      const uploads = [];
+      // 업로드 데이터 파싱 + 분할 행 그룹핑.
+      //
+      // 분할 행 규칙 (다운로드와 동일, WMS 와 합의):
+      //   - 식별 키: 물류센터 + 발주번호 + 상품코드 + SKU Barcode (= warehouseComposite)
+      //   - 헤더 행 (= 신청수량 비어있지 않은 첫 행):
+      //       신청수량 (SKU 총) / 반출 (SKU 총) / 창고수량 (SKU 총) / 비고
+      //   - 모든 분할 행:
+      //       확정수량 (= 그 박스/파렛트 적재량, per-row)
+      //       운송방법 / 박스번호 / 송장번호 / 파렛트번호
+      //   - 검증: SUM(분할 행 확정수량) ?= 헤더 행 신청수량 (불일치 시 경고만)
+      //
+      // 결과 구조:
+      //   uploads[composite] = {
+      //     ...lookup, wh,
+      //     reqQty,        // SKU 총 신청 (헤더 행, PO 단계 확정수량으로 cross-sync)
+      //     exportQty,     // SKU 총 반출 (헤더 행, po-tbnws 반출수량 patch)
+      //     warehouseQty,  // SKU 총 창고 (헤더 행, 스냅샷에만 보관)
+      //     remark,        // 헤더 행 비고
+      //     confirmedSum,  // SUM(분할 행 확정수량) — 검증용
+      //     transportEntries: [{ transportMethod, boxNo, invoiceNo, palletNo, qty }, ...]
+      //   }
+      const readNum = (v) => {
+        const s = String(v ?? '').trim();
+        if (s === '') return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? n : null;
+      };
+      const uploadsByComposite = new Map();
       for (let r = 1; r < aoa.length; r += 1) {
         const row = aoa[r] || [];
         const wh = String(row[iWh] ?? '').trim();
@@ -2496,19 +2547,71 @@ function registerIpcHandlers({
         if (!wh || !bc) continue;
         const lookup = rowKeyByLookup.get(`${wh}|${code}|${bc}`);
         if (!lookup) continue;
-        uploads.push({
-          ...lookup,
-          wh,
-          reqQty: Number(row[iReq]) || 0,
-          exportQty: iExport != null ? Number(row[iExport]) || 0 : 0,
-          warehouseQty: iWhQty != null ? Number(row[iWhQty]) || 0 : 0,
-          confirmedQty: Number(row[iConfirmed]) || 0,
-          transportMethod: iMethod != null ? String(row[iMethod] ?? '').trim() : '',
-          boxNo: iBox != null ? String(row[iBox] ?? '').trim() : '',
-          invoiceNo: iInvoice != null ? String(row[iInvoice] ?? '').trim() : '',
-          palletNo: iPallet != null ? String(row[iPallet] ?? '').trim() : '',
-          remark: iRemark != null ? String(row[iRemark] ?? '').trim() : '',
-        });
+
+        const composite = lookup.warehouseComposite;
+        if (!uploadsByComposite.has(composite)) {
+          uploadsByComposite.set(composite, {
+            ...lookup,
+            wh,
+            reqQty: null,
+            exportQty: null,
+            warehouseQty: null,
+            remark: '',
+            confirmedSum: 0,
+            transportEntries: [],
+          });
+        }
+        const g = uploadsByComposite.get(composite);
+
+        // 헤더 행 식별: 신청수량이 비어있지 않은 첫 행.
+        const reqRaw = iReq != null ? readNum(row[iReq]) : null;
+        const isHeaderRow = g.reqQty == null && reqRaw != null;
+        if (isHeaderRow) {
+          g.reqQty = reqRaw;
+          g.exportQty = iExport != null ? (readNum(row[iExport]) ?? 0) : 0;
+          g.warehouseQty = iWhQty != null ? (readNum(row[iWhQty]) ?? 0) : 0;
+          g.remark = iRemark != null ? String(row[iRemark] ?? '').trim() : '';
+        }
+
+        // 박스 적재량 (확정수량): 모든 분할 행에서 누적.
+        const boxQty = iConfirmed != null ? (readNum(row[iConfirmed]) ?? 0) : 0;
+        g.confirmedSum += boxQty;
+
+        // 운송 엔트리: 박스/파렛트/운송방법 중 하나라도 채워져 있거나 boxQty > 0 이면 추가.
+        const tm = iMethod != null ? String(row[iMethod] ?? '').trim() : '';
+        const boxNo = iBox != null ? String(row[iBox] ?? '').trim() : '';
+        const palletNo = iPallet != null ? String(row[iPallet] ?? '').trim() : '';
+        const invoiceNo = iInvoice != null ? String(row[iInvoice] ?? '').trim() : '';
+        if (tm || boxNo || palletNo || invoiceNo || boxQty > 0) {
+          g.transportEntries.push({
+            transportMethod: tm,
+            boxNo, invoiceNo, palletNo,
+            qty: boxQty,
+          });
+        }
+      }
+      // 헤더 행 없던 그룹 (= 신청수량 비어있는 케이스) 은 confirmedSum 으로 폴백.
+      for (const g of uploadsByComposite.values()) {
+        if (g.reqQty == null) {
+          g.reqQty = g.confirmedSum || 0;
+          g.exportQty = 0;
+          g.warehouseQty = 0;
+        }
+      }
+      const uploads = Array.from(uploadsByComposite.values());
+
+      // 검증: SUM(분할 확정) ?= 신청수량. 불일치 시 경고 로그만 (반영은 진행).
+      const mismatchWarnings = [];
+      for (const u of uploads) {
+        if (u.confirmedSum > 0 && u.reqQty > 0 && u.confirmedSum !== u.reqQty) {
+          mismatchWarnings.push(
+            `${u.wh} ${u.orderSeq} ${u.warehouseComposite.split('|')[2]}: 신청 ${u.reqQty} ≠ 박스 합 ${u.confirmedSum}`,
+          );
+        }
+      }
+      if (mismatchWarnings.length > 0) {
+        console.warn('[tbnwsCoupangExport:apply] 수량 불일치 SKU:', mismatchWarnings.length);
+        for (const w of mismatchWarnings.slice(0, 5)) console.warn('  -', w);
       }
 
       // ── 1. 확정수량 cross-sync (+ 부족사유 refresh) ──
@@ -2543,12 +2646,14 @@ function registerIpcHandlers({
       const defaultReason = loadDefaultShortageReason(vendor);
       const confirmedPatches = uploads.map((u) => {
         const orderQty = orderQtyByComposite.get(u.warehouseComposite) || 0;
-        const shortage = orderQty > 0 && u.confirmedQty < orderQty
+        // PO 단계 확정수량 = SKU 총 신청수량 (헤더 행)
+        // 부족사유: 신청수량 < 발주수량 일 때 자동 기재
+        const shortage = orderQty > 0 && u.reqQty < orderQty
           ? defaultReason
           : '';
         return {
           key: u.warehouseComposite,
-          confirmedQty: String(u.confirmedQty),
+          confirmedQty: String(u.reqQty),
           shortageReason: shortage,
         };
       });
@@ -2576,9 +2681,8 @@ function registerIpcHandlers({
       }
 
       // ── 3. transport.json 업데이트 — v4(lots) 구조로 ──
-      //   각 wh 의 assignment 는 최대 2개 lot 까지 유지 (쉽먼트 lot #1 + 밀크런 lot #1).
-      //   업로드 행을 해당 타입의 lot 에 배정. 기존 rowKey 가 다른 lot 에 있으면 제거.
-      //   한 SKU 는 한 lot 에만 들어가는 것으로 가정 (Phase 1 제약).
+      //   각 transportEntry 의 qty 는 엑셀에서 받은 박스별 적재량 (= 확정수량 컬럼).
+      //   균등 분배 X — WMS 가 적은 그대로 사용.
       let transport = {};
       const transportPath = path.join(dir, 'transport.json');
       if (fs.existsSync(transportPath)) {
@@ -2598,7 +2702,7 @@ function registerIpcHandlers({
         a.lots = Array.isArray(a.lots) ? a.lots : [];
         a.skuNotes = a.skuNotes || {};
 
-        // 이전 rowKey 배정을 모든 lot 에서 제거
+        // 이전 rowKey 배정을 모든 lot 에서 제거 — 새 엔트리로 덮어씀
         for (const lot of a.lots) {
           lot.items = (lot.items || []).filter((it) => it.rowKey !== u.rowKey);
         }
@@ -2606,55 +2710,60 @@ function registerIpcHandlers({
         if (u.remark) a.skuNotes[u.rowKey] = u.remark;
         else delete a.skuNotes[u.rowKey];
 
-        const isShipment = u.transportMethod === '쉽먼트';
-        const isMilkrun = u.transportMethod === '밀크런';
-        if (!isShipment && !isMilkrun) {
-          transportPatched += 1;
-          continue;
-        }
+        // transportEntries 없으면 skip (운송분배 미지정)
+        if (!u.transportEntries.length) continue;
 
-        // 해당 타입의 첫 lot 찾거나 생성
-        let lot = a.lots.find((l) => l.type === u.transportMethod);
-        if (!lot) {
-          if (isShipment) {
-            lot = {
-              id: makeLotId(), type: '쉽먼트',
-              boxCount: 0, boxInvoices: [],
-              items: [],
-            };
-          } else {
-            lot = {
-              id: makeLotId(), type: '밀크런',
-              originId: '', totalBoxes: '',
-              pallets: [{ presetName: '', boxCount: '' }],
-              items: [],
-            };
+        for (const te of u.transportEntries) {
+          const isShipment = te.transportMethod === '쉽먼트';
+          const isMilkrun = te.transportMethod === '밀크런';
+          if (!isShipment && !isMilkrun) continue;
+
+          // 해당 타입 lot 찾거나 생성
+          let lot = a.lots.find((l) => l.type === te.transportMethod);
+          if (!lot) {
+            if (isShipment) {
+              lot = {
+                id: makeLotId(), type: '쉽먼트',
+                boxCount: 0, boxInvoices: [],
+                items: [],
+              };
+            } else {
+              lot = {
+                id: makeLotId(), type: '밀크런',
+                originId: '', totalBoxes: '',
+                pallets: [{ presetName: '', boxCount: '' }],
+                items: [],
+              };
+            }
+            a.lots.push(lot);
           }
-          a.lots.push(lot);
-        }
 
-        if (isShipment) {
-          lot.items.push({
-            rowKey: u.rowKey,
-            qty: u.confirmedQty,
-            boxNo: u.boxNo || '',
-          });
-          if (u.boxNo) {
-            lot.boxCount = Math.max(Number(lot.boxCount) || 0, Number(u.boxNo) || 0);
-            if (u.invoiceNo) {
-              const idx = Number(u.boxNo) - 1;
-              if (Number.isInteger(idx) && idx >= 0) {
-                while (lot.boxInvoices.length <= idx) lot.boxInvoices.push('');
-                lot.boxInvoices[idx] = u.invoiceNo;
+          // qty = 박스별 적재량 (te.qty, 엑셀의 확정수량 컬럼)
+          const itemQty = Number(te.qty) || 0;
+
+          if (isShipment) {
+            lot.items.push({
+              rowKey: u.rowKey,
+              qty: itemQty,
+              boxNo: te.boxNo || '',
+            });
+            if (te.boxNo) {
+              lot.boxCount = Math.max(Number(lot.boxCount) || 0, Number(te.boxNo) || 0);
+              if (te.invoiceNo) {
+                const idx = Number(te.boxNo) - 1;
+                if (Number.isInteger(idx) && idx >= 0) {
+                  while (lot.boxInvoices.length <= idx) lot.boxInvoices.push('');
+                  lot.boxInvoices[idx] = te.invoiceNo;
+                }
               }
             }
+          } else {
+            lot.items.push({
+              rowKey: u.rowKey,
+              qty: itemQty,
+              palletNo: te.palletNo || '',
+            });
           }
-        } else {
-          lot.items.push({
-            rowKey: u.rowKey,
-            qty: u.confirmedQty,
-            palletNo: u.palletNo || '',
-          });
         }
         transportPatched += 1;
       }
@@ -2671,21 +2780,26 @@ function registerIpcHandlers({
         assignments,
       }, null, 2), 'utf-8');
 
-      // ── 4. 스냅샷 저장 — 창고수량 포함 모든 입력 필드 보관 ──
+      // ── 4. 스냅샷 저장 — generate 의 다음 호출에서 사용자 입력 보존용 ──
+      // 의미상 confirmedQty = SKU 총 확정 = 신청수량 (u.reqQty).
+      // 박스별 적재량은 transportEntries 에 보관.
       const snapshot = {
-        schemaVersion: 1,
+        schemaVersion: 3,
         updatedAt: new Date().toISOString(),
         rows: {},
       };
       for (const u of uploads) {
+        const firstEntry = u.transportEntries[0] || {};
         snapshot.rows[u.rowKey] = {
           warehouseQty: u.warehouseQty,
-          confirmedQty: u.confirmedQty,
+          confirmedQty: u.reqQty,           // SKU 총 (= 신청수량)
+          confirmedBoxSum: u.confirmedSum,  // 박스 합 (검증용)
           fulfillExportQty: u.exportQty,
-          transportMethod: u.transportMethod,
-          boxNo: u.boxNo,
-          invoiceNo: u.invoiceNo,
-          palletNo: u.palletNo,
+          transportMethod: firstEntry.transportMethod || '',
+          boxNo: firstEntry.boxNo || '',
+          invoiceNo: firstEntry.invoiceNo || '',
+          palletNo: firstEntry.palletNo || '',
+          transportEntries: u.transportEntries,  // 박스별 분할 (qty 포함)
           remark: u.remark,
         };
       }
@@ -2701,6 +2815,8 @@ function registerIpcHandlers({
         confirmedPatched,
         fulfillPatched,
         transportPatched,
+        mismatchCount: mismatchWarnings.length,
+        mismatchSamples: mismatchWarnings.slice(0, 5),
       };
     } catch (err) {
       console.error('[tbnwsCoupangExport:apply]', err);
