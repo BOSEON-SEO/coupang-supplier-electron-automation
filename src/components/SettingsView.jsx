@@ -82,11 +82,11 @@ const FIELDS = [
   { section: '운송 분배 기본값', key: 'palletPreset',           label: '팔레트 프리셋',     type: 'list-select',
     listKey: 'palletPresetList', modalTitle: '팔레트 프리셋 관리',
     listFields: [
-      { key: 'name',     label: '팔레트명', required: true, placeholder: '예: 아주팔레트 대' },
+      { key: 'name',     label: '팔레트명', required: true, placeholder: '한국팔레트 대' },
       { key: 'width',    label: '가로(cm)', required: true, placeholder: '1100' },
       { key: 'height',   label: '세로(cm)', required: true, placeholder: '1100' },
       { key: 'depth',    label: '높이(cm)', required: true, placeholder: '1500' },
-      { key: 'rentalId', label: '렌탈사', placeholder: '예: 아주팔레트' },
+      { key: 'rentalId', label: '렌탈사', placeholder: '한국팔레트' },
     ],
     idField: 'name',
     primaryField: 'name',

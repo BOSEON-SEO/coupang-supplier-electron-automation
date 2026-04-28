@@ -5,9 +5,13 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "predev": "node scripts/prepare-flavor.js tbnws",
     "dev": "concurrently -k -n webpack,electron -c blue,magenta \"npx webpack serve --mode development\" \"wait-on tcp:3100 && electron .\"",
     "build:renderer": "npx webpack --mode production",
-    "build": "npm run build:renderer && electron-builder",
+    "prebuild:notes": "node scripts/prepare-release-notes.js",
+    "build": "node scripts/build.js tbnws",
+    "build:basic": "node scripts/build.js basic",
+    "build:tbnws": "node scripts/build.js tbnws",
     "test:ui": "node run-ui-test.js",
     "test:lib": "node test-excel-lib.js",
     "test:python": "node test-python-bridge.js",
@@ -20,7 +24,6 @@
     "test:cdp": "node test-cdp-attach.js",
     "preflight": "node preflight.js",
     "preflight:json": "node preflight.js --json",
-    "python:hello": "node -e \"const p=require('child_process');const py=require('./ipc-handlers').detectPython();if(!py){console.error('Python not found');process.exit(1)}p.execFileSync(py,['-u','python/hello.py'],{stdio:'inherit',env:{...process.env,COUPANG_DATA_DIR:require('path').join(require('os').homedir(),'AppData','Local','CoupangAutomation')}})\"",
     "python:venv:create": "python -m venv python/.venv",
     "python:venv:install": "python/.venv/Scripts/pip.exe install -r python/requirements.txt || python/.venv/bin/pip install -r python/requirements.txt",
     "test": "node preflight.js && npm run test:lib && npm run test:python && npm run test:browser && npm run build:renderer && npm run test:ui",
@@ -57,7 +60,6 @@
       "license-service.js",
       "update-service.js",
       "plugin-main-loader.js",
-      "src/plugins/**/main.js",
       "src/core/poStyler.js",
       "src/core/confirmationBuilder.js",
       "src/core/deliveryCompanies.js",
@@ -78,12 +80,15 @@
       "buildResources": "build"
     },
     "afterPack": "./scripts/electron-fuses.js",
+    "releaseInfo": {
+      "releaseNotesFile": "release-notes/latest.md"
+    },
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://zegiknxhfljlkqrgcugj.supabase.co/storage/v1/object/public/releases",
-        "channel": "latest",
-        "useMultipleRangeRequest": false
+        "provider": "github",
+        "owner": "BOSEON-SEO",
+        "repo": "coupang-supplier-releases",
+        "releaseType": "release"
       }
     ],
     "win": {
@@ -96,7 +101,8 @@
         }
       ],
       "icon": "build/icon.ico",
-      "verifyUpdateCodeSignature": false
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "coupang-supplier-automation-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -110,6 +116,7 @@
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
+    "coupang-supplier-plugin-tbnws": "git+https://github.com/BOSEON-SEO/coupang-supplier-plugin-tbnws.git#main",
     "electron-updater": "^6.8.3",
     "exceljs": "^4.4.0",
     "luckyexcel": "^1.0.1",

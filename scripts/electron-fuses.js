@@ -40,10 +40,16 @@ module.exports = async function afterPack(context) {
     [FuseV1Options.RunAsNode]: false,
     [FuseV1Options.EnableNodeCliInspectArguments]: false,
     [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-    [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+    // electron-builder 24.x 가 asar 무결성 해시를 exe 리소스에 자동 임베드
+    // 하지 않아 true 로 두면 부팅 시 FindResource 실패로 앱이 안 뜸.
+    // OnlyLoadAppFromAsar 만으로도 외부 코드 로드는 차단되므로 일단 false.
+    [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: false,
     [FuseV1Options.OnlyLoadAppFromAsar]: true,
     [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false,
-    [FuseV1Options.GrantFileProtocolExtraPrivileges]: false,
+    // GrantFileProtocolExtraPrivileges: false 면 asar 내부 file:// 로드까지
+    // 막혀서 dist/index.html 못 띄움. 우리 앱은 file:// 로 로컬 자원 사용 →
+    // true 유지 필수.
+    [FuseV1Options.GrantFileProtocolExtraPrivileges]: true,
   });
 
   console.log('[fuses] done');

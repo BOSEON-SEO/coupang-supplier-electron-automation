@@ -18,7 +18,9 @@ module.exports = (env, argv) => ({
     rules: [
       {
         test: /\.jsx?$/,
-        exclude: /node_modules/,
+        // node_modules 는 기본 제외하되, 별도 repo 의 플러그인 패키지는
+        // transpile 필요 (소스 그대로 배포).
+        exclude: /node_modules\/(?!coupang-supplier-plugin-)/,
         use: {
           loader: 'babel-loader',
           options: {
@@ -34,6 +36,12 @@ module.exports = (env, argv) => ({
   },
   resolve: {
     extensions: ['.js', '.jsx'],
+    // 별도 repo 로 분리된 플러그인이 core 모듈을 절대경로로 참조할 수 있게.
+    // 예: import { KNOWN_HOOKS } from '@core/plugin-api'
+    alias: {
+      '@core': path.resolve(__dirname, 'src/core'),
+      '@components': path.resolve(__dirname, 'src/components'),
+    },
   },
   plugins: [
     new HtmlWebpackPlugin({

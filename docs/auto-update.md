@@ -2,12 +2,13 @@
 
 `electron-updater` + Supabase Storage(generic provider) 조합. 빌드 산출물을 public bucket 에 올리면 클라이언트가 5초 후 부팅 시 자동 감지 → 모달로 사용자에게 알림 → 동의 시 다운로드/재시작.
 
-## 한 번만 — Supabase Storage 준비
+## 한 번만 — GitHub Release 저장소 준비
 
-1. Supabase 콘솔 → **Storage** → **New bucket**
-   - Name: `releases`
-   - Public bucket: ✅ (anon 으로 GET 가능해야 함)
-2. (선택) 정책: anon 은 SELECT 만 허용. INSERT/UPDATE 는 service_role 로만.
+1. GitHub 에 **public** 저장소 새로 생성: `BOSEON-SEO/coupang-supplier-releases`
+   - 코드는 없음 — Releases 탭만 사용
+   - public 이라야 클라이언트가 토큰 없이 다운로드 가능
+2. (선택) 코드 저장소와 분리한 이유: 릴리즈는 누구나 다운로드 가능해도
+   라이선스 검증이 부팅 시 막아주니까 OK. private 으로 가려면 토큰 필요.
 
 ---
 
@@ -32,7 +33,7 @@ npm version patch        # 0.1.0 → 0.1.1
 - 라이선스 만료 임박 배너 추가
 ```
 
-`package.json` 의 `build.releaseInfo.releaseNotesFile` 로 가리키거나, `latest.yml` 생성 시 electron-builder 가 자동 inline.
+`package.json` 의 `build.releaseInfo.releaseNotesFile` 가 `release-notes/${version}.md` 로 설정돼 있어 빌드 시 자동으로 `latest.yml` 에 inline.
 
 ### 3) 빌드
 
@@ -45,11 +46,28 @@ npm run build
 - `latest.yml` (버전·sha512·릴리즈노트 메타)
 - `*.blockmap` (델타 업데이트 최적화)
 
-### 4) Supabase Storage 에 업로드
+### 4) GitHub Release 로 업로드
 
-콘솔 UI 로 `releases/` 버킷에 위 3개 파일 드래그-드롭. 같은 이름의 `latest.yml` 은 **덮어쓰기**.
+옵션 A — **GitHub 웹 UI**:
+1. https://github.com/BOSEON-SEO/coupang-supplier-releases/releases/new
+2. Tag: `v1.0.1` (또는 현재 버전)
+3. Title: `v1.0.1` (자유)
+4. Description: 릴리즈 노트 붙여넣기 (선택)
+5. Attach binaries 영역에 3개 파일 드래그:
+   - `coupang-supplier-automation-Setup-x.x.x.exe`
+   - `coupang-supplier-automation-Setup-x.x.x.exe.blockmap`
+   - `latest.yml`
+6. **Publish release**
 
-CLI 로 자동화하려면 supabase-js 의 service_role 사용 — 별도 스크립트로 분리(추후).
+옵션 B — **CLI 자동화** (`gh` 설치돼있으면):
+```bash
+cd dist-electron
+gh release create v$(node -p "require('../package.json').version") \
+  -R BOSEON-SEO/coupang-supplier-releases \
+  --title "v$(node -p "require('../package.json').version")" \
+  --notes-file ../release-notes/latest.md \
+  *.exe *.blockmap latest.yml
+```
 
 ### 5) 검증
 

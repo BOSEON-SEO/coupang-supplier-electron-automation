@@ -311,7 +311,7 @@ export default function VendorSelector({ value, onChange }) {
                     type="text"
                     value={draft.name}
                     onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                    placeholder="베이직"
+                    placeholder="기본"
                   />
                 </div>
                 <div className="vendor-mgmt__cred-section">

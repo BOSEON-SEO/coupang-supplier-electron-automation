@@ -107,7 +107,7 @@ export default function LicenseGate({ license, onActivated }) {
               type="text"
               value={id}
               onChange={(e) => setId(e.target.value)}
-              placeholder="예: tbnws-001"
+              placeholder="customer-001"
               disabled={busy}
               autoFocus
             />
@@ -118,7 +118,7 @@ export default function LicenseGate({ license, onActivated }) {
               type="text"
               value={serial}
               onChange={(e) => setSerial(e.target.value)}
-              placeholder="예: TBNWS-XXXX-YYYY-ZZZZ"
+              placeholder="MYSERIAL-XXX-YYY"
               disabled={busy}
             />
           </label>

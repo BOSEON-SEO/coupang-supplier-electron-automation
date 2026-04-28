@@ -15,3 +15,10 @@ build/
 .test-tmp-*
 0420 캐논 1차 - 입고확정 (1).xlsx
 tmp/
+
+# 빌드 산출물 (electron-builder)
+dist-electron/
+release-notes/latest.md
+
+# prepare-flavor.js 가 빌드 직전에 자동 생성
+src/plugins/_generated.js

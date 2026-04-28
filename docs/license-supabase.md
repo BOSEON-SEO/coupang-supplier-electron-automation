@@ -37,7 +37,7 @@ alter table license_entitlements enable row level security;
 
 ```sql
 insert into license_keys (id, serial, note) values
-  ('tbnws-001', 'TBNWS-XXXX-YYYY-ZZZZ', '투비네트웍스글로벌 본 라이선스');
+  ('tbnws-001', 'MYSERIAL-XXX-YYY', '투비네트웍스글로벌 본 라이선스');
 
 insert into license_entitlements (license_id, entitlement, expired_at, issued_by) values
   ('tbnws-001', 'core',         '2027-04-30T23:59:59Z', 'admin'),
@@ -134,7 +134,7 @@ curl -i -X POST https://<PROJECT_REF>.supabase.co/functions/v1/license-verify \
   -H "Content-Type: application/json" \
   -H "apikey: <ANON_KEY>" \
   -H "Authorization: Bearer <ANON_KEY>" \
-  -d '{"id":"tbnws-001","serial":"TBNWS-XXXX-YYYY-ZZZZ"}'
+  -d '{"id":"tbnws-001","serial":"MYSERIAL-XXX-YYY"}'
 ```
 
 응답 shape:

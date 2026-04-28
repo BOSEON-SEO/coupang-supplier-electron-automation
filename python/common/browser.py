@@ -62,7 +62,7 @@ def _install_launch_guard():
         BrowserType.launch = _blocked_launch
         _launch_guard_installed = True
     except ImportError:
-        # playwright 미설치 시 guard 스킵 (hello.py 등에서 import만 할 때)
+        # playwright 미설치 시 guard 스킵
         pass
 
 

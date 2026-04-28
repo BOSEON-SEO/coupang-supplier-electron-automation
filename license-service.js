@@ -151,7 +151,7 @@ async function verifyOnline({ id, serial }) {
       return {
         valid: true,
         expiredAt,
-        entitlements: ['core', 'tbnws.plugin', 'hello'],
+        entitlements: ['core', 'tbnws.plugin'],
       };
     }
     return {
