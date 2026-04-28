@@ -19,6 +19,7 @@ files:
   - ipc-handlers.js
   - license-service.js
   - update-service.js
+  - secrets.js
   - plugin-main-loader.js
   - src/core/poStyler.js
   - src/core/confirmationBuilder.js

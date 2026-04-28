@@ -146,8 +146,18 @@ const SUPABASE_URL_FALLBACK = 'https://zegiknxhfljlkqrgcugj.supabase.co';
 const SUPABASE_ANON_KEY_FALLBACK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InplZ2lrbnhoZmxqbGtxcmdjdWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyOTkxMTMsImV4cCI6MjA5Mjg3NTExM30.7SBSlVbS2PWBW5F9kNikL90BpOdWYsNG9ggXUys83sI';
 
 async function verifyOnline({ id, serial }) {
+  const { app } = require('electron');
   const supabaseUrl = process.env.SUPABASE_URL || SUPABASE_URL_FALLBACK;
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || SUPABASE_ANON_KEY_FALLBACK;
+
+  // 패키징 빌드는 dev stub 절대 차단 — Supabase fallback 이 항상 채워지므로
+  // 아래 분기 도달 가능성도 없지만, 안전망으로 명시.
+  if (app.isPackaged && (!supabaseUrl || !supabaseAnonKey)) {
+    return {
+      valid: false, expiredAt: null, entitlements: [],
+      error: '라이선스 서버 자격증명 누락 — 빌드 설정 문제, 관리자에게 문의',
+    };
+  }
 
   if (!supabaseUrl || !supabaseAnonKey) {
     // dev stub — Supabase 미설정 환경에서 개발/테스트용.
