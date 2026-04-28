@@ -7,15 +7,17 @@ import React from 'react';
  *   - activeView: 'calendar' | 'work' | 'settings' | 'plugins'
  *   - onChange: (view) => void
  *   - workActive: boolean — 작업 컨텍스트가 잡혀있을 때만 'work' 메뉴 활성화
- *   - pluginsMenuEnabled: boolean — 설정에서 켜졌을 때만 'plugins' 메뉴 노출
+ *
+ * 라이선스 게이트가 메인 앱 자체를 차단하므로, 메인 앱이 떠 있다는 건 이미
+ * 정상 라이선스 보유 상태. plugins 메뉴는 항상 노출.
  */
 
-export default function Sidebar({ activeView, onChange, workActive = false, pluginsMenuEnabled = false }) {
+export default function Sidebar({ activeView, onChange, workActive = false }) {
   const items = [
     { id: 'calendar', icon: '📅', label: '달력' },
     { id: 'work', icon: '📋', label: '작업' },
     { id: 'settings', icon: '⚙', label: '설정' },
-    ...(pluginsMenuEnabled ? [{ id: 'plugins', icon: '🔌', label: '플러그인' }] : []),
+    { id: 'plugins', icon: '🔌', label: '플러그인' },
   ];
   return (
     <nav className="app-sidebar">

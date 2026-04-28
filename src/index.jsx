@@ -42,7 +42,7 @@ function PopupShell({ children, vendor }) {
       if (cancelled) return;
       const settings = sRes?.settings || {};
       const license = lRes?.license || null;
-      const ents = resolveEntitlementsFromLicense(license, settings);
+      const ents = resolveEntitlementsFromLicense(license);
       setEntitlements(ents);
       const perPluginEnabled = {};
       const ps = settings?.plugins || {};

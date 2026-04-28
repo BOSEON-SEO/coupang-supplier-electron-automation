@@ -318,23 +318,8 @@ export default function SettingsView({ activeVendor }) {
         ))}
       </div>
 
-      {/* 고급 — 글로벌(벤더 무관) 토글들 */}
-      <div className="settings-advanced">
-        <div className="settings-advanced__title">고급</div>
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={!!defaults.pluginsMenuEnabled}
-            onChange={(e) => handleDefaultChange('pluginsMenuEnabled', e.target.checked)}
-          />
-          <span className="settings-toggle__label">플러그인 활성화</span>
-          <span className="settings-toggle__hint">
-            모든 플러그인을 on/off 합니다. 끄면 벤더별 커스텀 탭·모달·체크박스 등
-            플러그인이 기여한 UI 가 전부 사라지고 순정 코어만 동작. 사이드바의
-            🔌 플러그인 메뉴도 이 설정에 따라 함께 토글됩니다.
-          </span>
-        </label>
-      </div>
+      {/* 라이선스 — 캐시된 license dto 표시 + 재인증/지우기 */}
+      <LicenseCard />
 
       {activeModalField && (
         <ListManagerModal
@@ -348,6 +333,108 @@ export default function SettingsView({ activeVendor }) {
           onClose={() => setModalListKey(null)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * 라이선스 카드 — 캐시된 license dto 표시 + 재인증/지우기.
+ * 자체 fetch 하므로 부모가 prop 으로 안 내려줘도 됨. license-changed 이벤트
+ * 구독해 activate/reverify/clear 시 자동 갱신.
+ */
+function LicenseCard() {
+  const [license, setLicense] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electronAPI?.license?.get?.();
+        if (!cancelled && res?.success) setLicense(res.license || null);
+      } catch (_) { /* 무시 */ }
+    })();
+    const off = window.electronAPI?.license?.onChanged?.((dto) => setLicense(dto || null));
+    return () => {
+      cancelled = true;
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
+  const handleReverify = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const res = await window.electronAPI?.license?.reverify();
+      setMsg(res?.success ? '재검증 완료' : `실패: ${res?.error || ''}`);
+    } catch (err) {
+      setMsg(`오류: ${err.message || String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!window.confirm('저장된 라이선스를 지웁니다. 다음 실행 시 시리얼을 다시 입력해야 합니다. 진행할까요?')) return;
+    setBusy(true); setMsg('');
+    try {
+      const res = await window.electronAPI?.license?.clear();
+      setMsg(res?.success ? '라이선스 삭제됨' : `실패: ${res?.error || ''}`);
+    } catch (err) {
+      setMsg(`오류: ${err.message || String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+    } catch (_) { return iso; }
+  };
+
+  const status = license?.status || 'unlicensed';
+  const statusLabel = {
+    valid:        { text: '정상',         tone: 'ok' },
+    'near-expiry': { text: '만료 임박',   tone: 'warn' },
+    expired:      { text: '만료됨',       tone: 'danger' },
+    invalid:      { text: '검증 실패',    tone: 'danger' },
+    unlicensed:   { text: '인증되지 않음', tone: 'danger' },
+  }[status] || { text: status, tone: 'warn' };
+
+  return (
+    <div className="license-card">
+      <div className="license-card__head">
+        <span className="license-card__title">🔐 라이선스</span>
+        <span className={`license-card__status license-card__status--${statusLabel.tone}`}>
+          {statusLabel.text}
+        </span>
+      </div>
+      <dl className="license-card__grid">
+        <dt>발급 ID</dt>      <dd>{license?.id || '—'}</dd>
+        <dt>시리얼</dt>       <dd>{license?.serial || '—'}</dd>
+        <dt>만료일</dt>       <dd>{formatDate(license?.expiredAt)}</dd>
+        <dt>마지막 검증</dt>  <dd>{formatDate(license?.lastVerifiedAt)}</dd>
+        <dt>권한</dt>         <dd>{(license?.entitlements || []).join(', ') || '—'}</dd>
+      </dl>
+      {msg && <div className="license-card__msg">{msg}</div>}
+      <div className="license-card__actions">
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={handleReverify}
+          disabled={busy || !license?.id}
+        >⟳ 재검증</button>
+        <button
+          type="button"
+          className="btn btn--secondary license-card__danger"
+          onClick={handleClear}
+          disabled={busy || !license?.id}
+        >라이선스 지우기</button>
+      </div>
     </div>
   );
 }

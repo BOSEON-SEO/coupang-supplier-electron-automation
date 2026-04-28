@@ -78,13 +78,10 @@ export default function App() {
     window.addEventListener('settings-changed', onChanged);
     return () => window.removeEventListener('settings-changed', onChanged);
   }, [reloadGlobalSettings]);
-  const pluginsMenuEnabled = !!globalSettings.pluginsMenuEnabled;
-
   // ── 라이선스 ─────────────────────────────────────────────
   //   main process 의 license-service 가 source of truth. 부팅 직후 한 번 fetch +
   //   'license-changed' 이벤트로 갱신 (activate/reverify/clear 시).
-  //   v1: license 가 'valid'/'near-expiry' 일 때만 entitlements 활성. 그 외엔
-  //   pluginsMenuEnabled 토글이 켜져있을 때 dev override (개발용).
+  //   license 가 'valid'/'near-expiry' 가 아니면 메인 앱 마운트 차단(LicenseGate).
   const [license, setLicense] = useState(null);
   useEffect(() => {
     let cancelled = false;
@@ -104,12 +101,12 @@ export default function App() {
   }, []);
 
   // ── 플러그인 로드 ─────────────────────────────────────────
-  // entitlements = license dto + globalSettings 합산.
+  // entitlements = license dto 의 entitlements (valid/near-expiry 일 때만).
   // perPluginEnabled 는 개별 플러그인 on/off (settings.plugins.<id>.enabled).
-  // license/settings 변경 → 재계산 → useEffect 재실행 → unload + load.
+  // license 변경 → 재계산 → useEffect 재실행 → unload + load.
   const entitlements = useMemo(
-    () => resolveEntitlementsFromLicense(license, globalSettings),
-    [license, globalSettings],
+    () => resolveEntitlementsFromLicense(license),
+    [license],
   );
   const perPluginEnabled = useMemo(() => {
     const out = {};
@@ -205,14 +202,11 @@ export default function App() {
   };
 
   // ── 라이선스 게이트 ────────────────────────────────────────
-  // license fetch 가 완료되기 전엔 빈 화면(loading), 그 후 status 보고 분기.
-  // pluginsMenuEnabled 토글이 켜져있으면 dev override — gate 우회 (개발용).
-  // 출시 빌드에선 이 토글의 default 를 false 로 하거나 라벨을 "라이선스 무시"
-  // 로 바꿔 의도치 않은 우회를 차단할 것.
+  // license fetch 가 완료된 후 status 보고 분기. valid / near-expiry 가 아니면
+  // 메인 앱 대신 LicenseGate. fetch 전엔 빈 화면(스플래시 대신 단순 null).
   const licenseLoaded = license !== null;
   const licenseValid = license && (license.status === 'valid' || license.status === 'near-expiry');
-  const devBypass = !!globalSettings.pluginsMenuEnabled;
-  if (licenseLoaded && !licenseValid && !devBypass) {
+  if (licenseLoaded && !licenseValid) {
     return (
       <PluginProvider entitlements={[]} currentVendor={null}>
         <LicenseGate license={license} onActivated={(dto) => setLicense(dto)} />
@@ -229,12 +223,24 @@ export default function App() {
         <VendorSelector value={vendor} onChange={setVendor} />
       </header>
 
+      {license?.status === 'near-expiry' && (
+        <div className="license-banner">
+          ⚠ 라이선스가 곧 만료됩니다 ({new Date(license.expiredAt).toLocaleDateString('ko-KR')}).
+          {' '}관리자에게 갱신을 요청한 후{' '}
+          <button
+            type="button"
+            className="license-banner__action"
+            onClick={() => setView('settings')}
+          >설정 → 라이선스</button>
+          {' '}에서 재검증하세요.
+        </div>
+      )}
+
       <div className="app-body">
         <Sidebar
           activeView={view}
           onChange={setView}
           workActive={!!activeJob}
-          pluginsMenuEnabled={pluginsMenuEnabled}
         />
 
         <main className="app-main">
@@ -272,8 +278,8 @@ export default function App() {
           {/* 설정 view */}
           {view === 'settings' && <SettingsView activeVendor={vendor} />}
 
-          {/* 플러그인 view — 사이드바 토글이 켜져 있을 때만 */}
-          {view === 'plugins' && pluginsMenuEnabled && <PluginsView />}
+          {/* 플러그인 view */}
+          {view === 'plugins' && <PluginsView />}
         </main>
       </div>
 

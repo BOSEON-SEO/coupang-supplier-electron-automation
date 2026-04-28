@@ -4578,3 +4578,65 @@ button.session-badge:disabled {
 }
 .license-gate__clear:hover { color: #a50e0e; }
 
+
+/* ─── License Card (SettingsView 내부) ─────────────────────── */
+.license-card {
+  margin: 16px 0;
+  padding: 16px 20px;
+  background: #f8f9fc;
+  border: 1px solid #e0e3eb;
+  border-radius: 8px;
+}
+.license-card__head {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 12px;
+}
+.license-card__title { font-weight: 600; font-size: 15px; color: #1a237e; }
+.license-card__status {
+  font-size: 12px; font-weight: 600;
+  padding: 2px 10px; border-radius: 12px;
+}
+.license-card__status--ok     { background: #e8f5e9; color: #2e7d32; }
+.license-card__status--warn   { background: #fff8e1; color: #f57c00; }
+.license-card__status--danger { background: #fdecea; color: #c62828; }
+
+.license-card__grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.license-card__grid dt { color: #5f6368; font-weight: 500; }
+.license-card__grid dd { margin: 0; color: #202124; word-break: break-all; }
+
+.license-card__msg {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #e3f2fd;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #1565c0;
+}
+.license-card__actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 8px;
+}
+.license-card__danger { color: #c62828; }
+
+/* ─── License Banner (만료 임박) ─────────────────────────── */
+.license-banner {
+  background: #fff8e1;
+  border-bottom: 1px solid #ffe082;
+  color: #5d4037;
+  font-size: 13px;
+  padding: 8px 16px;
+  text-align: center;
+}
+.license-banner__action {
+  background: none; border: none; padding: 0;
+  color: #1565c0; text-decoration: underline; cursor: pointer;
+  font: inherit;
+}
+.license-banner__action:hover { color: #0d47a1; }
+
