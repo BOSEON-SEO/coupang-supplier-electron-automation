@@ -43,10 +43,10 @@ package.json # peerDependencies: react, xlsx
 
 코어가 webpack alias 로 `@core/*`, `@components/*` 를 노출하므로 플러그인 코드는 절대경로로 코어 모듈 참조. babel-loader 는 `node_modules/coupang-supplier-plugin-*` 패턴은 transpile 대상 포함.
 
-## TODO (Phase 2.5)
+## Phase 2.5 — 진짜 격리 (완료)
 
-- [ ] global.css 의 플러그인 prefix 클래스(`tbnws-*`)도 플러그인 패키지로 이전 — 현재 basic 번들에 CSS 이름만 남음
-- [ ] basic 빌드 시 `node_modules/coupang-supplier-plugin-tbnws` 자체를 빼기 — 현재 package.json 에 항상 dep 으로 들어가 있어 asar 에 포함됨. flavor 별 package.json 관리 필요.
+- ✅ 플러그인 CSS (`.tbnws-*`) 가 플러그인 패키지의 `src/styles.css` 로 이전. flavor=basic 번들에선 import 자체가 없으므로 CSS 도 자동 제외
+- ✅ flavor 별 electron-builder 설정 (`scripts/builder-config-<flavor>.yml`) — basic.yml 의 `files` 가 `!node_modules/coupang-supplier-plugin-*/**` 로 asar 에서 플러그인 패키지 자체를 제외. 검증: `npx asar list .../app.asar | grep tbnws` → 0건
 
 ## 동작 원리
 

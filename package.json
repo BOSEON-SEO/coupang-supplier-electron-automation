@@ -116,7 +116,7 @@
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
-    "coupang-supplier-plugin-tbnws": "git+https://github.com/BOSEON-SEO/coupang-supplier-plugin-tbnws.git#main",
+    "coupang-supplier-plugin-tbnws": "github:BOSEON-SEO/coupang-supplier-plugin-tbnws#main",
     "electron-updater": "^6.8.3",
     "exceljs": "^4.4.0",
     "luckyexcel": "^1.0.1",

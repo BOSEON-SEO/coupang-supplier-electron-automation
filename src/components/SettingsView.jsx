@@ -318,6 +318,24 @@ export default function SettingsView({ activeVendor }) {
         ))}
       </div>
 
+      {/* 고급 — 전체 플러그인 on/off */}
+      <div className="settings-advanced">
+        <div className="settings-advanced__title">고급</div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={defaults.pluginsEnabled !== false}
+            onChange={(e) => handleDefaultChange('pluginsEnabled', e.target.checked)}
+          />
+          <span className="settings-toggle__label">플러그인 활성화</span>
+          <span className="settings-toggle__hint">
+            모든 플러그인을 한꺼번에 on/off 합니다. 끄면 플러그인이 기여한 UI(탭·모달·
+            체크박스 등) 가 전부 사라지고 순정 코어만 동작. 사이드바의 🔌 플러그인
+            메뉴도 함께 숨겨집니다. 개별 토글은 🔌 플러그인 메뉴에서.
+          </span>
+        </label>
+      </div>
+
       {/* 라이선스 — 캐시된 license dto 표시 + 재인증/지우기 */}
       <LicenseCard />
 

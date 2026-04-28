@@ -1,0 +1,54 @@
+# basic flavor 전용 electron-builder 설정.
+# --config 플래그는 package.json 의 build 를 머지하지 않고 대체하므로
+# 모든 필드를 명시. 변경점은 files (플러그인 패키지 제외) + publish (basic 채널).
+appId: com.tbnws.coupang-supplier-automation
+productName: 쿠팡 서플라이어 자동화
+directories:
+  output: dist-electron
+  buildResources: build
+asar: true
+asarUnpack:
+  - python/**/*
+  - "**/*.node"
+files:
+  - dist/**/*
+  - main.js
+  - preload.js
+  - ipc-handlers.js
+  - license-service.js
+  - update-service.js
+  - plugin-main-loader.js
+  - src/core/poStyler.js
+  - src/core/confirmationBuilder.js
+  - src/core/deliveryCompanies.js
+  - package.json
+  - "!**/*.{md,test.js,spec.js}"
+  - "!docs/**"
+  - "!scripts/**"
+  - "!python/.venv/**"
+  - "!python/__pycache__/**"
+  # basic 핵심 — 플러그인 패키지를 asar 에서 제외
+  - "!node_modules/coupang-supplier-plugin-*/**"
+afterPack: ./scripts/electron-fuses.js
+releaseInfo:
+  releaseNotesFile: release-notes/latest.md
+publish:
+  - provider: github
+    owner: BOSEON-SEO
+    repo: coupang-supplier-releases-basic
+    releaseType: release
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  verifyUpdateCodeSignature: false
+  artifactName: coupang-supplier-automation-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 쿠팡 서플라이어 자동화

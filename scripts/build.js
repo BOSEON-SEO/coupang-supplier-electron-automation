@@ -15,37 +15,28 @@
 const { execFileSync, execSync } = require('child_process');
 const path = require('path');
 
-// flavor 별 GitHub Release 채널.
-// 비어있는(=현재) tbnws 채널은 기존 repo 재사용.
-const PUBLISH_REPOS = {
-  basic: 'coupang-supplier-releases-basic',
-  tbnws: 'coupang-supplier-releases-tbnws',
-  // acme: 'coupang-supplier-releases-acme',
-};
-
 const flavor = process.argv[2];
 if (!flavor) {
   console.error('사용: node scripts/build.js <flavor>');
-  console.error(`flavor: ${Object.keys(PUBLISH_REPOS).join(' | ')}`);
-  process.exit(1);
-}
-const repo = PUBLISH_REPOS[flavor];
-if (!repo) {
-  console.error(`알 수 없는 flavor: ${flavor}`);
+  console.error('flavor: scripts/builder-config-<flavor>.yml 이 있는 이름 (basic, tbnws, ...)');
   process.exit(1);
 }
 
 const root = path.resolve(__dirname, '..');
+const extraConfigPath = path.join('scripts', `builder-config-${flavor}.yml`);
+if (!require('fs').existsSync(path.join(root, extraConfigPath))) {
+  console.error(`설정 파일 없음: ${extraConfigPath}`);
+  process.exit(1);
+}
+
 const opts = { stdio: 'inherit', cwd: root, env: { ...process.env, BUILD_FLAVOR: flavor } };
 
-console.log(`\n━━ flavor=${flavor} · publish=BOSEON-SEO/${repo} ━━\n`);
+console.log(`\n━━ flavor=${flavor} · config=${extraConfigPath} ━━\n`);
 
 execFileSync('node', [path.join('scripts', 'prepare-flavor.js'), flavor], opts);
 execFileSync('node', [path.join('scripts', 'prepare-release-notes.js')], opts);
 
 execSync('npx webpack --mode production', opts);
-
-// electron-builder publish.repo override — flavor 별 다른 release 채널 사용
-execSync(`npx electron-builder --config.publish.repo=${repo}`, opts);
+execSync(`npx electron-builder --config ${extraConfigPath}`, opts);
 
 console.log(`\n✓ flavor=${flavor} 빌드 완료. dist-electron/ 확인.\n`);

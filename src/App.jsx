@@ -117,14 +117,18 @@ export default function App() {
     }
     return out;
   }, [globalSettings]);
+  // 글로벌 플러그인 on/off — 설정 → 고급 → 플러그인 활성화. 기본 true.
+  // off 면 entitlements 비어서 어떤 플러그인도 활성화 안 됨.
+  const pluginsEnabled = globalSettings?.pluginsEnabled !== false;
+  const effectiveEntitlements = pluginsEnabled ? entitlements : [];
   useEffect(() => {
     bootstrapPlugins({
-      entitlements,
+      entitlements: effectiveEntitlements,
       currentVendor: vendor || null,
       electronAPI: window.electronAPI,
       perPluginEnabled,
     });
-  }, [entitlements, vendor, perPluginEnabled]);
+  }, [effectiveEntitlements, vendor, perPluginEnabled]);
 
   // ── Toast 알림 ─────────────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -242,6 +246,7 @@ export default function App() {
           activeView={view}
           onChange={setView}
           workActive={!!activeJob}
+          pluginsEnabled={pluginsEnabled}
         />
 
         <main className="app-main">
@@ -279,8 +284,8 @@ export default function App() {
           {/* 설정 view */}
           {view === 'settings' && <SettingsView activeVendor={vendor} />}
 
-          {/* 플러그인 view */}
-          {view === 'plugins' && <PluginsView />}
+          {/* 플러그인 view — 활성화돼있을 때만 */}
+          {view === 'plugins' && pluginsEnabled && <PluginsView />}
         </main>
       </div>
 
