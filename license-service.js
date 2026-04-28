@@ -162,25 +162,49 @@ async function verifyOnline({ id, serial }) {
     };
   }
 
-  // TODO: 실 Supabase 호출 — Edge Function 또는 RPC.
-  //   const res = await fetch(`${supabaseUrl}/functions/v1/license-verify`, {
-  //     method: 'POST',
-  //     headers: {
-  //       'Content-Type': 'application/json',
-  //       'apikey': supabaseAnonKey,
-  //       'Authorization': `Bearer ${supabaseAnonKey}`,
-  //     },
-  //     body: JSON.stringify({ id, serial }),
-  //   });
-  //   const data = await res.json();
-  //   return { valid: data.valid, expiredAt: data.expired_at,
-  //            entitlements: data.entitlements || [] };
-  return {
-    valid: false,
-    expiredAt: null,
-    entitlements: [],
-    error: 'Supabase 호출 미구현 (TODO). license-service.js verifyOnline 참고.',
-  };
+  // 실 Supabase Edge Function 호출.
+  // 응답 shape: { valid, expiredAt, entitlements, error? } — Edge Function
+  // 이 이미 같은 shape 을 그대로 돌려주므로 추가 매핑 불필요.
+  // docs/license-supabase.md 참고.
+  const url = `${String(supabaseUrl).replace(/\/$/, '')}/functions/v1/license-verify`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ id, serial }),
+      // 네트워크 hang 회피용 timeout — AbortSignal.timeout 은 Node 18+.
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+        ? AbortSignal.timeout(15000)
+        : undefined,
+    });
+    let data;
+    try { data = await res.json(); } catch (_) { data = null; }
+    if (!res.ok) {
+      return {
+        valid: false,
+        expiredAt: null,
+        entitlements: [],
+        error: data?.error || `HTTP ${res.status}`,
+      };
+    }
+    return {
+      valid: !!data?.valid,
+      expiredAt: data?.expiredAt || null,
+      entitlements: Array.isArray(data?.entitlements) ? data.entitlements : [],
+      error: data?.error || null,
+    };
+  } catch (err) {
+    return {
+      valid: false,
+      expiredAt: null,
+      entitlements: [],
+      error: `네트워크 오류: ${err.message || String(err)}`,
+    };
+  }
 }
 
 /**

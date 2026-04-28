@@ -7,6 +7,7 @@ import ToastContainer from './components/Toast';
 import SettingsView from './components/SettingsView';
 import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
+import LicenseGate from './components/LicenseGate';
 import { PluginProvider, ViewOutlet } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
 import { resolveEntitlementsFromLicense } from './core/entitlements';
@@ -202,6 +203,23 @@ export default function App() {
     if (opts?.isNew) setWorkOpen(false);
     setView('work');
   };
+
+  // ── 라이선스 게이트 ────────────────────────────────────────
+  // license fetch 가 완료되기 전엔 빈 화면(loading), 그 후 status 보고 분기.
+  // pluginsMenuEnabled 토글이 켜져있으면 dev override — gate 우회 (개발용).
+  // 출시 빌드에선 이 토글의 default 를 false 로 하거나 라벨을 "라이선스 무시"
+  // 로 바꿔 의도치 않은 우회를 차단할 것.
+  const licenseLoaded = license !== null;
+  const licenseValid = license && (license.status === 'valid' || license.status === 'near-expiry');
+  const devBypass = !!globalSettings.pluginsMenuEnabled;
+  if (licenseLoaded && !licenseValid && !devBypass) {
+    return (
+      <PluginProvider entitlements={[]} currentVendor={null}>
+        <LicenseGate license={license} onActivated={(dto) => setLicense(dto)} />
+        <ToastContainer />
+      </PluginProvider>
+    );
+  }
 
   return (
     <PluginProvider entitlements={entitlements} currentVendor={vendor || null}>

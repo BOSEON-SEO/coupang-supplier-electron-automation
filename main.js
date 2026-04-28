@@ -2,6 +2,31 @@ const { app, BrowserWindow, WebContentsView, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+// ── .env 로더 ─────────────────────────────────────────────────
+// dotenv 직접 의존 없이 가벼운 파싱. SUPABASE_URL 등 라이선스 검증용 env 를
+// 프로젝트 루트의 .env 에서 읽어 process.env 로 주입. 이미 set 된 값은 덮어
+// 쓰지 않음. .env 가 없으면 무시. .gitignore 됨.
+(function loadDotenv() {
+  try {
+    const p = path.join(__dirname, '.env');
+    if (!fs.existsSync(p)) return;
+    const txt = fs.readFileSync(p, 'utf-8');
+    for (const raw of txt.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m) continue;
+      let val = m[2].trim();
+      if ((val.startsWith('"') && val.endsWith('"'))
+        || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!(m[1] in process.env)) process.env[m[1]] = val;
+    }
+  } catch (_) { /* 무시 */ }
+})();
+
 const { registerIpcHandlers } = require('./ipc-handlers');
 const { loadPluginMainHalves } = require('./plugin-main-loader');
 const { registerLicenseIpc } = require('./license-service');

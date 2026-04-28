@@ -4501,3 +4501,80 @@ button.session-badge:disabled {
   width: 74px;
   text-align: right;
 }
+
+/* ─── License Gate ───────────────────────────────────────── */
+.license-gate {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f0 100%);
+  z-index: 1000;
+  padding: 32px;
+}
+.license-gate__card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  padding: 40px 48px;
+  max-width: 480px;
+  width: 100%;
+}
+.license-gate__title {
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1a237e;
+}
+.license-gate__sub {
+  margin: 0 0 24px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #5f6368;
+}
+.license-gate__form { display: flex; flex-direction: column; gap: 16px; }
+.license-gate__field { display: flex; flex-direction: column; gap: 6px; }
+.license-gate__field span {
+  font-size: 12px; font-weight: 600; color: #444;
+}
+.license-gate__field input {
+  padding: 10px 12px;
+  border: 1px solid #d0d4da;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+.license-gate__field input:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+}
+.license-gate__error {
+  padding: 10px 12px;
+  background: #fdecea;
+  border: 1px solid #f5c2bd;
+  border-radius: 6px;
+  color: #b3261e;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.license-gate__actions {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px;
+}
+.license-gate__footer {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 12px; color: #777;
+}
+.license-gate__footer code {
+  background: #f5f5f5; padding: 2px 6px; border-radius: 3px;
+  font-family: ui-monospace, monospace;
+}
+.license-gate__clear {
+  background: none; border: none;
+  color: #c5221f; font-size: 12px; cursor: pointer; padding: 0;
+  text-decoration: underline;
+}
+.license-gate__clear:hover { color: #a50e0e; }
+
