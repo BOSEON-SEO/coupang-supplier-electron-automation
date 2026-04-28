@@ -33,6 +33,7 @@ const opts = { stdio: 'inherit', cwd: root, env: { ...process.env, BUILD_FLAVOR:
 
 console.log(`\n━━ flavor=${flavor} · config=${extraConfigPath} ━━\n`);
 
+execFileSync('node', [path.join('scripts', 'check-builder-files.js')], opts);
 execFileSync('node', [path.join('scripts', 'prepare-flavor.js'), flavor], opts);
 execFileSync('node', [path.join('scripts', 'prepare-release-notes.js')], opts);
 // Python embeddable + playwright 번들 (캐시 — 첫 빌드만 오래 걸림).
