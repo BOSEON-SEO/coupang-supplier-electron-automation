@@ -14,6 +14,7 @@ files:
   - dist/**/*
   - main.js
   - preload.js
+  - preload-printblock.js
   - ipc-handlers.js
   - license-service.js
   - update-service.js

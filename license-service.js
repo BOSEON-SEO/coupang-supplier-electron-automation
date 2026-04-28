@@ -140,9 +140,14 @@ function toDto(rec, now = Date.now()) {
  *
  * @param {{id:string, serial:string}} args
  */
+// 패키징된 빌드는 .env 가 없으므로 fallback 으로 공개 anon 자격증명을 임베드.
+// dev 환경에선 .env 가 우선 — 다른 Supabase 프로젝트로 검증하고 싶을 때 override.
+const SUPABASE_URL_FALLBACK = 'https://zegiknxhfljlkqrgcugj.supabase.co';
+const SUPABASE_ANON_KEY_FALLBACK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InplZ2lrbnhoZmxqbGtxcmdjdWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyOTkxMTMsImV4cCI6MjA5Mjg3NTExM30.7SBSlVbS2PWBW5F9kNikL90BpOdWYsNG9ggXUys83sI';
+
 async function verifyOnline({ id, serial }) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || SUPABASE_URL_FALLBACK;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || SUPABASE_ANON_KEY_FALLBACK;
 
   if (!supabaseUrl || !supabaseAnonKey) {
     // dev stub — Supabase 미설정 환경에서 개발/테스트용.
