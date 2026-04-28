@@ -120,7 +120,8 @@ function detectPython() {
   }
 
   // ── 3) 프로젝트 로컬 venv (./python/.venv) ──
-  const venvDir = path.join(__dirname, 'python', '.venv');
+  // 패키지 빌드에선 venv 가 제외되므로 dev 환경에서만 의미. 그래도 path 는 안전하게 변환.
+  const venvDir = path.join(__dirname, 'python', '.venv').replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
   const venvCandidates = process.platform === 'win32'
     ? [path.join(venvDir, 'Scripts', 'python.exe')]
     : [path.join(venvDir, 'bin', 'python3'), path.join(venvDir, 'bin', 'python')];
@@ -236,7 +237,10 @@ function registerIpcHandlers({
   const VENDORS_PATH = path.join(dataDir, 'vendors.json');
   const CREDENTIALS_PATH = path.join(dataDir, 'credentials.enc');
   const SETTINGS_PATH = path.join(dataDir, 'settings.json');
-  const SCRIPTS_DIR = path.join(__dirname, 'python');
+  // 패키징 시 python/ 은 asarUnpack 으로 app.asar.unpacked/python/ 에 위치.
+  // child_process.spawn 은 asar 가상 fs 를 못 보므로 실제 경로(unpacked) 로 변환.
+  // dev 모드에선 __dirname 에 'app.asar' 가 없어 replace 가 no-op.
+  const SCRIPTS_DIR = path.join(__dirname, 'python').replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
   // CDP 포트: main.js에서 주입, 없으면 환경변수/기본값 사용
   const _cdpPort = cdpPort || parseInt(process.env.CDP_PORT, 10) || 9222;
 
