@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const secrets = require('./secrets');
 
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,29}$/;
 
@@ -74,6 +75,13 @@ function loadPluginMainHalves({ ipcMain, app, dataDir }) {
       pluginId,
       userDataPath,
       dataDir,
+      /**
+       * 플러그인 비밀값 조회 — `plugins.<pluginId>.<localKey>` 경로로
+       * secrets.enc 에서 복호화된 문자열 반환. 미설정이면 ''.
+       */
+      getSecret(localKey) {
+        return secrets.getSecret(`plugins.${pluginId}.${localKey}`);
+      },
       handle(channel, handler) {
         if (typeof channel !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,59}$/i.test(channel)) {
           throw new Error(`[plugin-main '${pluginId}'] invalid channel: ${channel}`);

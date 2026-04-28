@@ -352,13 +352,23 @@ function registerIpcHandlers({
   });
 
   // ── 전역 설정 (settings.json) ──
+  // 비밀 필드(예: plugins.tbnws.apiToken) 는 secrets.enc 로 분리 저장.
+  // load: 평문이 있으면 자동 마이그레이션 + placeholder 로 마스크.
+  // save: placeholder 는 무시, 신규 값은 secrets 에 저장 + settings 에서 제거.
+  const secrets = require('./secrets');
   ipcMain.handle('settings:load', async () => {
     try {
+      let data;
       if (!fs.existsSync(SETTINGS_PATH)) {
-        return { schemaVersion: 1, settings: {} };
+        data = { schemaVersion: 1, settings: {} };
+      } else {
+        data = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
       }
-      const raw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
-      return JSON.parse(raw);
+      if (!data.settings) data.settings = {};
+      const migrated = secrets.migrateSettings(data.settings);
+      if (migrated) fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf-8');
+      secrets.maskSettings(data.settings);
+      return data;
     } catch (err) {
       return { schemaVersion: 1, settings: {}, error: err.message };
     }
@@ -366,7 +376,10 @@ function registerIpcHandlers({
 
   ipcMain.handle('settings:save', async (_e, data) => {
     try {
-      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf-8');
+      const out = JSON.parse(JSON.stringify(data || {}));
+      if (!out.settings) out.settings = {};
+      secrets.applyAndStripSecrets(out.settings);
+      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(out, null, 2), 'utf-8');
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };

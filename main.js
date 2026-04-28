@@ -31,6 +31,7 @@ const { registerIpcHandlers } = require('./ipc-handlers');
 const { loadPluginMainHalves } = require('./plugin-main-loader');
 const { registerLicenseIpc } = require('./license-service');
 const { registerUpdateIpc } = require('./update-service');
+const secrets = require('./secrets');
 
 // 쿠팡 서플라이어 사이트 진입 URL
 const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
@@ -566,6 +567,9 @@ function openTransportWindow(opts) {
 }
 
 app.whenReady().then(() => {
+  // safeStorage 의존하는 모듈은 whenReady 이후에 초기화
+  secrets.init(DATA_DIR);
+
   registerIpcHandlers({
     ipcMain,
     getWindow: () => mainWindow,
