@@ -1,29 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { setReserveTop } from '../lib/webviewReserve';
-
-/**
- * Shadow DOM 포털 — 안의 컨텐츠가 main page 의 findInPage 매칭에서 제외됨.
- * findInPage 는 same-document 텍스트만 매칭하는데, Shadow root 안은 separate
- * tree 라 격리됨. 자기 query 가 결과로 잡히는 문제 회피용.
- */
-function ShadowPortal({ children }) {
-  const hostRef = useRef(null);
-  const [shadow, setShadow] = useState(null);
-  useEffect(() => {
-    if (hostRef.current && !shadow) {
-      const root = hostRef.current.attachShadow({ mode: 'open' });
-      // shadow 내부에 호스트 페이지 스타일 시트 일부 주입 — 글로벌 className 사용 가능하도록.
-      // 실용적으로는 명시 style 속성 + 외부 ::part 로 처리. 여기선 inline style 만 신뢰.
-      setShadow(root);
-    }
-  }, [shadow]);
-  return (
-    <span ref={hostRef} style={{ display: 'contents' }}>
-      {shadow && createPortal(children, shadow)}
-    </span>
-  );
-}
 
 // FindBar 높이(36px) + 상단 여유 8px + 하단 여유 4px
 const WEBVIEW_FIND_RESERVE = 48;
@@ -125,9 +101,15 @@ export default function FindBar() {
       if (!data) return;
       if (data.target !== targetRef.current) return;
       if (data.finalUpdate || data.matches === 0) {
+        // findInPage 가 FindBar 의 input value 까지 매칭에 포함하므로 1건 보정.
+        // (Chromium 의 webContents.findInPage 는 visible form control 의 value
+        // 도 매칭하는 동작이라 Shadow DOM 격리로는 회피 불가 — 상수 1 빼는 것이
+        // 가장 단순.)
+        const total = Math.max(0, (data.matches || 0) - 1);
+        const ord = (data.activeMatchOrdinal || 0) - 1;
         setResult({
-          current: data.activeMatchOrdinal || 0,
-          total: data.matches || 0,
+          current: total > 0 ? Math.max(1, Math.min(ord, total)) : 0,
+          total,
         });
       }
     });
@@ -193,34 +175,24 @@ export default function FindBar() {
       style={{ top: pos.top, right: pos.right }}
     >
       {/*
-       * input 을 Shadow DOM 안에 두어 자기 query 가 findInPage 결과로 잡히는 문제 회피.
-       * 클래스 네임은 shadow 내부에서 동작 안 하므로 inline style 로 적용.
+       * input value 가 findInPage 결과에 1건 포함되는 건 onResult 보정으로 처리.
+       * (이전 ShadowPortal 격리 시도는 Shadow DOM + Strict Mode 가 createPortal
+       * race 를 만들어 한 글자만 입력되고 멈추는 부작용이 있었음.)
        */}
-      <ShadowPortal>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="찾기"
-          value={query}
-          onChange={handleChange}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              step(!e.shiftKey);
-            }
-          }}
-          style={{
-            border: 'none',
-            outline: 'none',
-            padding: '4px 8px',
-            fontSize: '13px',
-            width: '180px',
-            background: 'transparent',
-            color: 'inherit',
-            font: 'inherit',
-          }}
-        />
-      </ShadowPortal>
+      <input
+        ref={inputRef}
+        type="text"
+        className="find-bar__input"
+        placeholder="찾기"
+        value={query}
+        onChange={handleChange}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            step(!e.shiftKey);
+          }
+        }}
+      />
       <span className="find-bar__count">
         {query
           ? (result.total > 0 ? `${result.current}/${result.total}` : '0/0')
