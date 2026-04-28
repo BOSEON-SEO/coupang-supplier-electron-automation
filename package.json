@@ -55,6 +55,7 @@
       "preload.js",
       "ipc-handlers.js",
       "license-service.js",
+      "update-service.js",
       "plugin-main-loader.js",
       "src/plugins/**/main.js",
       "src/core/poStyler.js",
@@ -77,9 +78,22 @@
       "buildResources": "build"
     },
     "afterPack": "./scripts/electron-fuses.js",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://zegiknxhfljlkqrgcugj.supabase.co/storage/v1/object/public/releases",
+        "channel": "latest",
+        "useMultipleRangeRequest": false
+      }
+    ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico",
       "verifyUpdateCodeSignature": false
@@ -96,6 +110,7 @@
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
+    "electron-updater": "^6.8.3",
     "exceljs": "^4.4.0",
     "luckyexcel": "^1.0.1",
     "react": "^18.2.0",

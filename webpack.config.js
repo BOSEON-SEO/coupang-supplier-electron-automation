@@ -1,5 +1,7 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const pkg = require('./package.json');
 
 module.exports = (env, argv) => ({
   entry: './src/index.jsx',
@@ -36,6 +38,9 @@ module.exports = (env, argv) => ({
   plugins: [
     new HtmlWebpackPlugin({
       template: './public/index.html',
+    }),
+    new webpack.DefinePlugin({
+      __APP_VERSION__: JSON.stringify(pkg.version),
     }),
   ],
   devServer: {

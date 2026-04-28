@@ -30,6 +30,7 @@ const os = require('os');
 const { registerIpcHandlers } = require('./ipc-handlers');
 const { loadPluginMainHalves } = require('./plugin-main-loader');
 const { registerLicenseIpc } = require('./license-service');
+const { registerUpdateIpc } = require('./update-service');
 
 // 쿠팡 서플라이어 사이트 진입 URL
 const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
@@ -588,17 +589,22 @@ app.whenReady().then(() => {
 
   // 라이선스 IPC — entitlements gating 의 source. license-changed 이벤트는
   // 모든 BrowserWindow 의 webContents 로 브로드캐스트해 renderer 가 즉시 반영.
+  const broadcastAll = (channel, payload) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w && !w.isDestroyed()) {
+        try { w.webContents.send(channel, payload); } catch (_) { /* 무시 */ }
+      }
+    }
+  };
+
   registerLicenseIpc({
     ipcMain,
     dataDir: DATA_DIR,
-    broadcast: (channel, payload) => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (w && !w.isDestroyed()) {
-          try { w.webContents.send(channel, payload); } catch (_) { /* 무시 */ }
-        }
-      }
-    },
+    broadcast: broadcastAll,
   });
+
+  // 자동 업데이트 — electron-updater 래퍼. 부팅 후 5초 뒤 1회 체크.
+  registerUpdateIpc({ ipcMain, broadcast: broadcastAll });
 
   // ── WebContentsView 제어 IPC ────────────────────────────
   ipcMain.handle('webview:setVendor', (_e, vendorId) => {

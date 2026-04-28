@@ -4640,3 +4640,48 @@ button.session-badge:disabled {
 }
 .license-banner__action:hover { color: #0d47a1; }
 
+/* ─── Update Modal ───────────────────────────────────────── */
+.update-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9000;
+}
+.update-modal {
+  background: #fff; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  width: min(540px, 90vw); max-height: 80vh;
+  display: flex; flex-direction: column;
+  padding: 20px 22px; gap: 14px;
+}
+.update-modal__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  border-bottom: 1px solid #eceff1; padding-bottom: 10px;
+}
+.update-modal__title { font-size: 16px; font-weight: 600; color: #1a237e; }
+.update-modal__version { font-size: 13px; color: #5f6368; font-family: monospace; }
+.update-modal__notes {
+  overflow-y: auto; max-height: 50vh;
+  font-size: 13px; line-height: 1.55; color: #202124;
+  padding-left: 4px;
+}
+.update-modal__notes h4 { margin: 8px 0 4px; font-size: 14px; }
+.update-modal__notes p { margin: 4px 0; }
+.update-modal__notes li { margin-left: 18px; list-style: disc; }
+.update-modal__msg { font-size: 13px; color: #202124; }
+.update-modal__msg--error { color: #c62828; word-break: break-all; }
+.update-modal__progress {
+  height: 8px; background: #eceff1; border-radius: 4px; overflow: hidden;
+}
+.update-modal__bar {
+  height: 100%; background: linear-gradient(90deg, #1a73e8, #4285f4);
+  transition: width 0.2s ease;
+}
+.update-modal__progress-text {
+  font-size: 12px; color: #5f6368; text-align: center;
+}
+.update-modal__actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  border-top: 1px solid #eceff1; padding-top: 12px;
+}
+.update-card { margin-top: 12px; }
+

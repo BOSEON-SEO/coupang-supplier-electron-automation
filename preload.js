@@ -187,6 +187,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // ── 자동 업데이트 ──
+  update: {
+    get: () => ipcRenderer.invoke('update:get'),
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onStatus: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('update:status', handler);
+      return () => ipcRenderer.removeListener('update:status', handler);
+    },
+  },
+
   // ── 위험 동작 ──
   confirmDangerous: (actionName) => ipcRenderer.invoke('action:confirmDangerous', actionName),
 

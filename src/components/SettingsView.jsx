@@ -321,6 +321,9 @@ export default function SettingsView({ activeVendor }) {
       {/* 라이선스 — 캐시된 license dto 표시 + 재인증/지우기 */}
       <LicenseCard />
 
+      {/* 업데이트 — 현재 버전 + 수동 체크 */}
+      <UpdateCard />
+
       {activeModalField && (
         <ListManagerModal
           title={activeModalField.modalTitle}
@@ -434,6 +437,69 @@ function LicenseCard() {
           onClick={handleClear}
           disabled={busy || !license?.id}
         >라이선스 지우기</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 업데이트 카드 — 현재 버전 + 수동 체크. update:status 이벤트 구독해 상태 표시.
+ * 실제 모달(다운로드/재시작 안내) 은 App.jsx 의 <UpdateModal /> 이 담당.
+ */
+function UpdateCard() {
+  const [status, setStatus] = useState({ state: 'idle' });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cur = await window.electronAPI?.update?.get?.();
+        if (!cancelled && cur) setStatus(cur);
+      } catch (_) { /* 무시 */ }
+    })();
+    const off = window.electronAPI?.update?.onStatus?.((s) => setStatus(s || { state: 'idle' }));
+    return () => {
+      cancelled = true;
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
+  const handleCheck = async () => {
+    setBusy(true);
+    try { await window.electronAPI?.update?.check?.(); }
+    finally { setBusy(false); }
+  };
+
+  const labelOf = {
+    idle:        '대기',
+    checking:    '확인 중…',
+    available:   `새 버전 있음 (v${status.version || '?'})`,
+    downloading: `다운로드 중 ${status.percent || 0}%`,
+    downloaded:  `다운로드 완료 (v${status.version || '?'}) — 재시작 시 설치`,
+    'up-to-date': '최신 버전입니다',
+    dev:         '개발 모드 (자동 업데이트 비활성)',
+    error:       `오류: ${status.error || ''}`,
+    unavailable: '업데이트 모듈 미설치',
+  }[status.state] || status.state;
+
+  return (
+    <div className="license-card update-card">
+      <div className="license-card__head">
+        <span className="license-card__title">⬇ 업데이트</span>
+        <span className="license-card__status">{labelOf}</span>
+      </div>
+      <dl className="license-card__grid">
+        <dt>현재 버전</dt>
+        <dd>{__APP_VERSION__ || '—'}</dd>
+      </dl>
+      <div className="license-card__actions">
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={handleCheck}
+          disabled={busy || status.state === 'checking' || status.state === 'downloading'}
+        >⟳ 업데이트 확인</button>
       </div>
     </div>
   );

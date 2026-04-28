@@ -8,6 +8,7 @@ import SettingsView from './components/SettingsView';
 import PluginsView from './components/PluginsView';
 import FindBar from './components/FindBar';
 import LicenseGate from './components/LicenseGate';
+import UpdateModal from './components/UpdateModal';
 import { PluginProvider, ViewOutlet } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
 import { resolveEntitlementsFromLicense } from './core/entitlements';
@@ -284,6 +285,7 @@ export default function App() {
       </div>
 
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <UpdateModal />
       <FindBar />
       {/* 플러그인이 기여하는 전역 모달/오버레이 호스트 */}
       <ViewOutlet role={KNOWN_VIEW_ROLES.APP_OVERLAY} />
