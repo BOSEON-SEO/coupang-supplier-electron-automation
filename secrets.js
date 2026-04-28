@@ -17,6 +17,22 @@ let cache = null;
 function init(dataDir) {
   storePath = path.join(dataDir, 'secrets.enc');
   cache = null; // lazy
+
+  // 부팅 직후 settings.json 의 평문 비밀값을 자동 마이그레이션.
+  // 설정 화면을 안 열어도 안전하게 이전됨.
+  try {
+    const settingsPath = path.join(dataDir, 'settings.json');
+    if (!fs.existsSync(settingsPath)) return;
+    const raw = fs.readFileSync(settingsPath, 'utf-8');
+    const data = JSON.parse(raw);
+    if (!data.settings) data.settings = {};
+    if (migrateSettings(data.settings)) {
+      fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf-8');
+      console.log('[secrets] settings.json 의 평문 비밀값을 secrets.enc 로 이전');
+    }
+  } catch (err) {
+    console.warn('[secrets] 부팅 마이그레이션 실패:', err.message);
+  }
 }
 
 function load() {

@@ -978,6 +978,9 @@ function registerIpcHandlers({
           stdio: ['pipe', 'pipe', 'pipe'],
           // Windows에서 shell 사용하지 않음 (보안)
           shell: false,
+          // python.exe 가 console app 이라 부모(Electron) 가 콘솔 없는 환경에선
+          // 새 콘솔 창이 깜빡임. 사용자 경험상 숨김.
+          windowsHide: true,
         });
       } catch (err) {
         return resolve({
