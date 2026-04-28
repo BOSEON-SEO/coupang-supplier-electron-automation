@@ -9,6 +9,7 @@ directories:
 asar: true
 asarUnpack:
   - python/**/*
+  - python-runtime/**/*
   - "**/*.node"
 files:
   - dist/**/*
@@ -24,6 +25,7 @@ files:
   - src/core/deliveryCompanies.js
   - package.json
   - python/**/*
+  - python-runtime/**/*
   - "!**/*.{md,test.js,spec.js}"
   - "!docs/**"
   - "!scripts/**"

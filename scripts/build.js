@@ -35,6 +35,8 @@ console.log(`\n━━ flavor=${flavor} · config=${extraConfigPath} ━━\n`);
 
 execFileSync('node', [path.join('scripts', 'prepare-flavor.js'), flavor], opts);
 execFileSync('node', [path.join('scripts', 'prepare-release-notes.js')], opts);
+// Python embeddable + playwright 번들 (캐시 — 첫 빌드만 오래 걸림).
+execFileSync('node', [path.join('scripts', 'setup-python-runtime.js')], opts);
 
 execSync('npx webpack --mode production', opts);
 execSync(`npx electron-builder --config ${extraConfigPath}`, opts);

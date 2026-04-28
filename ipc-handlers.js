@@ -119,8 +119,18 @@ function detectPython() {
     }
   }
 
-  // ── 3) 프로젝트 로컬 venv (./python/.venv) ──
-  // 패키지 빌드에선 venv 가 제외되므로 dev 환경에서만 의미. 그래도 path 는 안전하게 변환.
+  // ── 3) 번들된 embeddable Python (./python-runtime/python.exe) ──
+  // 패키지 빌드는 setup-python-runtime.js 가 만들어 둔 디렉토리를 asarUnpack
+  // 으로 포함. 이게 있으면 사용자 PC 에 Python 미설치라도 동작.
+  const bundledPython = path.join(__dirname, 'python-runtime', 'python.exe')
+    .replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
+  if (fs.existsSync(bundledPython)) {
+    _cachedPythonPath = bundledPython;
+    return _cachedPythonPath;
+  }
+
+  // ── 4) 프로젝트 로컬 venv (./python/.venv) ──
+  // 패키지 빌드에선 venv 가 제외되므로 dev 환경에서만 의미.
   const venvDir = path.join(__dirname, 'python', '.venv').replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
   const venvCandidates = process.platform === 'win32'
     ? [path.join(venvDir, 'Scripts', 'python.exe')]
