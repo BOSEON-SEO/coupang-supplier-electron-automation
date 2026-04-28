@@ -40,6 +40,10 @@ const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
 // 환경변수 CDP_PORT로 오버라이드 가능 (기본: 9222).
 const CDP_PORT = parseInt(process.env.CDP_PORT, 10) || 9222;
 app.commandLine.appendSwitch('remote-debugging-port', String(CDP_PORT));
+// Chromium 111+ 는 file:// origin 에서 CDP attach 를 거부 — 패키지 빌드는
+// dist/index.html 을 file:// 로 로드하므로 명시적으로 모든 origin 허용 필요.
+// 9222 는 loopback 만 바인딩이라 외부 노출 위험은 없음.
+app.commandLine.appendSwitch('remote-allow-origins', '*');
 
 // ── 경로 상수 ──────────────────────────────────────────────
 const DATA_DIR = path.join(
