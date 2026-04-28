@@ -33,6 +33,7 @@
     "@babel/core": "^7.24.0",
     "@babel/preset-env": "^7.24.0",
     "@babel/preset-react": "^7.23.3",
+    "@electron/fuses": "^1.8.0",
     "babel-loader": "^9.1.3",
     "concurrently": "^8.2.2",
     "css-loader": "^6.10.0",
@@ -44,6 +45,54 @@
     "webpack": "^5.90.3",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^5.0.2"
+  },
+  "build": {
+    "appId": "com.tbnws.coupang-supplier-automation",
+    "productName": "쿠팡 서플라이어 자동화",
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js",
+      "ipc-handlers.js",
+      "license-service.js",
+      "plugin-main-loader.js",
+      "src/plugins/**/main.js",
+      "src/core/poStyler.js",
+      "src/core/confirmationBuilder.js",
+      "src/core/deliveryCompanies.js",
+      "package.json",
+      "!**/*.{md,test.js,spec.js}",
+      "!docs/**",
+      "!scripts/**",
+      "!python/.venv/**",
+      "!python/__pycache__/**"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "python/**/*",
+      "**/*.node"
+    ],
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build"
+    },
+    "afterPack": "./scripts/electron-fuses.js",
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "쿠팡 서플라이어 자동화"
+    }
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
