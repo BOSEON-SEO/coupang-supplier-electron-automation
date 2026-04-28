@@ -22,6 +22,7 @@ files:
   - src/core/confirmationBuilder.js
   - src/core/deliveryCompanies.js
   - package.json
+  - python/**/*
   - "!**/*.{md,test.js,spec.js}"
   - "!docs/**"
   - "!scripts/**"
