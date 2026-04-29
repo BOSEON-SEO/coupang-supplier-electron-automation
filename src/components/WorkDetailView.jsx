@@ -4,60 +4,43 @@ import WorkView from './WorkView';
 import PhaseStepper from './PhaseStepper';
 
 /**
- * 작업 상세 view
+ * 작업 상세 view — 작업뷰가 메인(풀스크린), 웹뷰는 우측 슬라이드 패널.
  *
- * 구조 (형제 요소, app-main--stack 안에 나열):
- *   work-detail-header
- *   app-pane--web  (flex: 1, 웹뷰 담기)
- *   work-bar       (토글 버튼, 36px)
- *   work-panel     (flex-basis 0 ↔ availableHeight px transition)
+ * 구조:
+ *   work-stack                 (column flex)
+ *     work-detail-header
+ *     work-stack__body         (row flex)
+ *       work-main              (작업뷰, 항상 풀사이즈로 차지)
+ *       web-panel              (width transition: 0 ↔ WEB_WIDTH px)
+ *         web-panel__edge      (좌측 세로 토글 바, 사용자 클릭 토글)
+ *         web-panel__inner     (WebView 마운트)
  *
- * 닫힘: work-panel flex-basis = 0
- * 열림: work-panel flex-basis = (app-main--stack height - header - work-bar)
- *       → 웹뷰가 밀려나고 패널이 콘텐츠 섹션 전체 차지
+ * 자동 펼침:
+ *   - CountdownModal mount  → onShowWeb()       (WorkView 내 pendingAction 변경 감지로 호출)
+ *   - Python 실행 시작      → onShowWeb()       (WorkView 의 pythonRunning 변경 시)
+ *   - 자동 트리거 종료 시   → 사용자 직전 상태로 복귀.
  *
- * pixel 값 transition 이라 양방향 모두 부드럽게.
+ * 사용자가 명시적으로 토글 버튼을 누르면 그 상태가 새 "사용자 의도" 가 된다.
  */
+const WEB_PANEL_WIDTH = 520;
+
 export default function WorkDetailView({
-  job, vendor, vendors, workOpen, onToggleWork, onCloseWork,
+  job, vendor, vendors,
+  webOpen, onToggleWeb, onShowWeb, onHideWeb,
   onJobUpdated, onBackToCalendar,
 }) {
-  // 표시용 vendor 이름 — vendors.json 의 name. 없으면 id fallback.
   const vendorMeta = (vendors || []).find((v) => v.id === job?.vendor);
   const vendorName = vendorMeta?.name || job?.vendor || '';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [availableHeight, setAvailableHeight] = useState(0);
   const [animated, setAnimated] = useState(false);
 
   const stackRef = useRef(null);
-  const headerRef = useRef(null);
-  const barRef = useRef(null);
 
-  // work-bar 는 work-panel 안이므로 header만 빼면 됨
-  // 첫 프레임에 availableHeight 확정 → 다음 프레임부터 transition 활성화
   useLayoutEffect(() => {
-    const stack = stackRef.current;
-    if (!stack) return;
-    const update = () => {
-      const total = stack.clientHeight;
-      const header = headerRef.current?.clientHeight || 0;
-      setAvailableHeight(Math.max(36, total - header));
-    };
-    update();
-
-    // 다음 프레임에 mount 플래그 on → 초기 점프 없이 이후 변화만 애니메이션
     const raf = requestAnimationFrame(() => setAnimated(true));
-
-    const ro = new ResizeObserver(update);
-    ro.observe(stack);
-    if (headerRef.current) ro.observe(headerRef.current);
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
+    return () => cancelAnimationFrame(raf);
   }, [job]);
-
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -100,7 +83,7 @@ export default function WorkDetailView({
 
   return (
     <div className="work-stack" ref={stackRef}>
-      <div className="work-detail-header" ref={headerRef}>
+      <div className="work-detail-header">
         <button
           type="button"
           className="btn btn--secondary work-detail-header__back"
@@ -122,6 +105,15 @@ export default function WorkDetailView({
         </div>
         <button
           type="button"
+          className="btn btn--secondary work-detail-header__webtoggle"
+          onClick={onToggleWeb}
+          title={webOpen ? '웹뷰 닫기' : '웹뷰 펼치기'}
+          aria-expanded={webOpen}
+        >
+          {webOpen ? '🌐 웹뷰 ▶' : '🌐 웹뷰 ◀'}
+        </button>
+        <button
+          type="button"
           className="btn btn--secondary work-detail-header__complete"
           onClick={handleComplete}
           disabled={busy || job.completed}
@@ -132,28 +124,26 @@ export default function WorkDetailView({
       </div>
       {error && <div className="modal__error" style={{ margin: '0 16px 8px' }}>{error}</div>}
 
-      <section className="app-pane app-pane--web">
-        <WebView vendor={vendor} isActive={!workOpen} />
-      </section>
+      <div className="work-stack__body">
+        <section className="work-main">
+          <WorkView
+            vendor={vendor}
+            job={job}
+            onCloseWork={onShowWeb}
+            onJobUpdated={onJobUpdated}
+          />
+        </section>
 
-      <section
-        className={`work-panel${workOpen ? ' work-panel--open' : ''}${animated ? ' work-panel--animated' : ''}`}
-        style={{ height: workOpen ? `${availableHeight}px` : '36px' }}
-      >
-        <button
-          type="button"
-          className={`work-bar${workOpen ? ' work-bar--open' : ''}`}
-          onClick={onToggleWork}
-          aria-expanded={workOpen}
-          ref={barRef}
+        <aside
+          className={`web-panel${webOpen ? ' web-panel--open' : ''}${animated ? ' web-panel--animated' : ''}`}
+          style={{ width: webOpen ? `${WEB_PANEL_WIDTH}px` : '0px' }}
+          aria-hidden={!webOpen}
         >
-        <span className="work-bar__label">📋 작업 패널</span>
-        <span className="work-bar__chevron">{workOpen ? '▼ 닫기' : '▲ 펼치기'}</span>
-      </button>
-        <div className="work-panel__inner">
-          <WorkView vendor={vendor} job={job} onCloseWork={onCloseWork} onJobUpdated={onJobUpdated} />
-        </div>
-      </section>
+          <div className="web-panel__inner">
+            <WebView vendor={vendor} isActive={webOpen} />
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
