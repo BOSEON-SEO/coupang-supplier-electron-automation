@@ -273,7 +273,10 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     prevLockTypesRef.current = cur;
   }, [locks, currentJobKey, appendLog]);
 
-  // ── Python 실행 시작 시 작업 패널 자동 접기 (웹뷰 노출) ──
+  // ── Python 실행 시작 시 웹뷰 슬라이드 패널 자동 펼침 ──
+  // (구 모델에서는 작업 패널을 접어 웹뷰를 노출했음 — 새 모델은 메인이 작업뷰라
+  //  대신 우측 웹뷰 패널을 자동으로 연다. onCloseWork prop 은 호환을 위해
+  //  이름은 그대로지만 의미는 "웹뷰 보여달라" 콜백이다.)
   const prevPythonRunningRef = useRef(false);
   useEffect(() => {
     if (!prevPythonRunningRef.current && pythonRunning) {
@@ -281,6 +284,11 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     }
     prevPythonRunningRef.current = pythonRunning;
   }, [pythonRunning, onCloseWork]);
+
+  // ── 카운트다운 모달 mount 시 (위험 동작 직전) 웹뷰 자동 펼침 ──
+  useEffect(() => {
+    if (pendingAction) onCloseWork?.();
+  }, [pendingAction, onCloseWork]);
 
   // 플러그인 창이 닫히며 lock 이 풀리는 순간, 해당 변경 결과를 뷰에 자동 반영.
   //   재고조정 닫힘 → po.xlsx 보고 있으면 리로드 (확정수량 변경)

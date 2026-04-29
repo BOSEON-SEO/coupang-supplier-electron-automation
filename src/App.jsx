@@ -41,8 +41,9 @@ export default function App() {
     return () => window.removeEventListener('job:reload', onReload);
   }, []);
 
-  // 작업 패널 토글 — 항상 닫힌 채로 시작
-  const [workOpen, setWorkOpen] = useState(false);
+  // 웹뷰 슬라이드 패널 토글 — 작업뷰가 메인, 웹뷰는 우측 슬라이드.
+  // 항상 접힌 채로 시작. Python 실행 / 카운트다운 시 자동 펼침.
+  const [webOpen, setWebOpen] = useState(false);
 
   // 패널/뷰 전환 시 매 프레임 WCV bounds 갱신
   useEffect(() => {
@@ -55,7 +56,7 @@ export default function App() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [workOpen, view]);
+  }, [webOpen, view]);
 
   // Ctrl+F 는 FindBar 가 직접 window keydown 으로 처리. App 에서는 별도 작업 없음.
 
@@ -157,7 +158,9 @@ export default function App() {
       if (data.killed) {
         showToast({ type: 'warn', text: `${hit.label} 다운로드가 취소되었습니다.` });
       } else if (data.exitCode === 0) {
-        if (hit.openWork) setWorkOpen(true);
+        // Python 종료 → 웹뷰 자동 펼침을 닫아서 작업뷰(메인)로 돌아옴.
+        // PO 다운로드처럼 결과 검토가 필요한 경우는 더더욱 작업뷰가 보여야 함.
+        if (hit.openWork) setWebOpen(false);
         showToast({ type: 'success', text: `${hit.label} 다운로드가 완료되었습니다.` });
         // PO 다운 완료 → 플러그인 po.postprocess 훅 호출 (파일 읽어 Buffer 로).
         if (hit.suffix === 'po_download.py') {
@@ -201,8 +204,9 @@ export default function App() {
     setActiveJob(job);
     // 작업의 벤더로 헤더 벤더 동기화 (WCV partition + 자동 로그인)
     if (job?.vendor && job.vendor !== vendor) setVendor(job.vendor);
-    // 새로 만든 작업이면 작업 패널은 접은 채로 시작 (PO 다운로드 지켜보게)
-    if (opts?.isNew) setWorkOpen(false);
+    // 새로 만든 작업이면 웹뷰 펼침 — PO 다운로드 시작을 사용자가 보게.
+    // (Python 실행 트리거가 자동 펼침을 켜기도 하지만 여기서 미리 펼쳐 둠)
+    if (opts?.isNew) setWebOpen(true);
     setView('work');
   };
 
@@ -273,9 +277,10 @@ export default function App() {
               job={activeJob}
               vendor={vendor}
               vendors={vendors}
-              workOpen={workOpen}
-              onToggleWork={() => setWorkOpen((o) => !o)}
-              onCloseWork={() => setWorkOpen(false)}
+              webOpen={webOpen}
+              onToggleWeb={() => setWebOpen((o) => !o)}
+              onShowWeb={() => setWebOpen(true)}
+              onHideWeb={() => setWebOpen(false)}
               onJobUpdated={(updated) => setActiveJob(updated)}
               onBackToCalendar={() => setView('calendar')}
             />
