@@ -25,3 +25,4 @@ src/plugins/_generated.js
 
 # setup-python-runtime.js 가 빌드 시 자동 생성 (캐시)
 python-runtime/
+docs/~$*.xlsx
