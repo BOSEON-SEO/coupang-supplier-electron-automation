@@ -2488,6 +2488,397 @@ function registerIpcHandlers({
    *     비고     → skuNotes
    *     창고수량 → coupang-export.json 스냅샷에 보관 (앱 내부 반영 안 됨)
    */
+  /**
+ * v2 양식 (확정/컨테이너/적재 3시트) apply.
+ *
+ * 단순 명료 — 3가지만 한다:
+ *   1. PO/po-tbnws/confirmation.xlsx 의 확정수량 컬럼 patch
+ *      (= 시트1.확정수량 + po-tbnws.fulfillment_export_qty 합산)
+ *   2. confirmation.xlsx 의 입고유형 + 부족사유 컬럼 갱신
+ *   3. transport.json 통째 재생성
+ */
+  async function applyV2({ buf, dir, confPath, date, vendor, sequence }) {
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    const aoaConfirm   = XLSX.utils.sheet_to_json(wb.Sheets['확정'],     { header: 1, defval: '' });
+    const aoaContainer = XLSX.utils.sheet_to_json(wb.Sheets['컨테이너'], { header: 1, defval: '' });
+    const aoaLoading   = XLSX.utils.sheet_to_json(wb.Sheets['적재'],     { header: 1, defval: '' });
+
+    // ── 시트별 파싱 ──
+    const headIndex = (aoa) => {
+      const h = aoa[0] || [];
+      const m = {};
+      h.forEach((c, i) => { m[String(c ?? '').trim()] = i; });
+      return m;
+    };
+    const num = (v) => { const n = Number(String(v ?? '').trim()); return Number.isFinite(n) ? n : 0; };
+    const str = (v) => String(v ?? '').trim();
+
+    const hC = headIndex(aoaConfirm);
+    const hK = headIndex(aoaContainer);
+    const hL = headIndex(aoaLoading);
+    for (const k of ['물류센터','발주번호','SKU Barcode','확정수량']) {
+      if (hC[k] == null) return { success: false, error: `'확정' 시트에 '${k}' 컬럼이 없습니다.` };
+    }
+    for (const k of ['물류센터','컨테이너ID','운송방법','박스수']) {
+      if (hK[k] == null) return { success: false, error: `'컨테이너' 시트에 '${k}' 컬럼이 없습니다.` };
+    }
+    for (const k of ['물류센터','발주번호','SKU Barcode','컨테이너ID','수량']) {
+      if (hL[k] == null) return { success: false, error: `'적재' 시트에 '${k}' 컬럼이 없습니다.` };
+    }
+
+    // 확정 시트: (wh|order|barcode) → confirmedQtyByWms
+    const wmsConfirmedQtyByKey = new Map();
+    for (let r = 1; r < aoaConfirm.length; r += 1) {
+      const row = aoaConfirm[r] || [];
+      const wh = str(row[hC['물류센터']]); if (!wh) continue;
+      const order = str(row[hC['발주번호']]);
+      const bc = str(row[hC['SKU Barcode']]);
+      if (!order || !bc) continue;
+      wmsConfirmedQtyByKey.set(`${wh}|${order}|${bc}`, num(row[hC['확정수량']]));
+    }
+
+    // 컨테이너 시트: (wh|cid) → meta
+    const containerByKey = new Map();
+    const containersByWhMethod = new Map(); // wh|method → ordered cid list
+    for (let r = 1; r < aoaContainer.length; r += 1) {
+      const row = aoaContainer[r] || [];
+      const wh = str(row[hK['물류센터']]); if (!wh) continue;
+      const cid = str(row[hK['컨테이너ID']]); if (!cid) continue;
+      const method = str(row[hK['운송방법']]);
+      const meta = {
+        wh, cid, method,
+        boxes:   num(row[hK['박스수']]),
+        invoice: hK['송장번호'] != null ? str(row[hK['송장번호']]) : '',
+        origin:  hK['출고지']   != null ? str(row[hK['출고지']])   : '',
+        preset:  hK['프리셋']   != null ? str(row[hK['프리셋']])   : '',
+        remark:  hK['비고']     != null ? str(row[hK['비고']])     : '',
+      };
+      containerByKey.set(`${wh}|${cid}`, meta);
+      const k = `${wh}|${method}`;
+      if (!containersByWhMethod.has(k)) containersByWhMethod.set(k, []);
+      containersByWhMethod.get(k).push(meta);
+    }
+
+    // 컨테이너 행 등장 순서로 1-based 번호 부여 (운송방법별로 독립)
+    const positionByContainer = new Map(); // wh|cid → 1-based position within wh+method
+    for (const [, list] of containersByWhMethod) {
+      list.forEach((meta, i) => {
+        positionByContainer.set(`${meta.wh}|${meta.cid}`, i + 1);
+      });
+    }
+
+    // 적재 시트: SKU × 컨테이너 매핑
+    const loadingRows = [];
+    for (let r = 1; r < aoaLoading.length; r += 1) {
+      const row = aoaLoading[r] || [];
+      const wh = str(row[hL['물류센터']]); if (!wh) continue;
+      const order = str(row[hL['발주번호']]);
+      const bc = str(row[hL['SKU Barcode']]);
+      const cid = str(row[hL['컨테이너ID']]);
+      const qty = num(row[hL['수량']]);
+      if (!order || !bc || !cid) continue;
+      loadingRows.push({ wh, order, bc, cid, qty });
+    }
+
+    // ── settings.json 에서 출고지/프리셋 룩업 맵 ──
+    const settingsRaw = (() => {
+      try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8')).settings || {}; }
+      catch { return {}; }
+    })();
+    const originList = [
+      ...(Array.isArray(settingsRaw.transportOriginList) ? settingsRaw.transportOriginList : []),
+      ...(Array.isArray(settingsRaw.shipmentOriginList)  ? settingsRaw.shipmentOriginList  : []),
+    ];
+    const presetList = Array.isArray(settingsRaw.palletPresetList) ? settingsRaw.palletPresetList : [];
+    const originSeqByName = new Map();
+    for (const o of originList) originSeqByName.set(str(o.location_name), str(o.location_seq));
+    const presetExistsByName = new Set(presetList.map((p) => str(p.name)));
+
+    // ── confirmation.xlsx → rowKey + 신청수량 + 부족사유 default ──
+    const wbConf = XLSX.readFile(confPath, { cellDates: false, cellStyles: false });
+    const wsConf = wbConf.Sheets[wbConf.SheetNames[0]];
+    const aoaConf = XLSX.utils.sheet_to_json(wsConf, { header: 1, defval: '' });
+    const hConf = headIndex(aoaConf);
+    const cOrder    = hConf['발주번호'];
+    const cWh       = hConf['물류센터'];
+    const cBarcode  = hConf['상품바코드'];
+    const cName     = hConf['상품이름'];
+    const cConfQty  = hConf['확정수량'];
+    const cOrderQty = hConf['발주수량'];
+
+    // (wh|order|bc) → { rowKey, orderQty, rowIndex }
+    const skuMetaByKey = new Map();
+    for (let r = 1; r < aoaConf.length; r += 1) {
+      const row = aoaConf[r] || [];
+      const wh = str(row[cWh]);
+      const order = str(row[cOrder]);
+      const bc = str(row[cBarcode]);
+      if (!wh || !order || !bc) continue;
+      skuMetaByKey.set(`${wh}|${order}|${bc}`, {
+        rowKey: `${order}|${bc}|${r + 1}`, // 1-based row number
+        orderQty: num(row[cOrderQty]),
+        rowIndex: r + 1,
+      });
+    }
+
+    // ── po-tbnws.xlsx 의 fulfillment_export_qty (반출수량) 매핑 ──
+    const tbnwsPath = path.join(dir, 'po-tbnws.xlsx');
+    const fulfillByKey = new Map();
+    if (fs.existsSync(tbnwsPath)) {
+      try {
+        const wbT = XLSX.readFile(tbnwsPath, { cellDates: false });
+        const aoaT = XLSX.utils.sheet_to_json(wbT.Sheets[wbT.SheetNames[0]], { header: 1, defval: '' });
+        const hT = headIndex(aoaT);
+        const iWh = hT['물류센터'];
+        const iOrder = hT['발주번호'];
+        const iBc = hT['상품바코드'];
+        const iFul = hT['반출수량'];
+        if (iWh != null && iOrder != null && iBc != null && iFul != null) {
+          for (let r = 1; r < aoaT.length; r += 1) {
+            const row = aoaT[r] || [];
+            const wh = str(row[iWh]); if (!wh) continue;
+            const order = str(row[iOrder]); if (!order) continue;
+            const bc = str(row[iBc]); if (!bc) continue;
+            fulfillByKey.set(`${wh}|${order}|${bc}`, num(row[iFul]));
+          }
+        }
+      } catch (err) {
+        console.warn('[applyV2] po-tbnws 반출수량 로드 실패:', err.message);
+      }
+    }
+
+    // ── 검증 ──
+    const errors = [];
+    // (a) 적재 → 컨테이너 참조 무결성
+    for (const l of loadingRows) {
+      if (!containerByKey.has(`${l.wh}|${l.cid}`)) {
+        errors.push(`적재 [${l.wh} ${l.cid}] 가 컨테이너 시트에 없음`);
+      }
+      if (!skuMetaByKey.has(`${l.wh}|${l.order}|${l.bc}`)) {
+        errors.push(`적재 [${l.wh} ${l.order} ${l.bc}] 가 PO 에 없음`);
+      }
+    }
+    // (b) 시트1 SKU → SUM(시트3) 검증
+    const loadSumByKey = new Map();
+    for (const l of loadingRows) {
+      const k = `${l.wh}|${l.order}|${l.bc}`;
+      loadSumByKey.set(k, (loadSumByKey.get(k) || 0) + l.qty);
+    }
+    const mismatchWarnings = [];
+    for (const [k, wmsQty] of wmsConfirmedQtyByKey) {
+      const sum = loadSumByKey.get(k) || 0;
+      if (sum !== wmsQty) {
+        mismatchWarnings.push(`${k}: 확정 ${wmsQty} ≠ 적재 합 ${sum}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return {
+        success: false,
+        error: `검증 실패: ${errors.length}건\n  ` + errors.slice(0, 10).join('\n  '),
+      };
+    }
+
+    // ── 1) confirmation.xlsx 갱신 ──
+    // ExcelJS 로 in-place patch (셀 스타일 보존).
+    const ExcelJS = require('exceljs');
+    const wbE = new ExcelJS.Workbook();
+    await wbE.xlsx.readFile(confPath);
+    const wsE = wbE.getWorksheet(wbConf.SheetNames[0]) || wbE.worksheets[0];
+    let iWh, iOrder, iBc, iConfQty, iType, iShortage, iOrderQty;
+    wsE.getRow(1).eachCell((cell, col) => {
+      const v = String(cell.value ?? '').trim();
+      if (v === '물류센터') iWh = col;
+      if (v === '발주번호') iOrder = col;
+      if (v === '상품바코드') iBc = col;
+      if (v === '확정수량') iConfQty = col;
+      if (v === '입고유형') iType = col;
+      if (v === '납품부족사유') iShortage = col;
+      if (v === '발주수량') iOrderQty = col;
+    });
+
+    // SKU → 첫 컨테이너의 운송방법 (입고유형 결정)
+    const firstMethodByKey = new Map();
+    for (const l of loadingRows) {
+      const k = `${l.wh}|${l.order}|${l.bc}`;
+      if (!firstMethodByKey.has(k)) {
+        const meta = containerByKey.get(`${l.wh}|${l.cid}`);
+        if (meta) firstMethodByKey.set(k, meta.method);
+      }
+    }
+
+    const defaultShortage = settingsRaw.defaultShortageReason || '재고부족';
+    let confirmationPatched = 0;
+    const last = wsE.actualRowCount || wsE.rowCount;
+    for (let r = 2; r <= last; r += 1) {
+      const wh = String(wsE.getCell(r, iWh).value ?? '').trim();
+      const order = String(wsE.getCell(r, iOrder).value ?? '').trim();
+      const bc = String(wsE.getCell(r, iBc).value ?? '').trim();
+      if (!wh || !order || !bc) continue;
+      const key = `${wh}|${order}|${bc}`;
+
+      const wmsQty = wmsConfirmedQtyByKey.get(key) ?? 0;
+      const fulfillQty = fulfillByKey.get(key) ?? 0;
+      const finalQty = wmsQty + fulfillQty;
+      const orderQty = num(wsE.getCell(r, iOrderQty).value);
+
+      // 확정수량 patch — WMS 가 시트1 에 안 적은 SKU 면 0 (납품제외)
+      wsE.getCell(r, iConfQty).value = finalQty;
+      // 입고유형 patch — 매핑 있으면 적용, 없으면 보존
+      if (iType && firstMethodByKey.has(key)) {
+        wsE.getCell(r, iType).value = firstMethodByKey.get(key);
+      }
+      // 부족사유 — 신청수량 > 최종확정수량 이면 default, 같으면 빈값
+      if (iShortage) {
+        if (orderQty > 0 && finalQty < orderQty) {
+          wsE.getCell(r, iShortage).value = defaultShortage;
+        } else {
+          wsE.getCell(r, iShortage).value = '';
+        }
+      }
+      confirmationPatched += 1;
+    }
+    await wbE.xlsx.writeFile(confPath);
+
+    // ── 2) po.xlsx, po-tbnws.xlsx 의 확정수량 patch ──
+    let poPatched = 0;
+    let tbnwsPatched = 0;
+    const patchExcel = async (filePath) => {
+      if (!fs.existsSync(filePath)) return 0;
+      try {
+        const wbX = new ExcelJS.Workbook();
+        await wbX.xlsx.readFile(filePath);
+        const wsX = wbX.worksheets[0];
+        let xWh, xOrder, xBc, xConf;
+        wsX.getRow(1).eachCell((cell, col) => {
+          const v = String(cell.value ?? '').trim();
+          if (v === '물류센터') xWh = col;
+          if (v === '발주번호') xOrder = col;
+          if (v === '상품바코드' || v === 'SKU Barcode') xBc = col;
+          if (v === '확정수량') xConf = col;
+        });
+        if (!xWh || !xOrder || !xBc || !xConf) return 0;
+        let n = 0;
+        const lastRow = wsX.actualRowCount || wsX.rowCount;
+        for (let r = 2; r <= lastRow; r += 1) {
+          const wh = String(wsX.getCell(r, xWh).value ?? '').trim();
+          const order = String(wsX.getCell(r, xOrder).value ?? '').trim();
+          const bc = String(wsX.getCell(r, xBc).value ?? '').trim();
+          if (!wh || !order || !bc) continue;
+          const key = `${wh}|${order}|${bc}`;
+          if (!wmsConfirmedQtyByKey.has(key)) continue;
+          const finalQty = (wmsConfirmedQtyByKey.get(key) || 0) + (fulfillByKey.get(key) || 0);
+          wsX.getCell(r, xConf).value = finalQty;
+          n += 1;
+        }
+        if (n > 0) await wbX.xlsx.writeFile(filePath);
+        return n;
+      } catch (err) {
+        console.warn('[applyV2] patch 실패:', filePath, err.message);
+        return 0;
+      }
+    };
+    poPatched = await patchExcel(path.join(dir, 'po.xlsx'));
+    tbnwsPatched = await patchExcel(tbnwsPath);
+
+    // ── 3) transport.json 재생성 ──
+    const assignments = {};
+    // 센터별로 lots 묶기
+    for (const meta of containerByKey.values()) {
+      if (!assignments[meta.wh]) assignments[meta.wh] = { lots: [], skuNotes: {} };
+    }
+    for (const wh of Object.keys(assignments)) {
+      const a = assignments[wh];
+      // 운송방법별 lot
+      const milkrunContainers = (containersByWhMethod.get(`${wh}|밀크런`) || []);
+      const shipmentContainers = (containersByWhMethod.get(`${wh}|쉽먼트`) || []);
+
+      if (shipmentContainers.length > 0) {
+        const lot = {
+          id: makeLotId(),
+          type: '쉽먼트',
+          boxCount: shipmentContainers.reduce((s, c) => s + (c.boxes || 0), 0),
+          boxInvoices: shipmentContainers.map((c) => c.invoice || ''),
+          items: [],
+        };
+        a.lots.push(lot);
+      }
+      if (milkrunContainers.length > 0) {
+        // 첫 컨테이너의 출고지/프리셋을 lot 메타로
+        const firstOrigin = milkrunContainers[0]?.origin || '';
+        const lot = {
+          id: makeLotId(),
+          type: '밀크런',
+          originId: originSeqByName.get(firstOrigin) || firstOrigin,
+          totalBoxes: milkrunContainers.reduce((s, c) => s + (c.boxes || 0), 0),
+          pallets: milkrunContainers.map((c) => ({
+            presetName: presetExistsByName.has(c.preset) ? c.preset : (c.preset || ''),
+            boxCount: String(c.boxes || ''),
+          })),
+          items: [],
+        };
+        a.lots.push(lot);
+      }
+    }
+
+    // items 채움
+    for (const l of loadingRows) {
+      const meta = containerByKey.get(`${l.wh}|${l.cid}`);
+      if (!meta) continue;
+      const skuMeta = skuMetaByKey.get(`${l.wh}|${l.order}|${l.bc}`);
+      if (!skuMeta) continue;
+      const a = assignments[l.wh];
+      const lot = (a.lots || []).find((x) => x.type === meta.method);
+      if (!lot) continue;
+      const pos = positionByContainer.get(`${l.wh}|${l.cid}`);
+      if (meta.method === '쉽먼트') {
+        lot.items.push({ rowKey: skuMeta.rowKey, qty: l.qty, boxNo: String(pos) });
+      } else if (meta.method === '밀크런') {
+        lot.items.push({ rowKey: skuMeta.rowKey, qty: l.qty, palletNo: String(pos) });
+      }
+    }
+
+    // 비고 → skuNotes (SKU 한 행에 여러 컨테이너 비고가 있으면 첫 비어있지 않은 값)
+    for (const l of loadingRows) {
+      const meta = containerByKey.get(`${l.wh}|${l.cid}`);
+      if (!meta || !meta.remark) continue;
+      const skuMeta = skuMetaByKey.get(`${l.wh}|${l.order}|${l.bc}`);
+      if (!skuMeta) continue;
+      const a = assignments[l.wh];
+      if (!a.skuNotes[skuMeta.rowKey]) a.skuNotes[skuMeta.rowKey] = meta.remark;
+    }
+
+    fs.writeFileSync(
+      path.join(dir, 'transport.json'),
+      JSON.stringify({
+        schemaVersion: 4,
+        updatedAt: new Date().toISOString(),
+        assignments,
+      }, null, 2),
+      'utf-8',
+    );
+
+    // 원본 업로드본도 보관
+    fs.writeFileSync(path.join(dir, 'coupang-export-latest.xlsx'), buf);
+
+    // 작업 파일 갱신 이벤트 (renderer 자동 reload)
+    try {
+      broadcastFileUpdated({ date, vendor, sequence: Number(sequence), file: 'confirmation.xlsx' });
+      broadcastFileUpdated({ date, vendor, sequence: Number(sequence), file: 'transport.json' });
+    } catch { /* 무시 */ }
+
+    return {
+      success: true,
+      schema: 'v2',
+      confirmationPatched,
+      poPatched,
+      tbnwsPatched,
+      transportPatched: Object.keys(assignments).length,
+      mismatchCount: mismatchWarnings.length,
+      mismatchSamples: mismatchWarnings.slice(0, 5),
+    };
+  }
+
   ipcMain.handle('tbnwsCoupangExport:apply', async (_e, date, vendor, sequence, fileBuffer) => {
     if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
       return { success: false, error: 'invalid args' };
@@ -2497,6 +2888,19 @@ function registerIpcHandlers({
     const confPath = path.join(dir, 'confirmation.xlsx');
     if (!fs.existsSync(confPath)) {
       return { success: false, error: 'confirmation.xlsx 가 없습니다.' };
+    }
+
+    // ── v2 양식 (3시트 통합) 감지 ──
+    // 시트명 ['확정','컨테이너','적재'] 가 모두 있으면 v2 로 처리. 아니면 v1 (legacy 단일시트).
+    try {
+      const buf0 = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
+      const wbProbe = XLSX.read(buf0, { type: 'buffer' });
+      const names = new Set(wbProbe.SheetNames);
+      if (names.has('확정') && names.has('컨테이너') && names.has('적재')) {
+        return await applyV2({ wbProbe, buf: buf0, dir, confPath, date, vendor, sequence });
+      }
+    } catch (err) {
+      console.warn('[tbnwsCoupangExport:apply] v2 probe 실패, v1 로 진행:', err.message);
     }
     try {
       const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
