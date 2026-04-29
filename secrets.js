@@ -127,32 +127,42 @@ function migrateSettings(settings) {
 }
 
 /**
- * settings 객체에서 비밀 필드 자리에 placeholder 를 채워 renderer 에 노출.
- * placeholder = "값이 저장돼있음" 의 신호. UI 는 password 입력으로 표시.
+ * settings 객체에서 비밀 필드를 빈 문자열로 마스킹 (renderer 노출용).
+ * 이전엔 placeholder 문자열을 넣었으나 password 필드에서 사용자가 추가 입력 시
+ * 합쳐지는 UX 버그가 있어 빈 문자열로 통일. UI 는 별도로 hasSecret 정보를 받아
+ * "저장됨" 표시.
  */
 function maskSettings(settings) {
   for (const k of SECRET_KEYS) {
-    if (hasSecret(k)) setNested(settings, k, SECRET_PLACEHOLDER);
+    if (hasSecret(k)) setNested(settings, k, '');
   }
 }
 
 /**
  * renderer 가 settings:save 로 보낸 값에서 비밀 필드 추출 → secrets.enc 갱신.
- * settings 객체에서 해당 필드는 제거. placeholder 면 변경 없음으로 무시.
+ * 빈/undefined → 변경 없음 (사용자가 안 건드린 경우. 명시적 삭제는 별도 IPC 로).
+ * 비어있지 않은 새 값 → setSecret. legacy placeholder 값도 변경 없음으로 처리.
  */
 function applyAndStripSecrets(settings) {
   for (const k of SECRET_KEYS) {
     const val = getNested(settings, k);
-    if (val === SECRET_PLACEHOLDER || val === undefined) {
+    if (val === undefined || val === null || val === '' || val === SECRET_PLACEHOLDER) {
       deleteNested(settings, k); // 변경 없음
-    } else if (val === '' || val === null) {
-      setSecret(k, '');           // 명시적 삭제
-      deleteNested(settings, k);
     } else if (typeof val === 'string') {
       setSecret(k, val);
       deleteNested(settings, k);
     }
   }
+}
+
+/**
+ * settings:load 응답에 어느 키가 저장됐는지 알려주는 부가 정보 — UI 에서
+ * "저장됨" 배지 표시용.
+ */
+function getSecretFlags() {
+  const out = {};
+  for (const k of SECRET_KEYS) out[k] = hasSecret(k);
+  return out;
 }
 
 module.exports = {
@@ -165,4 +175,5 @@ module.exports = {
   migrateSettings,
   maskSettings,
   applyAndStripSecrets,
+  getSecretFlags,
 };
