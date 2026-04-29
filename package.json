@@ -1,6 +1,6 @@
 {
   "name": "coupang-supplier-automation",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "쿠팡 서플라이어 허브 Electron 자동화 앱",
   "main": "main.js",
   "scripts": {
