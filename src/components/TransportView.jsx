@@ -69,6 +69,7 @@ export default function TransportView({
   const [collapsedWh, setCollapsedWh] = useState({});
   const [expandedLotId, setExpandedLotId] = useState(null);
   const [addModal, setAddModal] = useState(null); // { wh, type }
+  const [lotTypeFilter, setLotTypeFilter] = useState('all'); // 'all' | '쉽먼트' | '밀크런'
 
   // groups 재갱신 시 재초기화. dep 에 defaults 를 넣으면 부모가 매 렌더마다 새
   // 객체로 내려보낼 때 사용자 입력 도중 setLotsByWh 가 호출되어 입력이
@@ -221,6 +222,26 @@ export default function TransportView({
             총 <strong>{groups.length}</strong>개 창고 · <strong>{totalSkuCount}</strong>개 제품
           </span>
           <div className="transport-summary__spacer" />
+          {/* lot 타입 필터 — 재고분배 chip 패턴 동일 */}
+          <button
+            type="button"
+            className={`lot-filter-chip${lotTypeFilter === 'all' ? ' is-on' : ''}`}
+            onClick={() => setLotTypeFilter('all')}
+            title="모든 lot 표시"
+          >전체</button>
+          <button
+            type="button"
+            className={`lot-filter-chip lot-filter-chip--shipment${lotTypeFilter === '쉽먼트' ? ' is-on' : ''}`}
+            onClick={() => setLotTypeFilter((f) => (f === '쉽먼트' ? 'all' : '쉽먼트'))}
+            title="쉽먼트 lot 만 표시"
+          >📦 쉽먼트</button>
+          <button
+            type="button"
+            className={`lot-filter-chip lot-filter-chip--milkrun${lotTypeFilter === '밀크런' ? ' is-on' : ''}`}
+            onClick={() => setLotTypeFilter((f) => (f === '밀크런' ? 'all' : '밀크런'))}
+            title="밀크런 lot 만 표시"
+          >🚛 밀크런</button>
+          <span className="transport-summary__sep" />
           <button
             type="button"
             className="transport-summary__toggle"
@@ -247,6 +268,7 @@ export default function TransportView({
               originList={originList}
               collapsed={!!collapsedWh[g.warehouse]}
               expandedLotId={expandedLotId}
+              lotTypeFilter={lotTypeFilter}
               onToggleCollapse={() =>
                 setCollapsedWh((p) => ({ ...p, [g.warehouse]: !p[g.warehouse] }))
               }
@@ -372,13 +394,14 @@ function cleanLotForSave(lot) {
 // ──────────────────────────────────────────────────────────────
 function WarehouseCard({
   group, data, defaults, originList,
-  collapsed, expandedLotId,
+  collapsed, expandedLotId, lotTypeFilter = 'all',
   onToggleCollapse, onToggleLot, onOpenAddLot, onRemoveLot,
   onLotFieldChange, onLotPalletsChange,
   onAddItemRow, onUpdateItem, onRemoveItemRow,
   onRemoveSkuFromLot, onAddSkuToLot, onNote,
 }) {
-  const lots = data.lots || [];
+  const allLots = data.lots || [];
+  const lots = lotTypeFilter === 'all' ? allLots : allLots.filter((l) => l.type === lotTypeFilter);
   const skuNotes = data.skuNotes || {};
 
   // 미배정 수량 계산

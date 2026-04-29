@@ -4391,6 +4391,38 @@ button.session-badge:disabled {
 }
 .license-banner__action:hover { color: #0d47a1; }
 
+/* ─── Lot Filter Chip (TransportView 상단 토글) ─────────────── */
+.lot-filter-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  font-size: 12px; font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent; color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.lot-filter-chip:hover { background: rgba(26, 115, 232, 0.08); }
+.lot-filter-chip.is-on {
+  background: rgba(26, 115, 232, 0.15);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.lot-filter-chip--shipment.is-on {
+  background: rgba(67, 160, 71, 0.18);
+  border-color: rgba(67, 160, 71, 0.6);
+  color: #2e7d32;
+}
+.lot-filter-chip--milkrun.is-on {
+  background: rgba(251, 192, 45, 0.28);
+  border-color: rgba(251, 192, 45, 0.7);
+  color: #b8860b;
+}
+.transport-summary__sep {
+  display: inline-block; width: 1px; height: 16px;
+  background: var(--color-border); margin: 0 4px;
+}
+
 /* ─── Update Modal ───────────────────────────────────────── */
 .update-modal-backdrop {
   position: fixed; inset: 0;

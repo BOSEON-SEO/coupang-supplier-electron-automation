@@ -376,7 +376,31 @@ def _fill_one_row(page, *, index: int, entry: dict, weight: int,
         # TransportView UI 저장 구조가 이렇게 저장하고 있어서, 여기서는
         # 사용자의 '가로-세로-높이' 순서를 지키기 위해 key 이름이 아닌 '의미' 로 매핑.
         rental_for_row = rental_company
-        for pallet in entry["pallets"]:
+
+        # 같은 프리셋(이름·치수·렌탈사 동일) 끼리 묶어 한 행에 count=N 으로 입력.
+        # 예: "아주팔레트 대" 가 5개면 5줄이 아니라 1줄 × count=5.
+        # 그룹 순서는 첫 등장 순.
+        groups: list[dict] = []  # [{key, sample, count}]
+        for p in entry["pallets"]:
+            key = (
+                str(p.get("presetName") or "").strip(),
+                str(p.get("width")  or "").strip(),
+                str(p.get("height") or "").strip(),
+                str(p.get("depth")  or "").strip(),
+                str(p.get("rentalId") or "").strip(),
+            )
+            existing = next((g for g in groups if g["key"] == key), None)
+            if existing:
+                existing["count"] += int(str(p.get("count") or "1") or "1")
+            else:
+                groups.append({
+                    "key": key,
+                    "sample": p,
+                    "count": int(str(p.get("count") or "1") or "1"),
+                })
+
+        for g in groups:
+            pallet = g["sample"]
             page.locator(f"#addPallet_{index}").click(timeout=BUTTON_TIMEOUT_MS)
             time.sleep(0.3)
             pallet_body = page.locator(f"#palletBody_{index}")
@@ -384,7 +408,7 @@ def _fill_one_row(page, *, index: int, entry: dict, weight: int,
             horizontal = str(pallet.get("width")  or "").strip()  # '가로'
             vertical   = str(pallet.get("height") or "").strip()  # '세로' (key='height')
             tall       = str(pallet.get("depth")  or "").strip()  # '높이' (key='depth')
-            pc = str(pallet.get("count") or "").strip() or "1"
+            pc = str(g["count"])  # 그룹 사이즈
             if horizontal:
                 last_row.locator('input[name="length"]').fill(horizontal, timeout=BUTTON_TIMEOUT_MS)
             if vertical:
@@ -392,7 +416,6 @@ def _fill_one_row(page, *, index: int, entry: dict, weight: int,
             if tall:
                 last_row.locator('input[name="height"]').fill(tall, timeout=BUTTON_TIMEOUT_MS)
             last_row.locator('input[name="count"]').fill(pc, timeout=BUTTON_TIMEOUT_MS)
-            # 첫 팔레트의 rentalId 를 row 의 렌탈사 select 값으로 채택
             pallet_rental = str(pallet.get("rentalId") or "").strip()
             if pallet_rental:
                 rental_for_row = pallet_rental

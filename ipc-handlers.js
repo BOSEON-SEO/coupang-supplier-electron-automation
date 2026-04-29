@@ -2815,6 +2815,39 @@ function registerIpcHandlers({
         a.lots = (a.lots || []).filter((l) => (l.items || []).length > 0);
       }
 
+      // ── 밀크런 lot 의 팔레트 메타 자동 추론 ──
+      // 사용자가 운송분배를 미리 안 채우고 엑셀만 업로드한 경우, items 의 palletNo
+      // 최대값으로 lot.pallets 를 채워서 화면이 비지 않게. 프리셋은 settings 의 첫 번째.
+      // totalBoxes 는 비워둔다 (사용자가 직접 입력).
+      let firstPresetName = '';
+      try {
+        const settingsRaw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
+        const presets = JSON.parse(settingsRaw)?.settings?.palletPresetList || [];
+        if (presets.length > 0 && presets[0]?.name) firstPresetName = presets[0].name;
+      } catch { /* 무시 */ }
+
+      for (const wh of Object.keys(assignments)) {
+        const a = assignments[wh];
+        for (const lot of a.lots || []) {
+          if (lot.type !== '밀크런') continue;
+          const palletNos = (lot.items || [])
+            .map((it) => parseInt(it.palletNo, 10))
+            .filter((n) => Number.isFinite(n) && n > 0);
+          if (palletNos.length === 0) continue;
+          const maxPallet = Math.max(...palletNos);
+          // 기존 pallets 가 비었거나 [ {빈} ] 한 개뿐이면 자동 채움
+          const existing = Array.isArray(lot.pallets) ? lot.pallets : [];
+          const allEmpty = existing.every((p) =>
+            !p || (!p.presetName && !p.boxCount));
+          if (existing.length < maxPallet && allEmpty) {
+            lot.pallets = Array.from({ length: maxPallet }, () => ({
+              presetName: firstPresetName,
+              boxCount: '',
+            }));
+          }
+        }
+      }
+
       fs.writeFileSync(transportPath, JSON.stringify({
         schemaVersion: 4,
         updatedAt: new Date().toISOString(),
