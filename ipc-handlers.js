@@ -2830,20 +2830,27 @@ function registerIpcHandlers({
         const a = assignments[wh];
         for (const lot of a.lots || []) {
           if (lot.type !== '밀크런') continue;
-          const palletNos = (lot.items || [])
-            .map((it) => parseInt(it.palletNo, 10))
-            .filter((n) => Number.isFinite(n) && n > 0);
-          if (palletNos.length === 0) continue;
-          const maxPallet = Math.max(...palletNos);
-          // 기존 pallets 가 비었거나 [ {빈} ] 한 개뿐이면 자동 채움
+          // palletNo 별 박스 수량 합산 — WMS 가 SKU 분할로 같은 palletNo 를
+          // 여러 행으로 나눠 적어도 한 팔레트로 합쳐짐.
+          const palletBoxByNum = new Map(); // 1-based palletNo → sum(qty)
+          for (const it of lot.items || []) {
+            const n = parseInt(it.palletNo, 10);
+            if (!Number.isFinite(n) || n <= 0) continue;
+            palletBoxByNum.set(n, (palletBoxByNum.get(n) || 0) + (Number(it.qty) || 0));
+          }
+          if (palletBoxByNum.size === 0) continue;
+          const maxPallet = Math.max(...palletBoxByNum.keys());
           const existing = Array.isArray(lot.pallets) ? lot.pallets : [];
           const allEmpty = existing.every((p) =>
             !p || (!p.presetName && !p.boxCount));
           if (existing.length < maxPallet && allEmpty) {
-            lot.pallets = Array.from({ length: maxPallet }, () => ({
-              presetName: firstPresetName,
-              boxCount: '',
-            }));
+            lot.pallets = Array.from({ length: maxPallet }, (_, i) => {
+              const sum = palletBoxByNum.get(i + 1);
+              return {
+                presetName: firstPresetName,
+                boxCount: sum ? String(sum) : '',
+              };
+            });
           }
         }
       }
