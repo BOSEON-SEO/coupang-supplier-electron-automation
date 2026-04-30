@@ -1816,13 +1816,14 @@ function registerIpcHandlers({
           const migrated = migrateAssignment(s);
           const flat = flattenAssignmentForUi(migrated);
 
-          // 최초 로드 (저장 기록 없음) 면서 default 값으로 초기화 필요한 경우 보강.
+          // 최초 로드 (저장 기록 없음) — lots 를 빈 채로 둔다.
+          // 사용자가 '+ 쉽먼트' / '+ 밀크런' 으로 직접 추가하거나, 엑셀 업로드로 채워짐.
+          // (이전엔 쉽먼트 1개를 자동으로 만들었으나 의도치 않은 빈 lot 잔존이 잦아 제거.)
           if (migrated.lots.length === 0) {
-            const defaultType = g.defaultType || defaultTypeFallback;
-            flat.transportType = defaultType;
-            flat.originId = defTransport.originId || '';
-            flat.totalBoxes = defTransport.totalBoxes || '';
-            flat.pallets = [defaultPallet()];
+            flat.transportType = '';
+            flat.originId = '';
+            flat.totalBoxes = '';
+            flat.pallets = [];
           }
 
           return {
@@ -2478,6 +2479,50 @@ function registerIpcHandlers({
   });
 
   /**
+   * 쿠팡반출 설정 리셋 — 잘못된 transport.json/스냅샷을 깨끗이 비우고 처음부터 다시.
+   * 삭제 대상:
+   *   - transport.json   (운송분배 — 쉽먼트/밀크런 lot 통째)
+   *   - coupang-export.json (창고수량/비고 스냅샷)
+   *   - coupang-export-template.xlsx (생성된 양식 캐시)
+   *   - coupang-export-latest.xlsx (마지막 업로드 원본 보관본)
+   * 보존:
+   *   - confirmation.xlsx, po.xlsx, po-tbnws.xlsx (PO/확정 자체는 유지)
+   */
+  ipcMain.handle('tbnwsCoupangExport:reset', async (_e, date, vendor, sequence) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    try {
+      const dir = jobDir(dataDir, date, vendor, sequence);
+      const targets = [
+        'transport.json',
+        'coupang-export.json',
+        'coupang-export-template.xlsx',
+        'coupang-export-latest.xlsx',
+      ];
+      const removed = [];
+      for (const name of targets) {
+        const p = path.join(dir, name);
+        if (fs.existsSync(p)) {
+          try { fs.unlinkSync(p); removed.push(name); } catch (_) { /* 무시 */ }
+        }
+      }
+      // renderer 가 운송분배 탭/모달을 즉시 갱신하도록 알림
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('job:file-updated', {
+            date, vendor, sequence, file: 'transport.json',
+          });
+        }
+      } catch (_) { /* 무시 */ }
+      return { success: true, removed };
+    } catch (err) {
+      console.error('[tbnwsCoupangExport:reset]', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
    * 쿠팡반출 양식 업로드 반영.
    *   파싱 후:
    *     확정수량 → confirmedQty:sync (cross-file)
@@ -2918,6 +2963,7 @@ function registerIpcHandlers({
       for (const k of required) {
         if (col[k] == null) return { success: false, error: `컬럼 '${k}' 이 없습니다.` };
       }
+      const iOrder = col['발주번호'];
       const iWh = col['물류센터'];
       const iCode = col['상품코드'];
       const iBc = col['SKU Barcode'];
@@ -2943,7 +2989,9 @@ function registerIpcHandlers({
       const cCode = cmConf['상품번호'];
       const cBc = cmConf['상품바코드'];
 
-      const rowKeyByLookup = new Map(); // key = `${wh}|${code}|${bc}` → { rowKey, orderSeq }
+      // 키에 발주번호 포함 — 같은 SKU 가 다른 PO 에 동시 존재하는 경우(다른 차수 합쳐오기 등)
+      // 두 PO 가 한 그룹으로 묶여 transportEntries 가 중복되던 버그 방지.
+      const rowKeyByLookup = new Map(); // key = `${orderSeq}|${wh}|${code}|${bc}`
       for (let r = 1; r < aoaConf.length; r += 1) {
         const row = aoaConf[r] || [];
         const wh = String(row[cWh] ?? '').trim();
@@ -2951,7 +2999,7 @@ function registerIpcHandlers({
         const bc = String(row[cBc] ?? '').trim();
         const orderSeq = String(row[cOrder] ?? '');
         if (!wh || !bc) continue;
-        rowKeyByLookup.set(`${wh}|${code}|${bc}`, {
+        rowKeyByLookup.set(`${orderSeq}|${wh}|${code}|${bc}`, {
           rowKey: `${orderSeq}|${bc}|${r}`,
           orderSeq,
           warehouseComposite: `${orderSeq}|${wh}|${bc}`,
@@ -2981,13 +3029,22 @@ function registerIpcHandlers({
         return Number.isFinite(n) ? n : null;
       };
       const uploadsByComposite = new Map();
+      // 발주번호는 분할 행 중 일부에만 채워져 있을 수 있음(첫 행만). 그래서 row 단위로
+      // last-seen 을 추적해 빈 셀에 보강한다. 같은 SKU 가 다른 PO 에 동시 존재할 때
+      // 발주번호를 못 잃으면 매칭 실패함.
+      let lastOrderSeq = '';
       for (let r = 1; r < aoa.length; r += 1) {
         const row = aoa[r] || [];
         const wh = String(row[iWh] ?? '').trim();
         const code = String(row[iCode] ?? '').trim();
         const bc = String(row[iBc] ?? '').trim();
+        let orderSeq = iOrder != null ? String(row[iOrder] ?? '').trim() : '';
+        if (orderSeq) lastOrderSeq = orderSeq;
+        else orderSeq = lastOrderSeq;
         if (!wh || !bc) continue;
-        const lookup = rowKeyByLookup.get(`${wh}|${code}|${bc}`);
+        const lookup = rowKeyByLookup.get(`${orderSeq}|${wh}|${code}|${bc}`)
+          // legacy: 발주번호 누락 엑셀(구버전 양식 등) 호환 — 발주번호 없이도 매칭 시도
+          || rowKeyByLookup.get(`|${wh}|${code}|${bc}`);
         if (!lookup) continue;
 
         const composite = lookup.warehouseComposite;
@@ -3245,9 +3302,12 @@ function registerIpcHandlers({
           if (palletBoxByNum.size === 0) continue;
           const maxPallet = Math.max(...palletBoxByNum.keys());
           const existing = Array.isArray(lot.pallets) ? lot.pallets : [];
-          const allEmpty = existing.every((p) =>
+          // 사용자가 미리 채운 팔레트가 없으면(전부 빈 셀) 엑셀 업로드 결과로 통째 재구성.
+          // 이전엔 `existing.length < maxPallet` 조건이 있어 maxPallet=1 인 경우(보통)
+          // 채워지지 않는 버그가 있었음 → allEmpty 만으로 판단.
+          const allEmpty = existing.length === 0 || existing.every((p) =>
             !p || (!p.presetName && !p.boxCount));
-          if (existing.length < maxPallet && allEmpty) {
+          if (allEmpty) {
             lot.pallets = Array.from({ length: maxPallet }, (_, i) => {
               const sum = palletBoxByNum.get(i + 1);
               return {
@@ -3259,10 +3319,18 @@ function registerIpcHandlers({
         }
       }
 
+      // v3 backward-compat 필드(transportType, originId, totalBoxes, pallets) 도 함께 기록.
+      // milkrun_register.py / shipment_register.py 가 v3 필드를 읽기 때문에 누락되면
+      // "처리할 entry 0개" 로 끝남. transport:save 경로(serializeAssignmentForSave) 와 동일.
+      const flattenedAssignments = {};
+      for (const wh of Object.keys(assignments)) {
+        const a = assignments[wh];
+        flattenedAssignments[wh] = { ...a, ...flattenAssignmentForUi(a) };
+      }
       fs.writeFileSync(transportPath, JSON.stringify({
         schemaVersion: 4,
         updatedAt: new Date().toISOString(),
-        assignments,
+        assignments: flattenedAssignments,
       }, null, 2), 'utf-8');
 
       // ── 4. 스냅샷 저장 — generate 의 다음 호출에서 사용자 입력 보존용 ──

@@ -285,10 +285,10 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     prevPythonRunningRef.current = pythonRunning;
   }, [pythonRunning, onCloseWork]);
 
-  // ── 카운트다운 모달 mount 시 (위험 동작 직전) 웹뷰 자동 펼침 ──
-  useEffect(() => {
-    if (pendingAction) onCloseWork?.();
-  }, [pendingAction, onCloseWork]);
+  // ── 카운트다운 중에는 웹뷰를 열지 않는다 ──
+  // 이전엔 pendingAction 발생 즉시 펼쳤으나 WCV(BrowserView) 가 카운트다운 모달
+  // 위로 overlay 되며 모달 스타일이 깨지는 문제가 있었음. 카운트다운 종료 후
+  // pythonRunning 이 true 가 되는 시점에 위 useEffect 가 펼치므로 별도 트리거 X.
 
   // 플러그인 창이 닫히며 lock 이 풀리는 순간, 해당 변경 결과를 뷰에 자동 반영.
   //   재고조정 닫힘 → po.xlsx 보고 있으면 리로드 (확정수량 변경)
@@ -1289,6 +1289,37 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     if (!job) return;
     const api = window.electronAPI;
     if (!api) return;
+    // 등록 대상이 없으면 카운트다운 스킵하고 토스트만.
+    // Python 스크립트(milkrun_register.py)와 동일하게 transportType 기준으로 판정.
+    // (v3 호환 필드. v4 lots 만 있고 transportType 누락된 경우는 Python 이 0건으로 처리하므로 동일.)
+    try {
+      const tpath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'transport.json');
+      if (tpath?.success && (await api.fileExists(tpath.path))) {
+        const read = await api.readFile(tpath.path);
+        if (read?.success && read.data) {
+          const t = JSON.parse(new TextDecoder('utf-8').decode(read.data));
+          const asn = t?.assignments || {};
+          const has = Object.values(asn).some((a) => a?.transportType === '밀크런');
+          if (!has) {
+            // lots 에는 밀크런이 있는데 transportType 만 빠진 stale 케이스 안내.
+            const hasLot = Object.values(asn).some((a) =>
+              (a?.lots || []).some((l) => l.type === '밀크런' && (l.items || []).length > 0));
+            const hint = hasLot
+              ? ' 운송분배 모달을 열어 한 번 저장하거나, 쿠팡반출 양식을 다시 업로드하세요.'
+              : ' 운송분배에서 밀크런 lot 을 먼저 추가하세요.';
+            window.dispatchEvent(new CustomEvent('app:toast', {
+              detail: { type: 'warn', text: '등록할 밀크런이 없습니다 —' + hint },
+            }));
+            return;
+          }
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', {
+          detail: { type: 'warn', text: '등록할 밀크런이 없습니다 — 운송분배 먼저 진행하세요.' },
+        }));
+        return;
+      }
+    } catch { /* 조회 실패해도 진행 */ }
     try {
       const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
       const hist = mres?.success ? mres.manifest?.milkrunHistory : null;
@@ -1399,6 +1430,43 @@ export default function WorkView({ vendor, job, onCloseWork, onJobUpdated }) {
     if (!job) return;
     const api = window.electronAPI;
     if (!api) return;
+    // 등록 대상(미처리 쉽먼트 lot) 없으면 카운트다운 스킵.
+    // Python(shipment_register.py)과 동일하게 transportType 기준.
+    try {
+      const tpath = await api.resolveJobPath(job.date, job.vendor, job.sequence, 'transport.json');
+      if (tpath?.success && (await api.fileExists(tpath.path))) {
+        const read = await api.readFile(tpath.path);
+        if (read?.success && read.data) {
+          const t = JSON.parse(new TextDecoder('utf-8').decode(read.data));
+          const asn = t?.assignments || {};
+          const has = Object.values(asn).some((a) => a?.transportType === '쉽먼트');
+          if (!has) {
+            const hasLot = Object.values(asn).some((a) =>
+              (a?.lots || []).some((l) => l.type === '쉽먼트' && (l.items || []).length > 0));
+            const hint = hasLot
+              ? ' 운송분배 모달을 열어 한 번 저장하거나, 쿠팡반출 양식을 다시 업로드하세요.'
+              : ' 운송분배에서 쉽먼트 lot 을 먼저 추가하세요.';
+            window.dispatchEvent(new CustomEvent('app:toast', {
+              detail: { type: 'warn', text: '등록할 쉽먼트가 없습니다 —' + hint },
+            }));
+            return;
+          }
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', {
+          detail: { type: 'warn', text: '등록할 쉽먼트가 없습니다 — 운송분배 먼저 진행하세요.' },
+        }));
+        return;
+      }
+      // 모든 센터 등록 완료 상태면 토스트
+      const progress = await loadShipmentProgress(api, job);
+      if (progress && progress.pendingCenters.length === 0 && progress.allCenters.length > 0) {
+        window.dispatchEvent(new CustomEvent('app:toast', {
+          detail: { type: 'info', text: '등록할 쉽먼트가 없습니다 — 모든 센터 등록 완료.' },
+        }));
+        return;
+      }
+    } catch { /* 조회 실패해도 진행 */ }
     try {
       const mres = await api.jobs.loadManifest(job.date, job.vendor, job.sequence);
       const hist = mres?.success ? mres.manifest?.shipmentHistory : null;

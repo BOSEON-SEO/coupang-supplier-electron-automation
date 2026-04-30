@@ -140,6 +140,15 @@ export default function App() {
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+  // 자식 컴포넌트가 prop drilling 없이 토스트를 띄우는 경로 — window 이벤트.
+  useEffect(() => {
+    const handler = (e) => {
+      const d = e?.detail;
+      if (d && d.text) showToast(d);
+    };
+    window.addEventListener('app:toast', handler);
+    return () => window.removeEventListener('app:toast', handler);
+  }, [showToast]);
 
   // ── 다운로드 완료 감지: PO 는 작업 패널 자동 열기 + 토스트, 서류는 토스트만 ──
   useEffect(() => {

@@ -572,7 +572,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  /* FortuneSheet 스크롤바/툴바가 dim 위로 비치는 문제 방지 — fortune-sheet 내부
+     요소들이 z-index 1000~9999 까지 쓸 수 있어서 충분히 높게. */
+  z-index: 99999;
   animation: modal-fade-in 0.15s ease-out;
 }
 
