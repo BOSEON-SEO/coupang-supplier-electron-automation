@@ -110,6 +110,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('tbnwsCoupangExport:apply', date, vendor, sequence, fileBuffer),
     reset: (date, vendor, sequence) =>
       ipcRenderer.invoke('tbnwsCoupangExport:reset', date, vendor, sequence),
+    zeroOutUnmatched: (date, vendor, sequence, keys) =>
+      ipcRenderer.invoke('tbnwsCoupangExport:zeroOutUnmatched', date, vendor, sequence, keys),
   },
 
   // ── 작업 파일 갱신 이벤트 (confirmation/po/po-tbnws 등 자동 재로드용) ──

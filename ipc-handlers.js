@@ -3350,6 +3350,34 @@ function registerIpcHandlers({
         'utf-8',
       );
 
+      // ── 5. 업로드 누락 SKU 감지 ──
+      // WMS 가 확정수량 0(실제 재고 부족) 행을 아예 빼고 보낼 때, confirmation 의 해당
+      // 행은 그대로 남아 있어 PO 와 어긋남. 사용자에게 모아서 보고 → 0 처리 옵션 제공.
+      const matchedComposites = new Set([...uploadsByComposite.keys()]);
+      const cName = cmConf['상품이름'];
+      const cQty = cmConf['확정수량'];
+      const unmatchedRows = [];
+      if (cQty != null) {
+        for (let r = 1; r < aoaConf.length; r += 1) {
+          const row = aoaConf[r] || [];
+          const wh = String(row[cWh] ?? '').trim();
+          const bc = String(row[cBc] ?? '').trim();
+          const orderSeq = String(row[cOrder] ?? '');
+          const qty = Number(row[cQty]) || 0;
+          if (!wh || !bc || qty <= 0) continue;
+          const composite = `${orderSeq}|${wh}|${bc}`;
+          if (matchedComposites.has(composite)) continue;
+          unmatchedRows.push({
+            key: composite,
+            orderSeq,
+            warehouse: wh,
+            barcode: bc,
+            name: cName != null ? String(row[cName] ?? '') : '',
+            currentQty: qty,
+          });
+        }
+      }
+
       return {
         success: true,
         parsedRows: uploads.length,
@@ -3358,9 +3386,39 @@ function registerIpcHandlers({
         transportPatched,
         mismatchCount: mismatchWarnings.length,
         mismatchSamples: mismatchWarnings.slice(0, 5),
+        unmatchedRows,
       };
     } catch (err) {
       console.error('[tbnwsCoupangExport:apply]', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * 업로드 누락 SKU 의 확정수량을 0 으로 패치 — confirmation/po/po-tbnws 동시.
+   * @param keys Array<string> — 발주번호|물류센터|SKU바코드 복합키
+   */
+  ipcMain.handle('tbnwsCoupangExport:zeroOutUnmatched', async (_e, date, vendor, sequence, keys) => {
+    if (!isValidDate(date) || !isValidVendor(vendor) || !isValidSeq(sequence)) {
+      return { success: false, error: 'invalid args' };
+    }
+    if (!Array.isArray(keys) || keys.length === 0) {
+      return { success: true, patched: 0 };
+    }
+    try {
+      const defaultReason = loadDefaultShortageReason(vendor);
+      const patches = keys.map((k) => ({
+        key: String(k),
+        confirmedQty: '0',
+        shortageReason: defaultReason,
+      }));
+      const syncRes = await syncConfirmedQtyAcrossFiles(date, vendor, sequence, patches, {});
+      const patched = syncRes?.success
+        ? Object.values(syncRes.results || {}).reduce((sum, r) => sum + (r?.patched || 0), 0)
+        : 0;
+      return { success: true, patched };
+    } catch (err) {
+      console.error('[tbnwsCoupangExport:zeroOutUnmatched]', err);
       return { success: false, error: err.message };
     }
   });
