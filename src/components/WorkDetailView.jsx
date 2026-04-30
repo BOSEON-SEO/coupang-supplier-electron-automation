@@ -22,7 +22,10 @@ import PhaseStepper from './PhaseStepper';
  *
  * 사용자가 명시적으로 토글 버튼을 누르면 그 상태가 새 "사용자 의도" 가 된다.
  */
-const WEB_PANEL_WIDTH = 520;
+const WEB_PANEL_DEFAULT = 520;
+const WEB_PANEL_MIN = 320;
+const WEB_PANEL_MAX = 1200;
+const WEB_PANEL_STORAGE = 'webPanelWidth';
 
 export default function WorkDetailView({
   job, vendor, vendors,
@@ -35,12 +38,49 @@ export default function WorkDetailView({
   const [error, setError] = useState('');
   const [animated, setAnimated] = useState(false);
 
+  // 폭 — 사용자 드래그로 조정. localStorage 영속.
+  const [webWidth, setWebWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem(WEB_PANEL_STORAGE) || '', 10);
+    return Number.isFinite(saved) && saved >= WEB_PANEL_MIN && saved <= WEB_PANEL_MAX ? saved : WEB_PANEL_DEFAULT;
+  });
+  const [resizing, setResizing] = useState(false);
+
   const stackRef = useRef(null);
 
   useLayoutEffect(() => {
     const raf = requestAnimationFrame(() => setAnimated(true));
     return () => cancelAnimationFrame(raf);
   }, [job]);
+
+  // 드래그 리사이즈 — pointer move 로 폭 갱신, up 시 종료 + 저장.
+  const startResize = useCallback((e) => {
+    e.preventDefault();
+    setResizing(true);
+    const startX = e.clientX;
+    const startW = webWidth;
+    const onMove = (ev) => {
+      const dx = startX - ev.clientX; // 좌측으로 끌수록 폭 증가
+      const next = Math.min(WEB_PANEL_MAX, Math.max(WEB_PANEL_MIN, startW + dx));
+      setWebWidth(next);
+      window.dispatchEvent(new Event('webview-bounds-update'));
+    };
+    const onUp = () => {
+      setResizing(false);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [webWidth]);
+
+  // 드래그 종료 시 저장
+  useEffect(() => {
+    if (!resizing) localStorage.setItem(WEB_PANEL_STORAGE, String(webWidth));
+  }, [resizing, webWidth]);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -135,10 +175,19 @@ export default function WorkDetailView({
         </section>
 
         <aside
-          className={`web-panel${webOpen ? ' web-panel--open' : ''}${animated ? ' web-panel--animated' : ''}`}
-          style={{ width: webOpen ? `${WEB_PANEL_WIDTH}px` : '0px' }}
+          className={`web-panel${webOpen ? ' web-panel--open' : ''}${animated && !resizing ? ' web-panel--animated' : ''}`}
+          style={{ width: webOpen ? `${webWidth}px` : '0px' }}
           aria-hidden={!webOpen}
         >
+          {webOpen && (
+            <div
+              className="web-panel__resizer"
+              onPointerDown={startResize}
+              role="separator"
+              aria-orientation="vertical"
+              title="드래그해서 너비 조정"
+            />
+          )}
           <div className="web-panel__inner">
             <WebView vendor={vendor} isActive={webOpen} />
           </div>

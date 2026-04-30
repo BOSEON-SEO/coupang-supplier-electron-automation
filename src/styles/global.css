@@ -167,8 +167,9 @@ body {
   background: var(--color-bg);
 }
 
-/* 우측 웹뷰 슬라이드 패널 — width 0 ↔ WEB_PANEL_WIDTH */
+/* 우측 웹뷰 슬라이드 패널 — width 0 ↔ webWidth(드래그 조정) */
 .web-panel {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   flex-direction: row;
@@ -176,6 +177,43 @@ body {
   background: var(--color-bg);
   border-left: 1px solid var(--color-border);
   box-shadow: -4px 0 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 좌측 가장자리 드래그 핸들 — 6px 폭, hover/active 시 강조 */
+.web-panel__resizer {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 14px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+/* 가운데 작은 그립 인디케이터 (세로 점 3개) */
+.web-panel__resizer::before {
+  content: '';
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--color-border, #d1d5db);
+  box-shadow: 0 0 0 2px transparent;
+  transition: background 0.12s, height 0.12s;
+}
+.web-panel__resizer:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+.web-panel__resizer:hover::before {
+  background: var(--color-primary, #2563eb);
+  height: 48px;
+}
+.web-panel__resizer:active::before {
+  background: var(--color-primary, #2563eb);
+  height: 64px;
 }
 
 .web-panel--animated {
@@ -189,6 +227,9 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* WCV(BrowserView)가 webview-host 위치에 overlay 됨. 좌측 여백으로 밀어서
+     .web-panel__resizer (-6~+8px) 와 겹치지 않게 함. */
+  padding-left: 10px;
 }
 
 /* header 토글 버튼 — 작업완료 버튼 옆 */
