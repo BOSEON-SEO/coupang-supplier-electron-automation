@@ -1,6 +1,6 @@
 {
   "name": "coupang-supplier-automation",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "쿠팡 서플라이어 허브 Electron 자동화 앱",
   "main": "main.js",
   "scripts": {
@@ -116,7 +116,7 @@
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
-    "coupang-supplier-plugin-tbnws": "github:BOSEON-SEO/coupang-supplier-plugin-tbnws#main",
+    "coupang-supplier-plugin-tbnws": "github:BOSEON-SEO/coupang-supplier-plugin-tbnws#v1.2.6",
     "electron-updater": "^6.8.3",
     "exceljs": "^4.4.0",
     "luckyexcel": "^1.0.1",

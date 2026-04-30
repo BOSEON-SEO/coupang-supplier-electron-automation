@@ -2351,8 +2351,8 @@ function registerIpcHandlers({
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet('반출');
 
-      const HEADER = ['물류센터', '총 주문수량', '총 풀필반출', '발주번호', '상품코드',
-        'SKU Barcode', '상품명', '신청수량', '반출', '창고수량', '확정수량',
+      // v3 — 9컬럼 단일 시트 양식. 외부 WMS 와 합의된 표준.
+      const HEADER = ['물류센터', '발주번호', 'SKU Barcode', '확정수량',
         '운송방법', '박스번호', '송장번호', '파렛트번호', '비고'];
       ws.addRow(HEADER);
       ws.getRow(1).eachCell((cell) => {
@@ -2360,37 +2360,27 @@ function registerIpcHandlers({
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
       });
       // 컬럼 폭
-      ws.getColumn(1).width = 12;
-      ws.getColumn(2).width = 10;
-      ws.getColumn(3).width = 10;
-      ws.getColumn(4).width = 12;
-      ws.getColumn(5).width = 18;
-      ws.getColumn(6).width = 18;
-      ws.getColumn(7).width = 50;
-      for (let c = 8; c <= 16; c += 1) ws.getColumn(c).width = 10;
+      ws.getColumn(1).width = 12;  // 물류센터
+      ws.getColumn(2).width = 14;  // 발주번호
+      ws.getColumn(3).width = 18;  // SKU Barcode
+      ws.getColumn(4).width = 10;  // 확정수량
+      ws.getColumn(5).width = 10;  // 운송방법
+      ws.getColumn(6).width = 10;  // 박스번호
+      ws.getColumn(7).width = 14;  // 송장번호
+      ws.getColumn(8).width = 12;  // 파렛트번호
+      ws.getColumn(9).width = 24;  // 비고
 
-      // 센터 그룹 경계 추적 + preview 용 rows 축적.
-      //
       // 같은 SKU 가 운송분배에서 여러 박스/파렛트로 나뉘면 여러 엑셀 행으로 분할.
-      // 분할 행 규칙 (denormalized — 사람이 보기 좋도록 SKU 정보 모든 행에 반복):
-      //   - 센터 단위: 총 주문수량/총 풀필반출 → 센터 첫 행에만
-      //   - SKU 단위: 상품명/신청수량/반출/창고수량/비고 → 모든 분할 행에 반복 (같은 값)
-      //   - 박스 단위: 확정수량(박스 적재량)/운송방법/박스/송장/파렛트 → 행마다 다른 값
-      //   - 식별 키 (물류센터/발주번호/상품코드/SKU Barcode) → 모든 행 반복
-      //
-      // apply 측에서:
-      //   - SKU 단위 컬럼은 그룹의 첫 비어있지 않은 행 값만 사용 (반복돼도 무해)
-      //   - 확정수량은 모든 행 SUM
-      //   - 박스 단위는 행별 transportEntries 에 누적
+      //   - 식별 키 (물류센터/발주번호/SKU Barcode) → 모든 행 반복 (apply 매칭용)
+      //   - 박스 단위 (확정수량/운송방법/박스/송장/파렛트) → 행마다 다른 값
+      //   - 비고 → 첫 분할 행에만 표기 (apply 는 first-non-empty 로 처리)
+      //   - 쉽먼트 행 파레트번호 = 0, 밀크런 행 송장번호 = 빈 셀 (관습)
       const previewRows = [];
       let prevWh = null;
       for (const d of dataRows) {
         const saved = savedRows[d.rowKey] || {};
         const centerAsn = assignments[d.wh] || {};
 
-        // transport.json lots 에서 이 SKU(rowKey) 의 모든 배정 수집.
-        // 각 entry = { lotType, boxNo, palletNo, invoiceNo, qty }
-        // qty 는 박스별 적재량 — 확정수량 컬럼에 들어가는 값.
         const transportEntries = [];
         for (const lot of (centerAsn.lots || [])) {
           for (const it of (lot.items || [])) {
@@ -2411,50 +2401,38 @@ function registerIpcHandlers({
             transportEntries.push(entry);
           }
         }
-        // 운송분배 기록이 없으면 SKU 총량 1행 (분할 X). 박스/파렛트 비움.
         if (transportEntries.length === 0) {
           transportEntries.push({
             lotType: d.transportType || '',
             boxNo: '', palletNo: '', invoiceNo: '',
-            qty: d.reqQty,  // 분할 안 됐으니 SKU 총량 그대로
+            qty: d.reqQty,
           });
         }
 
-        const totals = totalsByWh.get(d.wh) || {};
-        const exportQty = saved.fulfillExportQty ?? exportQtyByKey.get(d.warehouseComposite) ?? 0;
-        const warehouseQty = saved.warehouseQty ?? Math.max(0, d.reqQty - exportQty);
         const firstRowOfCenter = prevWh !== d.wh;
 
-        // 분할 행 표기 — 보기 편한 빈 셀 스타일.
-        //   식별 키 (센터/발주/상품코드/바코드): 모든 행 반복 (apply 매칭용)
-        //   SKU 단위 (상품명/신청/반출/창고/비고): 첫 분할 행에만, 나머지 빈 셀
-        //   박스 단위 (확정/운송/박스/송장/파렛트): 행마다 다른 값
-        // apply 는 SUM 으로 처리하므로 빈 셀(=0) + 첫행 값 = SKU 총 자동 보존.
         transportEntries.forEach((te, idx) => {
           const isFirstSplit = idx === 0;
           const isFirstOfCenter = isFirstSplit && firstRowOfCenter;
+          const method = saved.transportMethod || te.lotType || '';
+          const isShipment = method === '쉽먼트';
 
           const rowValues = [
-            d.wh,                                              // 물류센터 — 모든 행 (식별 키)
-            isFirstOfCenter ? totals.totalReq : '',            // 총 주문수량 — 센터 첫 행만
-            isFirstOfCenter ? totals.totalExport : '',         // 총 풀필반출 — 센터 첫 행만
-            d.orderSeq,                                        // 발주번호 — 모든 행 (식별 키)
-            d.code,                                            // 상품코드 — 모든 행 (식별 키)
-            d.barcode,                                         // SKU Barcode — 모든 행 (식별 키)
-            isFirstSplit ? d.name : '',                        // 상품명 — 첫 분할 행만
-            isFirstSplit ? d.reqQty : '',                      // 신청수량 — 첫 분할 행만
-            isFirstSplit ? exportQty : '',                     // 반출 — 첫 분할 행만 (SKU 총)
-            isFirstSplit ? warehouseQty : '',                  // 창고수량 — 첫 분할 행만
-            te.qty,                                            // 확정수량 — 행별 (박스 적재량)
-            saved.transportMethod || te.lotType,               // 운송방법 — 행별
-            te.boxNo,                                          // 박스번호 — 행별
-            te.invoiceNo,                                      // 송장번호 — 행별
-            te.palletNo,                                       // 파렛트번호 — 행별
-            isFirstSplit ? (saved.remark ?? '') : '',          // 비고 — 첫 분할 행만
+            d.wh,                                              // 물류센터
+            d.orderSeq,                                        // 발주번호
+            d.barcode,                                         // SKU Barcode
+            te.qty,                                            // 확정수량 (박스 적재량)
+            method,                                            // 운송방법
+            te.boxNo,                                          // 박스번호
+            isShipment ? te.invoiceNo : '',                    // 송장번호 (쉽먼트만)
+            isShipment ? (te.palletNo || 0) : te.palletNo,     // 파렛트번호 (쉽먼트=0)
+            isFirstSplit ? (saved.remark ?? '') : '',          // 비고
           ];
           const row = ws.addRow(rowValues);
           row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { size: 10 }; });
-          row.getCell(6).numFmt = '0';
+          // 발주번호 / SKU Barcode 텍스트 양식 (앞자리 0 보존, 지수표기 방지)
+          row.getCell(2).numFmt = '@';
+          row.getCell(3).numFmt = '@';
 
           previewRows.push({ values: rowValues, isFirstOfCenter });
         });
@@ -2959,17 +2937,18 @@ function registerIpcHandlers({
       const head = aoa[0] || [];
       const col = {};
       head.forEach((h, i) => { col[String(h ?? '').trim()] = i; });
-      const required = ['물류센터', '상품코드', 'SKU Barcode', '확정수량'];
+      // v3 9컬럼 양식 필수: 물류센터, SKU Barcode, 확정수량.
+      // 상품코드/신청/반출/창고/상품명 은 구버전 16컬럼 양식 호환용 — 있으면 사용, 없으면 무시.
+      const required = ['물류센터', 'SKU Barcode', '확정수량'];
       for (const k of required) {
         if (col[k] == null) return { success: false, error: `컬럼 '${k}' 이 없습니다.` };
       }
       const iOrder = col['발주번호'];
       const iWh = col['물류센터'];
-      const iCode = col['상품코드'];
       const iBc = col['SKU Barcode'];
-      const iReq = col['신청수량'];
-      const iExport = col['반출'];
-      const iWhQty = col['창고수량'];
+      const iReq = col['신청수량'];      // optional (legacy)
+      const iExport = col['반출'];       // optional (legacy)
+      const iWhQty = col['창고수량'];    // optional (legacy)
       const iConfirmed = col['확정수량'];
       const iMethod = col['운송방법'];
       const iBox = col['박스번호'];
@@ -2989,21 +2968,25 @@ function registerIpcHandlers({
       const cCode = cmConf['상품번호'];
       const cBc = cmConf['상품바코드'];
 
-      // 키에 발주번호 포함 — 같은 SKU 가 다른 PO 에 동시 존재하는 경우(다른 차수 합쳐오기 등)
-      // 두 PO 가 한 그룹으로 묶여 transportEntries 가 중복되던 버그 방지.
-      const rowKeyByLookup = new Map(); // key = `${orderSeq}|${wh}|${code}|${bc}`
+      // 키 — `${orderSeq}|${wh}|${bc}` (상품코드 미사용. v3 양식엔 상품코드 없음.)
+      // 같은 SKU 가 다른 PO 에 동시 존재하는 경우 발주번호로 구분.
+      // 발주번호 누락 케이스 fallback 을 위해 wh|bc → [orderSeq...] 보조 색인도 준비.
+      const rowKeyByLookup = new Map();      // primary
+      const orderSeqsByWhBc = new Map();     // fallback — wh|bc → Set<orderSeq>
       for (let r = 1; r < aoaConf.length; r += 1) {
         const row = aoaConf[r] || [];
         const wh = String(row[cWh] ?? '').trim();
-        const code = String(row[cCode] ?? '').trim();
         const bc = String(row[cBc] ?? '').trim();
         const orderSeq = String(row[cOrder] ?? '');
         if (!wh || !bc) continue;
-        rowKeyByLookup.set(`${orderSeq}|${wh}|${code}|${bc}`, {
+        rowKeyByLookup.set(`${orderSeq}|${wh}|${bc}`, {
           rowKey: `${orderSeq}|${bc}|${r}`,
           orderSeq,
           warehouseComposite: `${orderSeq}|${wh}|${bc}`,
         });
+        const fk = `${wh}|${bc}`;
+        if (!orderSeqsByWhBc.has(fk)) orderSeqsByWhBc.set(fk, new Set());
+        orderSeqsByWhBc.get(fk).add(orderSeq);
       }
 
       // 업로드 데이터 파싱 + 분할 행 그룹핑.
@@ -3029,22 +3012,27 @@ function registerIpcHandlers({
         return Number.isFinite(n) ? n : null;
       };
       const uploadsByComposite = new Map();
-      // 발주번호는 분할 행 중 일부에만 채워져 있을 수 있음(첫 행만). 그래서 row 단위로
-      // last-seen 을 추적해 빈 셀에 보강한다. 같은 SKU 가 다른 PO 에 동시 존재할 때
-      // 발주번호를 못 잃으면 매칭 실패함.
+      // 발주번호 누락 시 보강:
+      //   1) 같은 행 안의 분할이면 last-seen 으로 carry-forward
+      //   2) 그래도 비어있으면 (wh,bc) 로 confirmation 에서 단일 PO 만 존재할 경우 그것으로 추정
+      //   3) 다중 PO 인데 발주번호 누락 → 매칭 불가, skip
       let lastOrderSeq = '';
       for (let r = 1; r < aoa.length; r += 1) {
         const row = aoa[r] || [];
         const wh = String(row[iWh] ?? '').trim();
-        const code = String(row[iCode] ?? '').trim();
         const bc = String(row[iBc] ?? '').trim();
         let orderSeq = iOrder != null ? String(row[iOrder] ?? '').trim() : '';
-        if (orderSeq) lastOrderSeq = orderSeq;
-        else orderSeq = lastOrderSeq;
+        if (orderSeq) {
+          lastOrderSeq = orderSeq;
+        } else if (lastOrderSeq) {
+          orderSeq = lastOrderSeq;
+        } else {
+          // last-seen 도 없으면 (wh,bc) 단일 PO 추정
+          const candidates = orderSeqsByWhBc.get(`${wh}|${bc}`);
+          if (candidates && candidates.size === 1) orderSeq = [...candidates][0];
+        }
         if (!wh || !bc) continue;
-        const lookup = rowKeyByLookup.get(`${orderSeq}|${wh}|${code}|${bc}`)
-          // legacy: 발주번호 누락 엑셀(구버전 양식 등) 호환 — 발주번호 없이도 매칭 시도
-          || rowKeyByLookup.get(`|${wh}|${code}|${bc}`);
+        const lookup = rowKeyByLookup.get(`${orderSeq}|${wh}|${bc}`);
         if (!lookup) continue;
 
         const composite = lookup.warehouseComposite;
