@@ -269,18 +269,22 @@ def find_vendor_page(browser):
         send_log("열린 페이지가 없습니다.")
         return None
 
-    # 1순위: supplier.coupang.com
-    for page, url in all_pages:
-        if SESSION_VALID_DOMAIN in url:
-            send_log(f"vendor 페이지 발견 (supplier): {url}")
-            return page
-
-    # 2순위: Keycloak 로그인 페이지
+    # ★ 0순위: 활성 Keycloak/xauth 페이지가 보이면 세션 만료 상태로 판단.
+    #    이전 버전은 supplier 페이지 우선이었으나, 사용자가 로그인 폼을 보고 있는데도
+    #    stale 한 supplier.coupang.com/dashboard 페이지(이전 세션의 잔여)가 잡혀
+    #    세션 유효로 오판되는 false-positive 발생. 활성 로그인 페이지는 명백한
+    #    "지금 로그인 필요" 시그널이므로 무조건 그쪽이 우선.
     keycloak_hosts = ["login.coupang.com", "sso.coupang.com", "xauth.coupang.com"]
     for page, url in all_pages:
         parsed = urlparse(url)
         if parsed.hostname in keycloak_hosts:
-            send_log(f"vendor 페이지 발견 (keycloak): {url}")
+            send_log(f"활성 로그인 페이지 감지 — 세션 만료: {url}")
+            return page
+
+    # 1순위: supplier.coupang.com
+    for page, url in all_pages:
+        if SESSION_VALID_DOMAIN in url:
+            send_log(f"vendor 페이지 발견 (supplier): {url}")
             return page
 
     # 3순위: coupang.com 도메인
