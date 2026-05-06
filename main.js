@@ -194,7 +194,8 @@ function ensureWebView(vendorId) {
     title: `쿠팡 서플라이어 — ${vendorId}`,
     backgroundColor: '#ffffff',
     show: false,
-    parent: mainWindow || undefined,
+    // parent 미설정 — 독립 윈도우. parent 가 있으면 부모 위에 고정되어
+    // 메인앱이 위로 못 올라옴. OS 의 일반 창 z-order 로 동작하도록 둠.
     webPreferences: {
       partition: `persist:vendor-${vendorId}`,
       contextIsolation: true,
