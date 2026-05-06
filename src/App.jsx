@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AppShell from './shell/AppShell';
-import CalendarView from './components/CalendarView';
+import CalendarV4 from './views/calendar/CalendarV4';
+import PoListView from './views/po-list/PoListView';
 import WorkDetailView from './components/WorkDetailView';
 import ToastContainer from './components/Toast';
 import SettingsView from './components/SettingsView';
@@ -19,8 +20,10 @@ export default function App() {
   // 헤더 벤더 (로그인·웹뷰 partition 용 — 작업 컨텍스트와 별개)
   const [vendor, setVendor] = useState('');
 
-  // 메인 view: 'calendar' | 'work' | 'settings'
+  // 메인 view: 'calendar' | 'po-list' | 'work' | 'settings' | 'plugins'
   const [view, setView] = useState('calendar');
+  // PoList 진입 시 해당 날짜
+  const [poListDate, setPoListDate] = useState(null);
 
   // 활성 작업 (vendor + date + sequence + manifest)
   const [activeJob, setActiveJob] = useState(null);
@@ -248,13 +251,32 @@ export default function App() {
         license={license}
         onOpenLicense={() => setView('settings')}
       >
-        {/* 달력 view */}
+        {/* 달력 view (M3) — 날짜 클릭 시 PoListView 로 진입 */}
         <div style={{ display: view === 'calendar' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
-          <CalendarView
+          <CalendarV4
             vendors={vendors}
             activeVendor={vendor}
-            onOpenJob={handleOpenJob}
+            onVendorChange={setVendor}
+            onOpenDate={(date) => { setPoListDate(date); setView('po-list'); }}
+            onOpenJob={(job) => handleOpenJob(job)}
+            onOpenPlugins={() => setView('plugins')}
           />
+        </div>
+
+        {/* PO 리스트 view (M3) */}
+        <div style={{ display: view === 'po-list' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
+          {view === 'po-list' && poListDate && (
+            <PoListView
+              vendor={vendors.find((v) => v.id === vendor) || { id: vendor, name: vendor }}
+              date={poListDate}
+              onBack={() => setView('calendar')}
+              onOpenJob={(job) => handleOpenJob(job)}
+              onCreateJob={async (posIds) => {
+                // M5 작업 — 신규 차수 생성 + pos.assignToJob. 임시로 토스트만.
+                showToast({ type: 'info', text: `미배정 PO ${posIds.length}건으로 새 차수 생성 (구현 예정)` });
+              }}
+            />
+          )}
         </div>
 
         {/* 작업 view (WCV 항상 마운트 유지) */}

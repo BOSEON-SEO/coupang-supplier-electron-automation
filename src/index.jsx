@@ -7,6 +7,7 @@ import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
 import { resolveEntitlementsFromLicense } from './core/entitlements';
 import './styles/global.css';
+import './styles/v4.css';
 
 // hash 기반 라우팅 — 새 BrowserWindow 도 같은 index.html 을 재사용
 function parseRoute() {
