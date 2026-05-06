@@ -614,11 +614,14 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
 
 /* Body — main + right slide panel */
 .app-body {
-  flex: 1; display: flex; min-height: 0;
+  /* 가로 스크롤 — 창이 좁아져 main + web-panel 합쳐서 안 들어가면 좌우 스크롤 */
+  flex: 1; display: flex; min-height: 0; overflow-x: auto; overflow-y: hidden;
 }
 .app-main {
-  flex: 1; display: flex; flex-direction: column;
-  min-width: 0; overflow: hidden;
+  /* min-width 로 압축 한계 — 그 이하로 가면 .app-body 가 가로 스크롤 */
+  flex: 1 0 720px;
+  display: flex; flex-direction: column;
+  min-width: 720px; overflow: hidden;
   background: var(--bg-panel-2);
   position: relative;
 }
@@ -650,6 +653,7 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
   overflow: hidden;
   transition: width 0.18s ease;
 }
+.web-panel.open { min-width: 320px; }
 .web-panel.resizing { transition: none; }
 .web-panel-resizer {
   position: absolute; top: 0; left: 0; bottom: 0; width: 6px;
