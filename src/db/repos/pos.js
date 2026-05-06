@@ -110,4 +110,31 @@ function unassign(posIds) {
   return tx(posIds);
 }
 
-module.exports = { makePosId, upsertMany, listAll, listByJob, listOrphans, assignToJob, unassign };
+/**
+ * PO 갱신용 — 기존 po_number 가 이미 존재하면 SKIP, 처음 보는 po_number 의 행만 INSERT.
+ * 같은 po_number 의 다른 SKU 행도 첫 행이 INSERT 되면 같이 들어옴 (po_number 단위 dedup).
+ *
+ * @param {string} vendor_id
+ * @param {Array<Row>} rows  (id 없어도 됨 — makePosId 로 자동 생성)
+ * @returns {{ added: number, skipped: number, addedPoNumbers: string[] }}
+ */
+function addNewOnly(vendor_id, rows) {
+  const db = getDb();
+  // 기존 po_number set
+  const existing = new Set(
+    db.prepare('SELECT DISTINCT po_number FROM pos WHERE vendor_id=?').all(vendor_id)
+      .map((r) => String(r.po_number))
+  );
+  const newPoNumbers = new Set();
+  const filtered = [];
+  for (const r of rows) {
+    const pn = String(r.po_number);
+    if (existing.has(pn)) continue;
+    filtered.push({ ...r, vendor_id, is_new: true });
+    newPoNumbers.add(pn);
+  }
+  const added = upsertMany(filtered);
+  return { added, skipped: rows.length - added, addedPoNumbers: [...newPoNumbers] };
+}
+
+module.exports = { makePosId, upsertMany, addNewOnly, listAll, listByJob, listOrphans, assignToJob, unassign };

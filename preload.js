@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('pos:assignToJob', posIds, vendorId, date, sequence),
     unassign: (posIds) => ipcRenderer.invoke('pos:unassign', posIds),
     upsertMany: (rows) => ipcRenderer.invoke('pos:upsertMany', rows),
+    addNewOnly: (vendorId, rows) => ipcRenderer.invoke('pos:addNewOnly', vendorId, rows),
   },
   inbox: {
     list: (vendorId, kind, date, sequence) =>

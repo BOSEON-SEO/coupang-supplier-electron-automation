@@ -10,6 +10,7 @@ import JobViewV4 from './JobView';
 import { PluginTakeover } from './Plugins';
 import SettingsPage from './SettingsPage';
 import PluginsPage from './PluginsPage';
+import WebView from '../components/WebView';
 import { PluginProvider } from '../core/plugin-host';
 import { bootstrapPlugins } from '../core/plugin-loader';
 import { resolveEntitlementsFromLicense } from '../core/entitlements';
@@ -285,27 +286,8 @@ export default function AppV4() {
               title="드래그해서 너비 조정"
             />
           )}
-          <div className="web-panel-head">
-            <I.ChevronL size={13} stroke="#777"/>
-            <I.Chevron size={13} stroke="#777"/>
-            <I.RefreshCw size={13} stroke="#777"/>
-            <div className="url">supplier.coupang.com/po/confirm</div>
-            <button className="x" onClick={() => setWebviewOpen(false)}><I.X size={13}/></button>
-          </div>
-          <div className="web-panel-body">
-            <div style={{padding:18, fontSize:13}}>
-              <div style={{fontSize:14, fontWeight:600, marginBottom:8}}>발주 확정 완료 (mock)</div>
-              <div style={{color:'var(--text-3)', marginBottom:14}}>벤더 코드: {vendor.code} · partition_{vendor.id}</div>
-              <table className="gtable" style={{fontSize:11}}>
-                <thead><tr><th>발주번호</th><th>SKU</th><th>수량</th><th>상태</th></tr></thead>
-                <tbody>
-                  <tr><td className="mono">129868291</td><td className="mono">4549292221</td><td className="num">4</td><td><span className="pill send">OK</span></td></tr>
-                  <tr><td className="mono">129868269</td><td className="mono">4549292255</td><td className="num">0</td><td><span className="pill reject">반려</span></td></tr>
-                  <tr><td className="mono">129799598</td><td className="mono">4549292062</td><td className="num">192</td><td><span className="pill send">OK</span></td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* WebView 자체가 자체 툴바(주소창 + 이동 버튼) + WCV overlay 영역 렌더 */}
+          <WebView vendor={vendor.id} isActive={webviewOpen} />
         </aside>
       </div>
 

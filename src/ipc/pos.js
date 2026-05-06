@@ -38,12 +38,22 @@ function register() {
     return { success: true, unassigned: n };
   });
 
-  // pos:refresh — M3 에서 python po_download 호출 + xlsx parse 후 upsert 추가 예정
-  // 현재는 단순 upsert API 만 노출 (테스트/마이그레이션 용)
   ipcMain.handle('pos:upsertMany', (_e, rows) => {
     if (!Array.isArray(rows)) return { success: false, error: 'rows required' };
     const n = posRepo.upsertMany(rows);
     return { success: true, count: n };
+  });
+
+  // PO 갱신 (po_number 단위 dedup) — 기존 발주번호는 skip, 신규만 추가.
+  ipcMain.handle('pos:addNewOnly', (_e, vendorId, rows) => {
+    if (!vendorId) return { success: false, error: 'vendor required' };
+    if (!Array.isArray(rows)) return { success: false, error: 'rows required' };
+    try {
+      const result = posRepo.addNewOnly(vendorId, rows);
+      return { success: true, ...result };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 }
 

@@ -326,51 +326,219 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
         </div>
       </div>
 
-      {refreshOpen && <PoUpdateModalV4 onClose={() => setRefreshOpen(false)}/>}
+      {refreshOpen && (
+        <PoUpdateModalV4
+          vendor={vendor}
+          onClose={() => setRefreshOpen(false)}
+          onRefreshed={(result) => { setRefreshOpen(false); reload(); }}
+        />
+      )}
     </div>
   );
 }
 
-function PoUpdateModalV4({ onClose }) {
-  const { useState } = React;
+import { parsePoBuffer } from '../core/poParser';
+
+function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
   const [source, setSource] = useState('coupang');
-  const [from, setFrom] = useState('2026-05-04T09:00');
+  const todayDate = (() => { const d = new Date(); d.setDate(d.getDate() - 2);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T09:00`;
+  })();
+  const [from, setFrom] = useState(todayDate);
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState(''); // 'downloading' | 'parsing' | 'saving' | 'done'
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null); // { added, skipped, addedPoNumbers }
+
+  const fetchAndApply = async (filePath) => {
+    setStage('parsing');
+    const read = await window.electronAPI?.readFile?.(filePath);
+    if (!read?.success) throw new Error('파일 읽기 실패: ' + (read?.error || filePath));
+    // ArrayBuffer 또는 Buffer{type, data}
+    const buf = read.data instanceof ArrayBuffer ? read.data
+      : (read.data?.data ? new Uint8Array(read.data.data).buffer : read.data);
+    const rows = parsePoBuffer(buf);
+    if (!rows.length) throw new Error('xlsx 에서 PO 행을 찾을 수 없습니다');
+
+    setStage('saving');
+    // poParser 결과 → pos schema 매핑
+    const mapped = rows.map((r) => ({
+      po_number: String(r.coupang_order_seq || ''),
+      wh: r.departure_warehouse || '',
+      sku: String(r.sku_id || ''),
+      barcode: r.sku_barcode || null,
+      name: r.sku_name || '',
+      req_qty: Number(r.order_quantity) || 0,
+      order_time: r.order_date || '',
+    })).filter((r) => r.po_number && r.sku);
+
+    const res = await window.electronAPI?.pos?.addNewOnly?.(vendor.id, mapped);
+    if (!res?.success) throw new Error('DB 저장 실패: ' + (res?.error || 'unknown'));
+    setStage('done');
+    setResult(res);
+    return res;
+  };
+
+  const handleCoupang = async () => {
+    setBusy(true); setError(''); setStage('downloading'); setResult(null);
+    try {
+      const dateFrom = from.slice(0, 10);
+      const args = ['--vendor', vendor.id, '--date-from', dateFrom];
+      const runRes = await window.electronAPI?.runPython?.('po_download.py', args);
+      if (!runRes?.success) throw new Error('python 실행 실패: ' + (runRes?.error || 'unknown'));
+      // python:done 이벤트 대기
+      const filePath = await waitPythonDone('po_download.py');
+      if (!filePath) throw new Error('다운로드 결과 파일을 찾을 수 없습니다');
+      await fetchAndApply(filePath);
+    } catch (err) {
+      setError(err.message); setStage('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExcel = async () => {
+    setError('');
+    // 파일 선택은 native dialog 가 없으므로 hidden input file 트릭
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls,.csv';
+    input.onchange = async (ev) => {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+      setBusy(true); setStage('parsing'); setResult(null);
+      try {
+        const buf = await file.arrayBuffer();
+        const rows = parsePoBuffer(buf);
+        if (!rows.length) throw new Error('xlsx 에서 PO 행을 찾을 수 없습니다');
+        setStage('saving');
+        const mapped = rows.map((r) => ({
+          po_number: String(r.coupang_order_seq || ''),
+          wh: r.departure_warehouse || '',
+          sku: String(r.sku_id || ''),
+          barcode: r.sku_barcode || null,
+          name: r.sku_name || '',
+          req_qty: Number(r.order_quantity) || 0,
+          order_time: r.order_date || '',
+        })).filter((r) => r.po_number && r.sku);
+        const res = await window.electronAPI?.pos?.addNewOnly?.(vendor.id, mapped);
+        if (!res?.success) throw new Error(res?.error || 'DB 저장 실패');
+        setStage('done'); setResult(res);
+      } catch (err) {
+        setError(err.message); setStage('');
+      } finally {
+        setBusy(false);
+      }
+    };
+    input.click();
+  };
+
+  const handleSubmit = () => {
+    if (busy) return;
+    if (source === 'coupang') handleCoupang();
+    else handleExcel();
+  };
+
+  const stageLabel = {
+    downloading: '쿠팡에서 다운로드 중…',
+    parsing: 'xlsx 파싱 중…',
+    saving: 'DB 저장 중…',
+    done: '완료',
+  }[stage] || '';
+
   return (
     <div className="overlay">
-      <div className="modal">
+      <div className="modal" style={{ width: 480 }}>
         <div className="modal-head">
           <h3><I.RefreshCw size={14}/>PO 갱신</h3>
-          <div className="sub">쿠팡에서 새 발주서를 가져옵니다. 신규 PO는 "미배정" 상태로 들어옵니다.</div>
+          <div className="sub">쿠팡에서 새 발주를 가져옵니다. <strong>발주번호 기준 dedup</strong> — 이미 있는 PO는 건너뜁니다.</div>
         </div>
         <div className="modal-body">
           <div className="field">
             <label>소스</label>
             <div className="radio-group">
-              <div className={'radio' + (source === 'coupang' ? ' on' : '')} onClick={() => setSource('coupang')}>
-                <div className="dot"/><div className="label">쿠팡 사이트에서 받기 <div className="desc">웹뷰 자동화</div></div>
+              <div className={'radio' + (source === 'coupang' ? ' on' : '')} onClick={() => !busy && setSource('coupang')}>
+                <div className="dot"/><div className="label">쿠팡 사이트에서 받기 <div className="desc">자동화 — 로그인 + 다운로드</div></div>
               </div>
-              <div className={'radio' + (source === 'excel' ? ' on' : '')} onClick={() => setSource('excel')}>
-                <div className="dot"/><div className="label">Excel 업로드</div>
+              <div className={'radio' + (source === 'excel' ? ' on' : '')} onClick={() => !busy && setSource('excel')}>
+                <div className="dot"/><div className="label">Excel 업로드 <div className="desc">.xlsx 파일 직접 선택</div></div>
               </div>
             </div>
           </div>
           {source === 'coupang' && (
             <div className="field">
               <label>발주일시 ≥</label>
-              <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)}/>
+              <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)} disabled={busy}/>
             </div>
           )}
-          <div style={{padding:10, background:'var(--accent-soft)', borderRadius:5, fontSize:12, color:'var(--accent-strong)', display:'flex', gap:8}}>
-            <I.Info size={13}/>
-            <span>예상 — 신규 <strong>5건</strong>, 중복 제외 <strong>3건</strong></span>
-          </div>
+
+          {stage && stage !== 'done' && (
+            <div style={{padding:10, background:'var(--accent-soft)', borderRadius:5, fontSize:12, color:'var(--accent-strong)', display:'flex', gap:8, alignItems:'center'}}>
+              <I.Loader size={13}/>
+              <span>{stageLabel}</span>
+            </div>
+          )}
+          {stage === 'done' && result && (
+            <div style={{padding:10, background:'var(--ok-soft)', borderRadius:5, fontSize:12, color:'var(--ok)', display:'flex', flexDirection:'column', gap:4}}>
+              <div style={{display:'flex', gap:8, alignItems:'center', fontWeight:600}}>
+                <I.CheckCircle size={13}/>
+                갱신 완료
+              </div>
+              <div>신규 추가 <strong className="mono">{result.added}</strong>건 · 중복 제외 <strong className="mono">{result.skipped}</strong>건</div>
+            </div>
+          )}
+          {error && (
+            <div style={{padding:10, background:'var(--danger-soft)', borderRadius:5, fontSize:12, color:'var(--danger)', display:'flex', gap:8}}>
+              <I.AlertTriangle size={13}/>
+              <span>{error}</span>
+            </div>
+          )}
         </div>
         <div className="modal-foot">
-          <button className="btn ghost" onClick={onClose}>취소</button>
-          <button className="btn primary" onClick={onClose}><I.RefreshCw size={13}/> 받기</button>
+          {stage === 'done' ? (
+            <button className="btn primary" onClick={() => onRefreshed?.(result)}>확인</button>
+          ) : (
+            <>
+              <button className="btn ghost" onClick={onClose} disabled={busy}>취소</button>
+              <button className="btn primary" onClick={handleSubmit} disabled={busy}>
+                <I.RefreshCw size={13}/> {busy ? '진행 중…' : '받기'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+// python:done 이벤트 대기 + 결과 파일 경로 추출.
+// po_download.py 가 다운로드한 파일을 찾기 위해 file:listVendorFiles 로 latest 검색.
+function waitPythonDone(scriptSuffix) {
+  return new Promise((resolve, reject) => {
+    const api = window.electronAPI;
+    if (!api?.onPythonDone) { reject(new Error('python IPC 미지원')); return; }
+    const timer = setTimeout(() => { unsub?.(); reject(new Error('타임아웃 (10분 초과)')); }, 10 * 60 * 1000);
+    const unsub = api.onPythonDone(async (data) => {
+      const name = data?.scriptName || '';
+      if (!name.includes(scriptSuffix)) return;
+      clearTimeout(timer);
+      try { unsub(); } catch (_) { /* ignore */ }
+      if (data.killed) { reject(new Error('사용자 취소')); return; }
+      if (data.exitCode !== 0) { reject(new Error('python 실패 (exitCode=' + data.exitCode + ')')); return; }
+      // 갱신된 결과 파일 검색 — 가장 최근의 {vendor}-{date}-{seq}.xlsx
+      try {
+        const v = data.vendorId || data.scriptName || '';
+        const list = await api.listVendorFiles?.();
+        const files = (list?.files || []).filter((f) => /\.xlsx$/i.test(f));
+        files.sort((a, b) => b.localeCompare(a)); // 이름 desc — 날짜+seq 가 들어있어 최신이 위
+        if (!files.length) { resolve(null); return; }
+        const top = files[0];
+        const resolved = await api.resolveVendorPath?.(top);
+        resolve(resolved?.path || null);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
 }
 
