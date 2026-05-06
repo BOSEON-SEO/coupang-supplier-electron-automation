@@ -37,4 +37,7 @@ I.Layers = mk(<><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 
 I.Maximize = mk(<><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></>);
 I.Min = mk(<line x1="5" y1="12" x2="19" y2="12"/>);
 
+// 셸/네비 추가 아이콘
+I.Briefcase = mk(<><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></>);
+
 export default I;

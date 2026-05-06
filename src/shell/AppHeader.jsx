@@ -1,5 +1,6 @@
 import React from 'react';
 import VendorSelector from '../components/VendorSelector';
+import { I } from '../icons/v4-icons';
 
 /**
  * v4 단일 윈도우 셸의 상단 바 (M1).
@@ -44,7 +45,7 @@ export default function AppHeader({
           className={'shell-header__navbtn' + (view === 'calendar' ? ' active' : '')}
           onClick={() => onViewChange('calendar')}
         >
-          📅 달력
+          <I.Calendar size={13} /> 달력
         </button>
         <button
           type="button"
@@ -53,14 +54,14 @@ export default function AppHeader({
           disabled={!workActive}
           title={workActive ? '활성 작업으로 이동' : '활성 작업이 없습니다'}
         >
-          🛠 작업
+          <I.Briefcase size={13} /> 작업
         </button>
         <button
           type="button"
           className={'shell-header__navbtn' + (view === 'settings' ? ' active' : '')}
           onClick={() => onViewChange('settings')}
         >
-          ⚙ 설정
+          <I.Settings size={13} /> 설정
         </button>
         {pluginsEnabled && (
           <button
@@ -68,7 +69,7 @@ export default function AppHeader({
             className={'shell-header__navbtn' + (view === 'plugins' ? ' active' : '')}
             onClick={() => onViewChange('plugins')}
           >
-            🔌 플러그인
+            <I.Plug size={13} /> 플러그인
           </button>
         )}
       </nav>
@@ -101,7 +102,7 @@ export default function AppHeader({
           onClick={onOpenLicense}
           title="라이선스 만료 임박"
         >
-          ⚠ 라이선스 갱신
+          <I.AlertTriangle size={13} /> 라이선스 갱신
         </button>
       )}
 
@@ -112,7 +113,7 @@ export default function AppHeader({
           onClick={onToggleWeb}
           title="웹뷰 토글"
         >
-          🌐 웹뷰
+          <I.Globe size={13} /> 웹뷰
         </button>
       )}
 

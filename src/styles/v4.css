@@ -271,3 +271,98 @@ table.gtable {
   text-align: right;
   font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;
 }
+
+/* ============================================================================
+ * 레거시 view 들(.plugins-view, .settings-view) v4 룩 적용
+ *   - 컴포넌트 코드 안 건드리고 토큰만 갈아끼움.
+ *   - higher specificity 와 !important 조합으로 기존 legacy 규칙을 덮음.
+ * ========================================================================== */
+.plugins-view, .settings-view {
+  background: var(--bg-panel-2);
+  color: var(--text);
+}
+.plugins-view__header h2, .settings-view__header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.3px;
+  margin: 0;
+}
+.plugins-view__header { padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+.settings-view__header { border-bottom-color: var(--border) !important; }
+
+.plugins-view__section-title {
+  color: var(--text-2) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px !important;
+}
+.plugins-view__empty, .plugins-view__todo {
+  color: var(--text-3) !important;
+  font-size: 12px !important;
+}
+
+.plugins-stats {
+  display: grid !important;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+.plugins-stat {
+  background: var(--bg-elev) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  padding: 16px 14px !important;
+  text-align: center;
+}
+.plugins-stat__value {
+  color: var(--text) !important;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 22px !important;
+  font-weight: 600 !important;
+  line-height: 1;
+}
+.plugins-stat__label {
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  margin-top: 8px !important;
+}
+.plugins-kv__row {
+  background: var(--bg-elev) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 5px !important;
+  padding: 10px 14px !important;
+}
+.plugins-kv__key {
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  font-weight: 500;
+}
+.plugins-kv__value {
+  color: var(--text) !important;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+/* Settings table */
+.settings-table {
+  background: var(--bg-elev) !important;
+  border-color: var(--border) !important;
+  border-radius: 6px !important;
+}
+.settings-table__row { border-bottom-color: var(--border-soft) !important; }
+.settings-table__row > *:nth-child(2) {
+  background: var(--bg-panel-2) !important;
+  border-color: var(--border-soft) !important;
+}
+.settings-table__row > *:nth-child(3) {
+  background: var(--accent-soft) !important;
+}
+.settings-table__row--header {
+  background: var(--bg-panel-2) !important;
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.6px;
+  font-weight: 600 !important;
+}
