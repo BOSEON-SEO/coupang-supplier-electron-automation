@@ -329,6 +329,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
       {refreshOpen && (
         <PoUpdateModalV4
           vendor={vendor}
+          date={date}
           onClose={() => setRefreshOpen(false)}
           onRefreshed={(result) => { setRefreshOpen(false); reload(); }}
         />
@@ -339,17 +340,21 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
 
 import { parsePoBuffer } from '../core/poParser';
 
-function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
+function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
   const [source, setSource] = useState('coupang');
-  const todayDate = (() => { const d = new Date(); d.setDate(d.getDate() - 2);
+  // 기본값: 달력에서 선택된 날짜 (없으면 오늘 -2일)
+  const defaultFrom = (() => {
+    if (date) return `${date}T09:00`;
+    const d = new Date(); d.setDate(d.getDate() - 2);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T09:00`;
   })();
-  const [from, setFrom] = useState(todayDate);
+  const [from, setFrom] = useState(defaultFrom);
   const [excelFile, setExcelFile] = useState(null); // File object
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState(''); // 'downloading' | 'parsing' | 'saving' | 'done'
   const [error, setError] = useState('');
   const [result, setResult] = useState(null); // { added, skipped, addedPoNumbers }
+  const cancelledRef = React.useRef(false);
   const fileInputRef = React.useRef(null);
   const canSubmit = !busy && (source === 'coupang' || (source === 'excel' && excelFile));
 
@@ -382,7 +387,27 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
     return res;
   };
 
+  // 사용자가 진행 중에 webview 창을 닫으면 자동 취소
+  useEffect(() => {
+    const api = window.electronAPI?.webview;
+    if (!api?.onVisibilityChanged) return;
+    const off = api.onVisibilityChanged(({ visible }) => {
+      if (busy && stage === 'downloading' && !visible) {
+        handleCancel('웹뷰 창이 닫혀 작업이 취소되었습니다');
+      }
+    });
+    return () => { if (typeof off === 'function') off(); };
+  }, [busy, stage]);
+
+  const handleCancel = async (msg) => {
+    if (!busy) return;
+    cancelledRef.current = true;
+    try { await window.electronAPI?.cancelPython?.(); } catch (_) { /* ignore */ }
+    setBusy(false); setStage(''); setError(msg || '취소됨');
+  };
+
   const handleCoupang = async () => {
+    cancelledRef.current = false;
     setBusy(true); setError(''); setStage('downloading'); setResult(null);
     try {
       const api = window.electronAPI;
@@ -547,16 +572,20 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
         <div className="modal-foot">
           {stage === 'done' ? (
             <button className="btn primary" onClick={() => onRefreshed?.(result)}>확인</button>
+          ) : busy ? (
+            <button className="btn danger" onClick={() => handleCancel()}>
+              <I.X size={13}/> 중단
+            </button>
           ) : (
             <>
-              <button className="btn ghost" onClick={onClose} disabled={busy}>취소</button>
+              <button className="btn ghost" onClick={onClose}>취소</button>
               <button
                 className="btn primary"
                 onClick={handleSubmit}
                 disabled={!canSubmit}
                 title={source === 'excel' && !excelFile ? '파일을 먼저 선택하세요' : ''}
               >
-                <I.RefreshCw size={13}/> {busy ? '진행 중…' : '받기'}
+                <I.RefreshCw size={13}/> 받기
               </button>
             </>
           )}
