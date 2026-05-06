@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App';
+import AppV4 from './v4/App';
 import StockAdjustApp from './StockAdjustApp';
 import TransportApp from './TransportApp';
 import { PluginProvider } from './core/plugin-host';
@@ -99,6 +99,6 @@ root.render(
         <TransportApp params={route.params} />
       </PopupShell>
     )}
-    {route.name === 'main' && <App />}
+    {route.name === 'main' && <AppV4 />}
   </React.StrictMode>
 );
