@@ -1,0 +1,12 @@
+{
+  "name": "coupang-v4-poc",
+  "version": "0.0.1",
+  "description": "Coupang Inbound v4 — UI POC (Electron shell + babel-standalone renderer)",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/launch.js"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

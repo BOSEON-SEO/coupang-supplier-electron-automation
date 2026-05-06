@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Inbound Ops — 앱 설계도</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAFAF9; --bg-2: #F4F4F2; --bg-3: #ECECEA;
+    --ink: #18181B; --ink-2: #52525B; --ink-3: #8B8B92;
+    --line: #E4E4E2; --line-2: #D4D4D1;
+    --paper: #FFFFFF;
+    --accent: oklch(0.55 0.14 250);
+    --accent-soft: oklch(0.95 0.03 250);
+    --accent-strong: oklch(0.42 0.16 250);
+    --ok: oklch(0.58 0.12 155); --ok-soft: oklch(0.95 0.04 155);
+    --warn: oklch(0.65 0.16 60); --warn-soft: oklch(0.96 0.04 60);
+    --danger: oklch(0.55 0.20 25); --danger-soft: oklch(0.96 0.04 25);
+    --role-biz: oklch(0.62 0.14 80);  --role-biz-soft: oklch(0.96 0.04 80);
+    --role-log: oklch(0.55 0.14 250); --role-log-soft: oklch(0.95 0.03 250);
+    --role-tx:  oklch(0.58 0.12 155); --role-tx-soft: oklch(0.95 0.04 155);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg-2); font-family: 'Pretendard', sans-serif; color: var(--ink); font-size: 14px; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  h1, h2, h3, h4 { margin: 0; letter-spacing: -0.3px; }
+  button { font: inherit; cursor: pointer; }
+
+  .doc { max-width: 1280px; margin: 0 auto; padding: 48px 32px 80px; }
+  .lead { padding: 28px 0 36px; border-bottom: 1px solid var(--line); margin-bottom: 40px; }
+  .lead .eyebrow { font-size: 11px; font-weight: 600; color: var(--accent-strong); letter-spacing: 1px; text-transform: uppercase; }
+  .lead h1 { font-size: 38px; font-weight: 700; margin-top: 8px; letter-spacing: -1px; }
+  .lead p { font-size: 15px; color: var(--ink-2); line-height: 1.6; max-width: 760px; margin-top: 12px; }
+  .lead .meta { display: flex; gap: 24px; margin-top: 20px; font-size: 12px; color: var(--ink-3); }
+
+  section { margin-bottom: 56px; }
+  section > .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  section > .head .num { font-family: 'JetBrains Mono', monospace; color: var(--accent-strong); font-size: 14px; font-weight: 600; }
+  section > .head h2 { font-size: 22px; font-weight: 600; }
+  section > .head .sub { color: var(--ink-3); font-size: 12px; margin-left: 8px; }
+  .pgraph { color: var(--ink-2); line-height: 1.7; max-width: 820px; margin-bottom: 20px; }
+  .pgraph code { font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 1px 6px; background: var(--bg-3); border-radius: 3px; }
+
+  /* === Insight callout === */
+  .insight { background: var(--paper); border-left: 3px solid var(--accent); padding: 16px 20px; border-radius: 0 6px 6px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04); margin-bottom: 24px; }
+  .insight .label { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--accent-strong); text-transform: uppercase; margin-bottom: 6px; }
+  .insight strong { color: var(--ink); }
+  .insight code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--accent-soft); color: var(--accent-strong); padding: 1px 6px; border-radius: 3px; }
+
+  /* === Tab bar === */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 0; }
+  .tab { padding: 10px 18px; font-size: 13px; font-weight: 500; color: var(--ink-3); border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; border-left:none; border-right:none; border-top:none; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab-body { padding: 24px 0 8px; }
+
+  /* === Stepper diagrams === */
+  .flow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 12px; }
+  .flow-card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+  .flow-card.now { border-color: var(--line-2); }
+  .flow-card.proposed { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .flow-card .ttl { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .flow-card .ttl h3 { font-size: 14px; font-weight: 600; }
+  .flow-card .pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600; letter-spacing: 0.4px; }
+  .flow-card.now .pill { background: var(--bg-3); color: var(--ink-2); }
+  .flow-card.proposed .pill { background: var(--accent); color: white; }
+
+  .stepper { display: flex; flex-direction: column; gap: 10px; }
+  .step { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; position: relative; }
+  .step .knob { width: 24px; height: 24px; border-radius: 50%; background: var(--bg-3); color: var(--ink-3); display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; flex-shrink: 0; z-index: 2; }
+  .step:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 22px; bottom: -10px; width: 2px; background: var(--line); }
+  .step.gate .knob { background: var(--warn-soft); color: var(--warn); border: 1.5px solid var(--warn); }
+  .step.upload .knob { background: var(--danger-soft); color: var(--danger); border: 1.5px solid var(--danger); }
+  .step.role-biz .knob { background: var(--role-biz-soft); color: var(--role-biz); border: 1.5px solid var(--role-biz); }
+  .step.role-log .knob { background: var(--role-log-soft); color: var(--role-log); border: 1.5px solid var(--role-log); }
+  .step.role-tx  .knob { background: var(--role-tx-soft);  color: var(--role-tx);  border: 1.5px solid var(--role-tx); }
+  .step .body { padding-top: 2px; }
+  .step .name { font-size: 13px; font-weight: 600; }
+  .step .desc { font-size: 11px; color: var(--ink-3); margin-top: 2px; line-height: 1.5; }
+  .step .role-tag { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  .role-tag.biz { background: var(--role-biz-soft); color: var(--role-biz); }
+  .role-tag.log { background: var(--role-log-soft); color: var(--role-log); }
+  .role-tag.tx  { background: var(--role-tx-soft);  color: var(--role-tx); }
+
+  /* === Swim lane === */
+  .swim { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 4px; overflow: hidden; }
+  .swim-header { display: grid; grid-template-columns: 140px 1fr; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--line); }
+  .swim-row { display: grid; grid-template-columns: 140px 1fr; align-items: stretch; min-height: 80px; border-bottom: 1px solid var(--line); }
+  .swim-row:last-child { border-bottom: none; }
+  .swim-label { padding: 14px 12px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--line); background: var(--bg-2); }
+  .swim-label .role { font-size: 12px; font-weight: 700; }
+  .swim-label .who { font-size: 10px; color: var(--ink-3); line-height: 1.4; }
+  .swim-label.biz .role { color: var(--role-biz); }
+  .swim-label.log .role { color: var(--role-log); }
+  .swim-label.tx  .role { color: var(--role-tx); }
+  .swim-track { padding: 10px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; }
+  .swim-task { padding: 6px 10px; border-radius: 5px; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+  .swim-task .knum { font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: 0.7; }
+  .swim-task.biz { background: var(--role-biz-soft); color: var(--role-biz); }
+  .swim-task.log { background: var(--role-log-soft); color: var(--role-log); }
+  .swim-task.tx  { background: var(--role-tx-soft);  color: var(--role-tx); }
+  .swim-arrow { color: var(--ink-3); font-size: 12px; }
+
+  /* === State machine === */
+  .sm-wrap { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 24px; overflow-x: auto; }
+  .sm-row { display: flex; align-items: center; gap: 0; min-width: 900px; }
+  .sm-state { display: flex; flex-direction: column; align-items: center; min-width: 120px; }
+  .sm-node { padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; background: var(--paper); border: 1.5px solid var(--line-2); position: relative; }
+  .sm-node .ic { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-3); display: block; margin-bottom: 2px; letter-spacing: 0.3px; }
+  .sm-node.start { border-color: var(--ink-2); background: var(--ink); color: var(--paper); }
+  .sm-node.gate { border-color: var(--warn); background: var(--warn-soft); }
+  .sm-node.upload { border-color: var(--danger); background: var(--danger-soft); }
+  .sm-node.terminal { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+  .sm-edge { flex: 1; height: 2px; background: var(--line-2); position: relative; min-width: 40px; }
+  .sm-edge::after { content: '▶'; position: absolute; right: -2px; top: -7px; font-size: 10px; color: var(--line-2); }
+  .sm-edge .lbl { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--ink-3); white-space: nowrap; background: var(--paper); padding: 0 4px; }
+  .sm-branch { display: flex; flex-direction: column; gap: 8px; }
+  .sm-branch .sm-row { min-width: auto; }
+
+  /* === Layout option cards === */
+  .layout-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .layout-card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color 120ms, box-shadow 120ms; }
+  .layout-card:hover { border-color: var(--accent); box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+  .layout-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .layout-card .preview { aspect-ratio: 16/10; background: #18181B; padding: 8px; display: flex; gap: 4px; }
+  .layout-card .info { padding: 14px 16px; }
+  .layout-card .info .ttl { font-size: 13px; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .layout-card .info .desc { font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+  .layout-card .info .pros, .layout-card .info .cons { font-size: 10px; margin-top: 6px; line-height: 1.5; }
+  .layout-card .info .pros { color: var(--ok); }
+  .layout-card .info .cons { color: var(--warn); }
+  .layout-card .badge-rec { font-size: 9px; padding: 2px 8px; background: var(--accent); color: white; border-radius: 3px; font-weight: 700; letter-spacing: 0.5px; }
+
+  /* preview mocks */
+  .pv { display: flex; gap: 4px; height: 100%; width: 100%; }
+  .pv .col { background: #232327; border-radius: 3px; flex-shrink: 0; }
+  .pv .grow { flex: 1; }
+  .pv .web { background: linear-gradient(135deg, #4A6FA5, #2C4F7E); }
+  .pv .log { background: #0A0A0C; border: 1px dashed #444; }
+  .pv .label { font-size: 8px; color: #71717A; padding: 2px 4px; }
+  .pv .toolbar { background: #1A1A1E; height: 12px; border-radius: 2px; margin-bottom: 4px; }
+  .pv .float { position: absolute; background: #232327; border: 1px solid #444; border-radius: 3px; }
+
+  /* role legend */
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 14px; background: var(--bg-2); border-radius: 6px; margin-bottom: 16px; font-size: 11px; }
+  .legend .item { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* tables */
+  table.spec { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  table.spec th { background: var(--bg-2); text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid var(--line); }
+  table.spec td { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12px; vertical-align: top; }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec td.k { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent-strong); white-space: nowrap; }
+
+  .composite-key {
+    display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px;
+    background: var(--accent-soft); border: 1px dashed var(--accent); border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent-strong);
+  }
+  .composite-key span { background: var(--paper); padding: 1px 5px; border-radius: 3px; }
+
+  /* split table */
+  .split-vis { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+  .split-vis h4 { font-size: 13px; margin-bottom: 12px; }
+  .key-row { display: grid; grid-template-columns: 1fr 80px 60px 80px 1fr; gap: 8px; padding: 8px; align-items: center; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .key-row:last-child { border-bottom: none; }
+  .key-row .ck { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-2); }
+  .key-row .qty { text-align: right; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .key-row .arrow { text-align: center; color: var(--ink-3); }
+  .key-row .lane { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-align: center; }
+  .key-row .lane.milk { background: oklch(0.94 0.05 80); color: oklch(0.42 0.14 80); }
+  .key-row .lane.ship { background: oklch(0.94 0.04 220); color: oklch(0.42 0.14 220); }
+  .key-row .status { text-align: right; font-size: 10px; color: var(--ink-3); font-family: 'JetBrains Mono', monospace; }
+  .key-row.head { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+
+  /* Open question */
+  .qbox { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+  .qbox h4 { font-size: 13px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .qbox h4::before { content: '?'; display: inline-flex; width: 18px; height: 18px; background: var(--accent); color: white; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .qbox p { font-size: 12px; color: var(--ink-2); line-height: 1.6; margin: 0; }
+  .qgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+
+  /* Bus inboxes */
+  .bus { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+  .bus-vis { display: grid; grid-template-columns: 200px 60px 1fr; gap: 16px; align-items: center; margin-top: 12px; }
+  .inbox { background: var(--bg-2); border: 1px dashed var(--line-2); border-radius: 6px; padding: 12px; }
+  .inbox .ttl { font-size: 12px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .inbox .item { padding: 6px 8px; background: var(--paper); border-radius: 3px; font-size: 11px; margin-bottom: 4px; display: flex; gap: 6px; align-items: center; border-left: 2px solid var(--line); }
+  .inbox.milk .ttl { color: oklch(0.42 0.14 80); }
+  .inbox.milk .item { border-left-color: oklch(0.62 0.14 80); }
+  .inbox.ship .ttl { color: oklch(0.42 0.14 220); }
+  .inbox.ship .item { border-left-color: oklch(0.55 0.14 220); }
+  .bus-arrow { font-size: 24px; color: var(--ink-3); text-align: center; }
+  .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  kbd { font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 1px 5px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 3px; color: var(--ink-2); }
+
+  .toc { position: sticky; top: 0; background: rgba(250,250,249,0.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); margin: -48px -32px 40px; padding: 14px 32px; z-index: 10; display: flex; gap: 4px; overflow-x: auto; }
+  .toc a { font-size: 12px; padding: 6px 10px; border-radius: 4px; color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+  .toc a:hover { background: var(--bg-3); color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="lead">
+    <div class="eyebrow">App Design Doc · 2026-04-30</div>
+    <h1>Inbound Ops — 워크플로우 재설계</h1>
+    <p>발주확정과 운송분배는 같은 차수 안에 묶여 있지만, <strong>복합키 단위로는 서로 독립</strong>입니다. 이 분리 가능성을 활용하면 작업 페이스, 담당자, 화면 구조가 모두 달라집니다. 이 문서는 새로운 흐름과 그것을 받쳐줄 화면/레이아웃 옵션을 정리한 설계 탐색입니다.</p>
+    <div class="meta">
+      <span><strong style="color:var(--ink-2)">대상</strong> · 운영팀 / 개발</span>
+      <span><strong style="color:var(--ink-2)">상태</strong> · 탐색 (Draft v0.1)</span>
+      <span><strong style="color:var(--ink-2)">관련</strong> · Inbound Ops.html</span>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <a href="#s1">1 · 핵심 발견</a>
+    <a href="#s2">2 · 두 워크플로우 비교</a>
+    <a href="#s3">3 · 역할 분리 (Swim lane)</a>
+    <a href="#s4">4 · 복합키 lifecycle</a>
+    <a href="#s5">5 · 운송 인박스 모델</a>
+    <a href="#s6">6 · 레이아웃 옵션</a>
+    <a href="#s7">7 · 화면 인벤토리</a>
+    <a href="#s8">8 · 열린 질문</a>
+  </nav>
+
+  <!-- ========================= Section 1 ========================= -->
+  <section id="s1">
+    <div class="head"><span class="num">01</span><h2>핵심 발견</h2><span class="sub">사고를 여는 한 줄</span></div>
+
+    <div class="insight">
+      <div class="label">Key Insight</div>
+      <p style="margin:0; line-height:1.7;"><strong>복합키 = (물류센터 + 발주번호 + SKU)</strong> 는 <code>운송방법</code>을 결정합니다. 한 복합키가 밀크런과 쉽먼트로 쪼개지는 일은 없습니다 — 항상 둘 중 <strong>하나</strong>입니다.</p>
+    </div>
+
+    <p class="pgraph">이 제약이 의미하는 것: 발주확정서 단계에서 운송방법만 정해두면, <strong>그 다음은 두 갈래로 흩어뜨려서 처리</strong>할 수 있습니다. 같은 차수 안에서 쉽먼트 lot은 송장 들어오는 대로 먼저 올리고, 밀크런 lot은 팔레트가 정해지는 대로 따로 올리고. 사람도, 시점도, 페이스도 분리됩니다.</p>
+
+    <table class="spec">
+      <thead>
+        <tr><th style="width:200px">키</th><th>예시</th><th style="width:120px">결정 시점</th><th>결정자</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="k">복합키</td><td><span class="composite-key"><span>안성4</span>+<span>129868269</span>+<span>4549292255</span></span></td><td>PO 다운 시</td><td>쿠팡 (시스템)</td></tr>
+        <tr><td class="k">운송방법</td><td>밀크런 / 쉽먼트 (1택)</td><td>발주확정 직전</td><td>물류 담당</td></tr>
+        <tr><td class="k">확정수량</td><td>13 → 0 (반려) 또는 13 → 13</td><td>발주확정</td><td>경영지원·물류</td></tr>
+        <tr><td class="k">팔레트/박스 분배</td><td>팔레트 1: 48개 / 팔레트 2: 0개</td><td>WMS 결과 후</td><td>물류 (자동) + 운송</td></tr>
+        <tr><td class="k">송장번호</td><td>420138291…294 (쉽먼트만)</td><td>출고 직전</td><td>운송</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========================= Section 2 ========================= -->
+  <section id="s2">
+    <div class="head"><span class="num">02</span><h2>두 워크플로우 비교</h2><span class="sub">현재 흐름 vs. 분리형 흐름</span></div>
+
+    <div class="flow-grid">
+      <div class="flow-card now">
+        <div class="ttl"><h3>지금 (모놀리식)</h3><span class="pill">현재</span></div>
+        <p style="font-size:11px; color:var(--ink-3); margin:0 0 14px; line-height:1.5;">한 차수 = 한 묶음. 모든 단계가 끝나야 다음 차수로 넘어갈 수 있음. 송장 늦게 들어오는 쉽먼트 1건이 전체를 막는다.</p>
+        <div class="stepper">
+          <div class="step"><div class="knob">1</div><div class="body"><div class="name">PO 다운</div><div class="desc">쿠팡 사이트에서 SKU 목록 받기</div></div></div>
+          <div class="step"><div class="knob">2</div><div class="body"><div class="name">투비 재고조정</div><div class="desc">협력사 재고 반영</div></div></div>
+          <div class="step"><div class="knob">3</div><div class="body"><div class="name">확정서 임시 생성</div><div class="desc">셀러가 셀 단위로 보냄/반려/수량 결정</div></div></div>
+          <div class="step"><div class="knob">4</div><div class="body"><div class="name">쉽/밀 운송 분배</div><div class="desc">팔레트·박스·송장 모두 입력</div></div></div>
+          <div class="step gate upload"><div class="knob">5</div><div class="body"><div class="name">확정서 업로드 (위험)</div><div class="desc">쿠팡에 한 번에 push — 3초 카운트다운</div></div></div>
+          <div class="step gate upload"><div class="knob">6</div><div class="body"><div class="name">운송분배 업로드 (위험)</div><div class="desc">사이트 운송지정 화면에 push</div></div></div>
+          <div class="step"><div class="knob">7</div><div class="body"><div class="name">결과 다운로드</div><div class="desc">통합 양식 저장</div></div></div>
+        </div>
+      </div>
+
+      <div class="flow-card proposed">
+        <div class="ttl"><h3>제안 (분리형 / 인박스)</h3><span class="pill">제안</span></div>
+        <p style="font-size:11px; color:var(--ink-3); margin:0 0 14px; line-height:1.5;">확정 후 두 갈래(쉽/밀)로 흩어진 인박스에 쌓이고, 각 인박스가 자기 페이스로 마감. 차수의 "완료"는 두 인박스가 모두 빌 때.</p>
+        <div class="stepper">
+          <div class="step role-biz"><div class="knob">1</div><div class="body"><div class="name">반려 결정 <span class="role-tag biz">경영지원</span></div><div class="desc">전체 PO에서 보냄 / 안 보냄. 수량은 default(=요청). 운송방법은 안 정해도 됨.</div></div></div>
+          <div class="step role-log"><div class="knob">2</div><div class="body"><div class="name">운송방법 지정 + 확정 <span class="role-tag log">물류</span></div><div class="desc">'보냄'으로 표시된 행에 운송방법(쉽/밀)만 지정 → 즉시 사이트에 발주확정 업로드</div></div></div>
+          <div class="step gate upload"><div class="knob">⚡</div><div class="body"><div class="name">확정서 업로드 (위험)</div><div class="desc">사이트 push. 이 시점부터 두 인박스로 자동 라우팅됨.</div></div></div>
+          <div class="step role-tx"><div class="knob">3a</div><div class="body"><div class="name">밀크런 인박스 처리 <span class="role-tag tx">운송</span></div><div class="desc">대기중 밀크런 묶음 목록 → 팔레트/프리셋 추가 → 사이트 업로드 → 다운로드</div></div></div>
+          <div class="step role-tx"><div class="knob">3b</div><div class="body"><div class="name">쉽먼트 인박스 처리 <span class="role-tag tx">운송</span></div><div class="desc">대기중 쉽먼트 묶음 목록 → 박스 추가 + 송장 입력 → 사이트 업로드 → 다운로드</div></div></div>
+          <div class="step"><div class="knob">✓</div><div class="body"><div class="name">결과 히스토리</div><div class="desc">두 인박스 모두 비면 차수 완료. 시점별 산출물 모두 보관.</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="pgraph" style="margin-top:24px;">제안 흐름의 본질: <strong>"차수"라는 컨테이너는 그대로 두되, 그 안의 작업을 두 종류의 인박스(쉽/밀)로 분리</strong>합니다. 차수는 더 이상 "선형 진행"이 아니라 "두 큐가 비어가는 과정"이 됩니다.</p>
+  </section>
+
+  <!-- ========================= Section 3 ========================= -->
+  <section id="s3">
+    <div class="head"><span class="num">03</span><h2>역할 분리 (Swim lane)</h2><span class="sub">누가 어디서 무엇을 하는가</span></div>
+
+    <div class="legend">
+      <div class="item"><span class="swatch" style="background: var(--role-biz)"></span> 경영지원 — 어떤 발주를 보낼지/말지 결정</div>
+      <div class="item"><span class="swatch" style="background: var(--role-log)"></span> 물류 — 운송방법·수량 확정 + 사이트 업로드</div>
+      <div class="item"><span class="swatch" style="background: var(--role-tx)"></span> 운송 — 팔레트·박스·송장 처리</div>
+    </div>
+
+    <div class="swim">
+      <div class="swim-header">
+        <div>역할</div>
+        <div>작업 흐름</div>
+      </div>
+      <div class="swim-row">
+        <div class="swim-label biz"><div class="role">경영지원</div><div class="who">PO 검토 ·<br/>반려 결정</div></div>
+        <div class="swim-track">
+          <div class="swim-task biz"><span class="knum">1</span> PO 다운 받기</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task biz"><span class="knum">2</span> 행별 보냄/반려 토글</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task biz"><span class="knum">3</span> 부족사유 입력 (반려만)</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task biz"><span class="knum">4</span> 물류에 넘기기</div>
+        </div>
+      </div>
+      <div class="swim-row">
+        <div class="swim-label log"><div class="role">물류</div><div class="who">운송방법 지정 ·<br/>발주확정</div></div>
+        <div class="swim-track">
+          <div class="swim-task log"><span class="knum">5</span> 보냄 행에 쉽/밀 지정</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task log"><span class="knum">6</span> 확정수량 검토</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task log" style="border:1.5px solid var(--danger);"><span class="knum">⚡</span> 발주확정 업로드</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task log"><span class="knum">7</span> 미배정 lot 두 인박스로 라우팅</div>
+        </div>
+      </div>
+      <div class="swim-row">
+        <div class="swim-label tx"><div class="role">운송 (밀크런)</div><div class="who">팔레트 분배 ·<br/>밀크런 업로드</div></div>
+        <div class="swim-track">
+          <div class="swim-task tx"><span class="knum">8a</span> 대기중 밀크런 lot 선택</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task tx"><span class="knum">9a</span> 팔레트 추가 (T11×N)</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task tx"><span class="knum">10a</span> SKU×팔레트 분배</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task tx" style="border:1.5px solid var(--danger);"><span class="knum">⚡</span> 운송 업로드</div>
+        </div>
+      </div>
+      <div class="swim-row">
+        <div class="swim-label tx"><div class="role">운송 (쉽먼트)</div><div class="who">박스·송장 ·<br/>쉽먼트 업로드</div></div>
+        <div class="swim-track">
+          <div class="swim-task tx"><span class="knum">8b</span> 대기중 쉽먼트 lot 선택</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task tx"><span class="knum">9b</span> 박스 N개 추가</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task tx"><span class="knum">10b</span> SKU×박스 분배 + 송장 입력</div>
+          <span class="swim-arrow">→</span>
+          <div class="swim-task tx" style="border:1.5px solid var(--danger);"><span class="knum">⚡</span> 쉽먼트 업로드</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="pgraph" style="margin-top:20px;">현재 앱은 <strong>한 사람이 처음부터 끝까지</strong> 하는 모델. 제안 모델은 <strong>경영지원 → 물류 → 운송</strong> 핸드오프가 가능. 한 사람이 전부 해도 되지만, 분리되면 화면 구조가 달라야 합니다.</p>
+  </section>
+
+  <!-- ========================= Section 4 ========================= -->
+  <section id="s4">
+    <div class="head"><span class="num">04</span><h2>복합키 lifecycle (상태 머신)</h2><span class="sub">한 row의 인생</span></div>
+
+    <p class="pgraph">복합키 row 1개는 다음 상태를 거칩니다. 각 상태에서 어떤 화면이 표시되고 어떤 작업이 가능한지가 명확해야 UI가 깔끔해집니다.</p>
+
+    <div class="sm-wrap">
+      <div class="sm-row">
+        <div class="sm-state"><div class="sm-node start"><span class="ic">SEED</span>NEW</div></div>
+        <div class="sm-edge"><span class="lbl">PO 다운</span></div>
+        <div class="sm-state"><div class="sm-node"><span class="ic">REVIEW</span>PENDING_REVIEW</div></div>
+        <div class="sm-edge"><span class="lbl">반려 결정</span></div>
+        <div class="sm-state"><div class="sm-node gate"><span class="ic">GATE</span>METHOD_NEEDED</div></div>
+        <div class="sm-edge"><span class="lbl">쉽/밀 지정</span></div>
+        <div class="sm-state"><div class="sm-node upload"><span class="ic">⚡</span>READY_TO_CONFIRM</div></div>
+      </div>
+      <div style="height: 30px;"></div>
+      <div class="sm-row">
+        <div style="min-width:120px;"></div>
+        <div class="sm-edge"><span class="lbl">확정 업로드 (위험)</span></div>
+        <div class="sm-state"><div class="sm-node" style="border-color:var(--role-log); background:var(--role-log-soft); color:var(--role-log)"><span class="ic">ROUTED</span>IN_INBOX</div></div>
+        <div class="sm-edge"><span class="lbl">밀크런 / 쉽먼트 분기</span></div>
+        <div class="sm-state">
+          <div class="sm-node" style="border-color:oklch(0.62 0.14 80); background:oklch(0.96 0.04 80); color:oklch(0.42 0.14 80); margin-bottom: 8px;"><span class="ic">MILK</span>PALLET_PENDING</div>
+          <div class="sm-node" style="border-color:oklch(0.55 0.14 220); background:oklch(0.94 0.04 220); color:oklch(0.42 0.14 220);"><span class="ic">SHIP</span>BOX_PENDING</div>
+        </div>
+        <div class="sm-edge"><span class="lbl">분배 + 송장</span></div>
+        <div class="sm-state"><div class="sm-node upload"><span class="ic">⚡</span>READY_TO_SHIP</div></div>
+      </div>
+      <div style="height: 30px;"></div>
+      <div class="sm-row">
+        <div style="min-width:120px;"></div>
+        <div class="sm-edge"><span class="lbl">운송 업로드 (위험)</span></div>
+        <div class="sm-state"><div class="sm-node terminal"><span class="ic">DONE</span>SHIPPED</div></div>
+        <div class="sm-edge"></div>
+        <div class="sm-state"><div class="sm-node terminal"><span class="ic">FILED</span>ARCHIVED</div></div>
+      </div>
+    </div>
+
+    <p class="pgraph" style="margin-top:24px;"><strong>설계 함의:</strong></p>
+    <ul style="font-size:13px; color:var(--ink-2); line-height:1.8; margin-top: 0; padding-left: 20px;">
+      <li><code>METHOD_NEEDED</code> 게이트가 새로 생김 — 기존엔 운송분배 화면에서 암묵적으로 끝났던 것을 명시적 단계로</li>
+      <li><code>IN_INBOX</code> 이후는 <strong>두 큐</strong>가 독립 진행. 차수 진행률은 두 큐의 잔여 합으로 계산</li>
+      <li>각 ⚡(위험 전이)에 카운트다운 + 취소. 그 외는 일반 저장</li>
+      <li>되돌리기 가능한 전이 ↔ 불가능한 전이를 시각적으로 구분 (위로 가는 화살표는 별도 색)</li>
+    </ul>
+  </section>
+
+  <!-- ========================= Section 5 ========================= -->
+  <section id="s5">
+    <div class="head"><span class="num">05</span><h2>운송 인박스 모델</h2><span class="sub">두 갈래 큐의 작동 방식</span></div>
+
+    <div class="bus">
+      <h4 style="font-size:14px; margin-bottom: 4px;">발주확정 직후, 자동 라우팅</h4>
+      <p style="font-size:12px; color:var(--ink-3); margin: 0 0 16px;">'보냄'으로 확정된 복합키 row가 운송방법에 따라 두 인박스에 자동 떨어집니다. 차수가 다른 lot이 같은 인박스에 섞여 있어도 OK — 인박스는 차수가 아니라 운송방법으로 묶입니다.</p>
+
+      <div class="split-vis">
+        <h4>예: 캐논 / 2026-04-30 / 1차 — 확정 후 라우팅</h4>
+        <div class="key-row head"><div>복합키</div><div>요청</div><div>운송</div><div>확정</div><div style="text-align:right;">→ 인박스</div></div>
+        <div class="key-row"><div class="ck">안성4 · 129868269 · 4549292255</div><div class="qty">13</div><div><span class="lane milk">밀크런</span></div><div class="qty" style="color:var(--danger)">0</div><div class="status">반려 → 종료</div></div>
+        <div class="key-row"><div class="ck">안성4 · 129799598 · 4549292062</div><div class="qty">192</div><div><span class="lane milk">밀크런</span></div><div class="qty" style="color:var(--ok)">192</div><div class="status">→ 밀크런 인박스</div></div>
+        <div class="key-row"><div class="ck">안성4 · 129799598 · 4549292068</div><div class="qty">4</div><div><span class="lane milk">밀크런</span></div><div class="qty" style="color:var(--ok)">4</div><div class="status">→ 밀크런 인박스</div></div>
+        <div class="key-row"><div class="ck">화성2 · 129701155 · 4549292068</div><div class="qty">8</div><div><span class="lane ship">쉽먼트</span></div><div class="qty" style="color:var(--ok)">8</div><div class="status">→ 쉽먼트 인박스</div></div>
+        <div class="key-row"><div class="ck">화성2 · 129701155 · 4549292255</div><div class="qty">12</div><div><span class="lane ship">쉽먼트</span></div><div class="qty" style="color:var(--ok)">12</div><div class="status">→ 쉽먼트 인박스</div></div>
+      </div>
+
+      <div class="bus-vis">
+        <div></div>
+        <div class="bus-arrow">↓</div>
+        <div></div>
+      </div>
+
+      <div class="lanes">
+        <div class="inbox milk">
+          <div class="ttl">▸ 밀크런 인박스 (대기 4건)</div>
+          <div class="item">안성4 · 192개 — 팔레트 미정</div>
+          <div class="item">안성4 · 4개 — 팔레트 미정</div>
+          <div class="item">인천26 · 48개 — 팔레트 미정</div>
+          <div class="item">덕평2 · 120개 — 팔레트 미정</div>
+        </div>
+        <div class="inbox ship">
+          <div class="ttl">▸ 쉽먼트 인박스 (대기 1건)</div>
+          <div class="item">화성2 · 20개 — 박스/송장 미정</div>
+          <div class="item" style="opacity:0.4; border-style:dashed;">(어제 차수에서 넘어온 1건)</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="pgraph" style="margin-top:20px;"><strong>핵심:</strong> 인박스는 <em>전역</em>이지 차수 종속이 아닙니다. 운송 담당자는 "오늘의 밀크런 인박스 / 오늘의 쉽먼트 인박스"를 보고 일하면 됩니다. 차수 별로 화면을 옮겨다닐 필요가 없어집니다.</p>
+  </section>
+
+  <!-- ========================= Section 6 ========================= -->
+  <section id="s6">
+    <div class="head"><span class="num">06</span><h2>레이아웃 옵션</h2><span class="sub">웹뷰·로그 처리 방식 4가지</span></div>
+
+    <p class="pgraph">현재는 우측 슬라이드 패널 안에 웹뷰. 하지만 BrowserView/WCV는 native overlay라 다른 옵션이 가능합니다. 작업 로그도 마찬가지로 분리 가능. 4가지 안:</p>
+
+    <div class="layout-grid" id="layoutGrid">
+      <!-- Option A: current -->
+      <div class="layout-card" data-id="A">
+        <div class="preview" style="background:#0F0F11;">
+          <div class="pv">
+            <div class="col" style="width:8%;"></div>
+            <div class="col grow" style="display:flex; flex-direction:column;">
+              <div class="toolbar"></div>
+              <div style="flex:1; background:#3A3A3F; border-radius:2px;"></div>
+              <div class="log" style="height:18%; margin-top:4px;"></div>
+            </div>
+            <div class="web" style="width:30%;"></div>
+          </div>
+        </div>
+        <div class="info">
+          <div class="ttl">A · 우측 슬라이드 (현재)</div>
+          <div class="desc">웹뷰는 우측 패널, 로그는 메인 하단. 모두 한 윈도우.</div>
+          <div class="pros">+ 한 시야에 모든 게 있음</div>
+          <div class="cons">− 메인 작업 영역이 좁음 · 송장 입력 같은 키보드 헤비 작업이 답답</div>
+        </div>
+      </div>
+
+      <!-- Option B: detached panes -->
+      <div class="layout-card" data-id="B">
+        <div class="preview" style="background:#0F0F11; padding:8px; display:block; position:relative;">
+          <div class="pv" style="height: 100%;">
+            <div class="col" style="width:8%;"></div>
+            <div class="col grow" style="display:flex; flex-direction:column;">
+              <div class="toolbar"></div>
+              <div style="flex:1; background:#3A3A3F; border-radius:2px;"></div>
+            </div>
+          </div>
+          <div class="float web" style="top: 16px; right: 16px; width: 30%; height: 70%; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
+            <div style="padding:4px; font-size:8px; color:white;">웹뷰 창</div>
+          </div>
+          <div class="float log" style="bottom: 16px; left: 50%; width: 35%; height: 22%; border-radius: 4px;">
+            <div style="padding:4px; font-size:8px; color:#71717A;">로그 창</div>
+          </div>
+        </div>
+        <div class="info">
+          <div class="ttl">B · 분리 윈도우 <span class="badge-rec">추천</span></div>
+          <div class="desc">메인은 작업에만 집중. 웹뷰 / 로그는 별도 윈도우로 띄움. 멀티 모니터 사용자에게 최적.</div>
+          <div class="pros">+ 메인 작업 공간 풀폭 · 모니터 분리 자연스러움</div>
+          <div class="cons">− 단일 모니터에서는 알트탭이 늘어남 · 항상 위 옵션 필요</div>
+        </div>
+      </div>
+
+      <!-- Option C: command palette + modal webview -->
+      <div class="layout-card" data-id="C">
+        <div class="preview" style="background:#0F0F11; padding:8px; display:block; position:relative;">
+          <div class="pv" style="height: 100%;">
+            <div class="col" style="width:8%;"></div>
+            <div class="col grow" style="display:flex; flex-direction:column;">
+              <div class="toolbar"></div>
+              <div style="flex:1; background:#3A3A3F; border-radius:2px;"></div>
+            </div>
+          </div>
+          <div class="float web" style="top: 24%; left: 20%; width: 60%; height: 50%; border-radius: 6px; box-shadow: 0 8px 32px rgba(0,0,0,0.6); border: 1px solid #444;">
+            <div style="padding:4px; font-size:8px; color:white;">웹뷰 — 자동화 동작 시 모달로 점프</div>
+          </div>
+        </div>
+        <div class="info">
+          <div class="ttl">C · 자동화 모달</div>
+          <div class="desc">평소 웹뷰는 숨김. 위험 동작(업로드) 트리거 시 화면 가운데 큰 모달로 떠서 사용자가 검수. 끝나면 자동 닫힘.</div>
+          <div class="pros">+ 평소 메인 작업 풀폭 · 위험 동작에만 집중하게</div>
+          <div class="cons">− 모달이 자주 뜨면 피로 · 자동화 동작 길면 답답</div>
+        </div>
+      </div>
+
+      <!-- Option D: bottom drawer -->
+      <div class="layout-card" data-id="D">
+        <div class="preview" style="background:#0F0F11; padding:8px; display:block; position:relative;">
+          <div class="pv" style="height: 100%;">
+            <div class="col" style="width:8%;"></div>
+            <div class="col grow" style="display:flex; flex-direction:column;">
+              <div class="toolbar"></div>
+              <div style="flex:1; background:#3A3A3F; border-radius:2px;"></div>
+              <div class="web" style="height:35%; margin-top:4px; border-radius: 2px;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="info">
+          <div class="ttl">D · 하단 드로어</div>
+          <div class="desc">웹뷰 + 로그를 통합한 하단 패널. 탭으로 둘 사이 전환. VS Code 터미널 영역과 같은 패턴.</div>
+          <div class="pros">+ 데스크톱 앱 사용자에게 친숙 · 와이드 모니터 잘 활용</div>
+          <div class="cons">− 폭이 좁은 모니터에서는 둘 다 답답 · 가로 그리드 중심인 우리 작업과 충돌</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="pgraph" style="margin-top:24px;"><strong>제안:</strong> 옵션 B(분리 윈도우)를 기본으로, 옵션 C(모달)를 위험 동작 시에만 자동 투입. 옵션 A는 단일 모니터/노트북 사용자를 위한 폴백 모드. 사용자가 '환경'을 한 번 선택하면 그 모드가 유지되게.</p>
+  </section>
+
+  <!-- ========================= Section 7 ========================= -->
+  <section id="s7">
+    <div class="head"><span class="num">07</span><h2>화면 인벤토리 (재구성)</h2><span class="sub">제안 흐름 기준 화면 목록</span></div>
+
+    <table class="spec">
+      <thead>
+        <tr><th style="width:60px">#</th><th style="width:200px">화면</th><th style="width:90px">역할</th><th>핵심 기능</th><th style="width:140px">새로움</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="k">S0</td><td><strong>대시보드</strong></td><td><span class="role-tag biz">경영지원</span></td><td>오늘 처리해야 할 차수 + 두 인박스 잔여 + 어제 마감 안 된 lot</td><td><span style="color:var(--accent)">신규</span></td></tr>
+        <tr><td class="k">S1</td><td>달력</td><td>전체</td><td>월 단위 / 차수 카드 + 진행률 점</td><td>유지</td></tr>
+        <tr><td class="k">S2</td><td><strong>차수 검토 (PO)</strong></td><td><span class="role-tag biz">경영지원</span></td><td>그리드. 행별 보냄/반려 토글, 부족사유. 운송방법 칸은 회색 (다음 단계)</td><td><span style="color:var(--accent)">단순화</span></td></tr>
+        <tr><td class="k">S3</td><td><strong>운송방법 + 확정</strong></td><td><span class="role-tag log">물류</span></td><td>'보냄' 행만 보임. 운송방법 일괄/개별 지정. 하단에 "확정 업로드" 큰 버튼</td><td><span style="color:var(--accent)">신규</span></td></tr>
+        <tr><td class="k">S4a</td><td><strong>밀크런 인박스</strong></td><td><span class="role-tag tx">운송</span></td><td>대기중 lot 카드 리스트. 카드 클릭 → S5a</td><td><span style="color:var(--accent)">신규</span></td></tr>
+        <tr><td class="k">S4b</td><td><strong>쉽먼트 인박스</strong></td><td><span class="role-tag tx">운송</span></td><td>대기중 lot 카드 리스트. 카드 클릭 → S5b</td><td><span style="color:var(--accent)">신규</span></td></tr>
+        <tr><td class="k">S5a</td><td>밀크런 lot 편집</td><td><span class="role-tag tx">운송</span></td><td>팔레트 추가 + SKU×팔레트 매트릭스. 끝나면 업로드</td><td>분리 (모달 가능)</td></tr>
+        <tr><td class="k">S5b</td><td>쉽먼트 lot 편집</td><td><span class="role-tag tx">운송</span></td><td>박스 추가 + 송장 + SKU×박스 매트릭스. 끝나면 업로드</td><td>분리 (모달 가능)</td></tr>
+        <tr><td class="k">S6</td><td>결과 히스토리</td><td>전체</td><td>차수별 산출물 다운로드 + lot별 업로드 결과</td><td>유지</td></tr>
+        <tr><td class="k">S7</td><td>설정 / 플러그인</td><td>전체</td><td>벤더, 자격증명, 마스터, 라이선스</td><td>유지</td></tr>
+      </tbody>
+    </table>
+
+    <p class="pgraph" style="margin-top:20px;"><strong>화면 수가 늘어난 것처럼 보이지만, 실제로는</strong> 한 사람이 한 번에 보는 정보는 줄어듭니다. 경영지원은 S0+S2만 보면 됨. 물류는 S3만. 운송은 S4a/S4b만. 한 사람이 다 한다면 좌측 사이드바 순서대로 따라가면 됨.</p>
+  </section>
+
+  <!-- ========================= Section 8 ========================= -->
+  <section id="s8">
+    <div class="head"><span class="num">08</span><h2>열린 질문</h2><span class="sub">결정해야 진행 가능</span></div>
+
+    <div class="qgrid">
+      <div class="qbox">
+        <h4>인박스의 단위는?</h4>
+        <p>벤더 단위로 인박스를 분리할지, 전 벤더 통합 단일 인박스로 갈지. 사용자가 한 번에 한 벤더만 보는 일반적이라면 벤더별, 통합 운영팀이라면 통합.</p>
+      </div>
+      <div class="qbox">
+        <h4>"차수"는 살아남는가?</h4>
+        <p>인박스 모델로 가면 "차수"는 메타데이터일 뿐. 캘린더의 차수 카드는 무엇을 의미해야 하는가 — 발주확정의 단위? 또는 단순 그룹핑?</p>
+      </div>
+      <div class="qbox">
+        <h4>역할 기반 권한이 필요한가?</h4>
+        <p>경영지원이 운송 화면을 못 보게 막을 필요가 있나, 아니면 그냥 사이드바 순서로 가이드만? 사용자 수가 적으면 후자.</p>
+      </div>
+      <div class="qbox">
+        <h4>위험 동작 카운트다운 위치</h4>
+        <p>3개 업로드 지점(확정·밀크런·쉽먼트) 모두 카운트다운? 첫 업로드만? 위험도가 다르므로 차등 가능.</p>
+      </div>
+      <div class="qbox">
+        <h4>실패 시 롤백 정책</h4>
+        <p>밀크런 업로드 후 쉽먼트 업로드가 실패하면? 차수 단위 atomic이 아니라 lot 단위 atomic. 부분 실패가 일상.</p>
+      </div>
+      <div class="qbox">
+        <h4>WMS 결과 도착 시점</h4>
+        <p>WMS 결과는 발주확정 후에 들어옴. 그렇다면 S3 직후 잠시 "WMS 대기" 상태가 있어야 함. 자동 폴링? 사용자가 수동 업로드?</p>
+      </div>
+    </div>
+  </section>
+
+  <div style="border-top: 1px solid var(--line); margin-top: 60px; padding-top: 24px; font-size: 12px; color: var(--ink-3); display: flex; gap: 24px;">
+    <span>다음 단계 후보</span>
+    <span>· 위 옵션 중 하나로 ▶ <strong style="color:var(--ink-2)">새 프로토타입</strong> 만들기</span>
+    <span>· 인박스 화면 (S4) 깊이 파기</span>
+    <span>· 데이터 모델 ERD 문서화</span>
+  </div>
+
+</div>
+</body>
+</html>
