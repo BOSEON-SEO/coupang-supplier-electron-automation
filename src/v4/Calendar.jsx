@@ -3,9 +3,18 @@ import React, { useState, useMemo } from 'react';
 import { I } from './icons';
 import { CAL_JOBS as V4_CAL_JOBS, VENDORS as V4_VENDORS } from './data';
 
-export default function CalendarV4({ vendor, setVendor, onOpenDate, onOpenPlugins }) {
-  const [month, setMonth] = useState({ y: 2026, m: 5 });
-  const today = '2026-05-06';
+export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, onOpenDate, onOpenPlugins, onOpenSettings }) {
+  const _now = new Date();
+  const [month, setMonth] = useState({ y: _now.getFullYear(), m: _now.getMonth() + 1 });
+  const today = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
+  const goToday = () => { const n = new Date(); setMonth({ y: n.getFullYear(), m: n.getMonth() + 1 }); };
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const yearList = (() => {
+    const y = _now.getFullYear();
+    const arr = [];
+    for (let i = y - 2; i <= y + 1; i++) arr.push(i);
+    return arr;
+  })();
 
   const days = useMemo(() => {
     const first = new Date(month.y, month.m - 1, 1);
@@ -44,7 +53,7 @@ export default function CalendarV4({ vendor, setVendor, onOpenDate, onOpenPlugin
     <div className="cal-shell" style={{flexDirection:'row'}}>
       <div className="cal-sidebar">
         <div className="cal-sb-section">벤더</div>
-        {V4_VENDORS.map(v => (
+        {vendors.map(v => (
           <div key={v.id} className={'cal-sb-vendor' + (vendor.id === v.id ? ' active' : '')} onClick={() => setVendor(v)}>
             <div className="swatch" style={{background: v.color}}>{v.initial}</div>
             <div className="info">
@@ -63,7 +72,7 @@ export default function CalendarV4({ vendor, setVendor, onOpenDate, onOpenPlugin
           <I.Plug size={14}/><span className="label">플러그인</span>
           <span className="badge plugin" style={{fontSize:10}}>1 활성</span>
         </button>
-        <button className="cal-sb-item">
+        <button className="cal-sb-item" onClick={onOpenSettings}>
           <I.Settings size={14}/><span className="label">설정</span>
         </button>
       </div>
@@ -71,11 +80,59 @@ export default function CalendarV4({ vendor, setVendor, onOpenDate, onOpenPlugin
       <div className="cal-shell">
         <div className="cal-header">
           <h1>달력</h1>
-          <div className="month-nav">
+          <div className="month-nav" style={{position:'relative'}}>
             <button className="btn ghost sm" onClick={() => setMonth({...month, m: month.m === 1 ? 12 : month.m - 1, y: month.m === 1 ? month.y - 1 : month.y})}><I.ChevronL size={14}/></button>
-            <span className="month mono">{month.y} · {String(month.m).padStart(2,'0')}월</span>
+            <button
+              className="month mono"
+              onClick={() => setPickerOpen(o => !o)}
+              style={{
+                background: pickerOpen ? 'var(--accent-soft)' : 'transparent',
+                border: '1px solid ' + (pickerOpen ? 'var(--accent)' : 'transparent'),
+                borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontWeight: 600,
+              }}
+              title="연/월 선택"
+            >
+              {month.y} · {String(month.m).padStart(2,'0')}월
+            </button>
             <button className="btn ghost sm" onClick={() => setMonth({...month, m: month.m === 12 ? 1 : month.m + 1, y: month.m === 12 ? month.y + 1 : month.y})}><I.Chevron size={14}/></button>
-            <button className="btn sm">오늘</button>
+            <button className="btn sm" onClick={goToday}>오늘</button>
+            {pickerOpen && (
+              <>
+                <div style={{position:'fixed', inset:0, zIndex:30}} onClick={() => setPickerOpen(false)}/>
+                <div style={{
+                  position:'absolute', top:'calc(100% + 6px)', left:0, zIndex:31,
+                  background:'var(--bg-elev)', border:'1px solid var(--border)', borderRadius:6,
+                  boxShadow:'0 12px 32px rgba(0,0,0,0.12)', padding:10, minWidth:240,
+                  display:'grid', gridTemplateColumns:'auto 1fr', gap:'6px 12px',
+                }}>
+                  <div style={{fontSize:10, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.6, fontWeight:600}}>연</div>
+                  <div style={{display:'flex', flexWrap:'wrap', gap:4}}>
+                    {yearList.map(y => (
+                      <button
+                        key={y}
+                        className={'btn ghost sm' + (y === month.y ? ' accent' : '')}
+                        style={{padding:'2px 8px', height:24, fontSize:11}}
+                        onClick={() => { setMonth({...month, y}); }}
+                      >{y}</button>
+                    ))}
+                  </div>
+                  <div style={{fontSize:10, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.6, fontWeight:600}}>월</div>
+                  <div style={{display:'grid', gridTemplateColumns:'repeat(6, 1fr)', gap:4}}>
+                    {Array.from({length:12}).map((_, i) => {
+                      const m = i + 1;
+                      return (
+                        <button
+                          key={m}
+                          className={'btn ghost sm' + (m === month.m ? ' accent' : '')}
+                          style={{padding:'2px 6px', height:24, fontSize:11}}
+                          onClick={() => { setMonth({...month, m}); setPickerOpen(false); }}
+                        >{m}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
           <div className="vendor-pick">
             <div className="swatch" style={{background: vendor.color}}>{vendor.initial}</div>
@@ -104,19 +161,16 @@ export default function CalendarV4({ vendor, setVendor, onOpenDate, onOpenPlugin
                    onClick={() => !c.other && onOpenDate(c.date)}>
                 <div className={'date' + (dow === 0 ? ' sun' : dow === 6 ? ' sat' : '')}>{day}</div>
                 <div className="seq-list">
-                  {jobs.map(j => (
+                  {jobs.slice(0, 2).map(j => (
                     <div key={j.id} className={'seq-card ' + j.state}>
                       <span className="label">{j.label}</span>
                       <span className="n">{j.skus}·{j.qty}</span>
                     </div>
                   ))}
+                  {jobs.length > 2 && (
+                    <div className="seq-more">외 {jobs.length - 2}건</div>
+                  )}
                 </div>
-                {!c.other && jobs.length === 0 && (
-                  <div className="new-seq"><I.ArrowRight size={10}/> PO 보기</div>
-                )}
-                {!c.other && jobs.length > 0 && (
-                  <div className="new-seq" style={{borderStyle:'solid', color:'var(--accent)', borderColor:'var(--accent)', opacity:0.6}}><I.ArrowRight size={10}/> 열기</div>
-                )}
               </div>
             );
           })}

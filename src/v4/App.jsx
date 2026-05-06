@@ -1,25 +1,110 @@
 // v4 single-window shell — no desktop/dock/draggable canvas.
 // 메인 윈도우 = 앱 자체. Calendar / PoList / Job 가 main area 를 점유.
-// WebView 는 우측 슬라이드 패널, 로그는 하단 collapsible 패널, 플러그인은 fullscreen modal.
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+// WebView 는 우측 슬라이드 패널, 로그는 하단 collapsible 패널.
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { I } from './icons';
 import { VENDORS as V_VENDORS, PLUGINS as V_PLUGINS, LOG_LINES as V_LOGS } from './data';
 import CalendarV4 from './Calendar';
 import PoListView from './PoList';
 import JobViewV4 from './JobView';
-import { PluginManager, PluginTakeover } from './Plugins';
+import { PluginTakeover } from './Plugins';
+import SettingsPage from './SettingsPage';
+import PluginsPage from './PluginsPage';
+import { PluginProvider } from '../core/plugin-host';
+import { bootstrapPlugins } from '../core/plugin-loader';
+import { resolveEntitlementsFromLicense } from '../core/entitlements';
+
+// 실제 vendors.json 의 {id, name, settings} 를 v4 mockup 의 vendor 모양 ({id, name, color, initial, code})
+// 으로 enrich. mockup 컴포넌트는 vendor.color / vendor.initial 등을 직접 참조.
+const VENDOR_COLOR_MAP = {
+  canon: 'oklch(0.55 0.14 250)',
+  epson: 'oklch(0.55 0.16 30)',
+  hp:    'oklch(0.55 0.14 150)',
+  basic: 'oklch(0.55 0.14 200)',
+};
+function enrichVendor(v) {
+  if (!v) return null;
+  return {
+    ...v,
+    initial: (v.initial || v.name?.slice(0, 1) || v.id?.slice(0, 1) || '?').toUpperCase(),
+    color: v.color || VENDOR_COLOR_MAP[v.id] || 'oklch(0.55 0.14 250)',
+    code: v.code || (v.id || '').toUpperCase().slice(0, 3),
+  };
+}
 
 export default function AppV4() {
-  const [vendor, setVendor] = useState(V_VENDORS[0]);
+  // 실 vendors.json 로드. 없을 때만 mockup 데이터로 fallback.
+  const [vendors, setVendors] = useState(() => V_VENDORS.map(enrichVendor));
+  const [vendor, setVendor] = useState(() => enrichVendor(V_VENDORS[0]));
+  const reloadVendors = useCallback(async () => {
+    const res = await window.electronAPI?.loadVendors?.();
+    const list = Array.isArray(res?.vendors) ? res.vendors.map(enrichVendor).filter(Boolean) : [];
+    if (list.length > 0) {
+      setVendors(list);
+      setVendor((cur) => list.find((v) => v.id === cur?.id) || list[0]);
+    }
+  }, []);
+  useEffect(() => { reloadVendors(); }, [reloadVendors]);
+
+  // 라이선스 + 글로벌 설정 — entitlements 계산 + 플러그인 부트스트랩.
+  const [license, setLicense] = useState(null);
+  const [globalSettings, setGlobalSettings] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    const loadAll = async () => {
+      const [lRes, sRes] = await Promise.all([
+        window.electronAPI?.license?.get?.(),
+        window.electronAPI?.loadSettings?.(),
+      ]);
+      if (cancelled) return;
+      setLicense(lRes?.license || null);
+      setGlobalSettings(sRes?.settings || {});
+    };
+    loadAll();
+    const off = window.electronAPI?.license?.onChanged?.((dto) => setLicense(dto || null));
+    const onSettings = () => loadAll();
+    window.addEventListener('settings-changed', onSettings);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('settings-changed', onSettings);
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
+  const entitlements = useMemo(() => resolveEntitlementsFromLicense(license), [license]);
+  const pluginsEnabled = globalSettings?.pluginsEnabled !== false;
+  const effectiveEntitlements = pluginsEnabled ? entitlements : [];
+  const perPluginEnabled = useMemo(() => {
+    const out = {};
+    const ps = globalSettings?.plugins || {};
+    for (const [id, conf] of Object.entries(ps)) {
+      if (conf && conf.enabled === false) out[id] = false;
+    }
+    return out;
+  }, [globalSettings]);
+
+  useEffect(() => {
+    bootstrapPlugins({
+      entitlements: effectiveEntitlements,
+      currentVendor: vendor?.id || null,
+      electronAPI: window.electronAPI,
+      perPluginEnabled,
+    });
+  }, [effectiveEntitlements, vendor?.id, perPluginEnabled]);
+
+  // 옵션: JobView 의 plugin gating UI 용 mock — 실제 hook 동작은 PluginProvider 가 담당.
   const [plugins, setPlugins] = useState(V_PLUGINS);
 
   // view: { kind: 'calendar' } | { kind: 'po-list', date } | { kind: 'job', job }
   const [view, setView] = useState({ kind: 'calendar' });
 
-  const [pluginManagerOpen, setPluginManagerOpen] = useState(false);
   const [pluginTakeoverOpen, setPluginTakeoverOpen] = useState(false);
   const [webviewOpen, setWebviewOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+
+  const goCalendar = () => setView({ kind: 'calendar' });
+  const goSettings = () => setView({ kind: 'settings' });
+  const goPlugins = () => setView({ kind: 'plugins' });
 
   // 웹뷰 패널 폭 — 드래그로 조정, localStorage 영속
   const WEB_MIN = 320, WEB_MAX = 1100, WEB_DEFAULT = 460;
@@ -61,7 +146,6 @@ export default function AppV4() {
   }, []);
   const restoreUpload = () => window.dispatchEvent(new CustomEvent('app:upload:restore'));
 
-  const goCalendar = () => setView({ kind: 'calendar' });
   const goPoList = (date) => setView({ kind: 'po-list', date });
   const goJob = (job) => { if (job) setView({ kind: 'job', job }); };
 
@@ -70,6 +154,7 @@ export default function AppV4() {
   };
 
   return (
+    <PluginProvider entitlements={effectiveEntitlements} currentVendor={vendor?.id || null}>
     <div className="app-shell">
       <header className="app-header">
         <div className="app-title">
@@ -123,11 +208,7 @@ export default function AppV4() {
           </button>
         )}
 
-        <div className="vendor-pill">
-          <span className="swatch" style={{background: vendor.color}}>{vendor.initial}</span>
-          <span>{vendor.name}</span>
-          <span className="mono ver">{vendor.id}</span>
-        </div>
+        <VendorPicker vendor={vendor} vendors={vendors} onSelect={setVendor} />
 
         <button className={'hbtn' + (logOpen ? ' active' : '')} onClick={() => setLogOpen(o => !o)} title="실행 로그">
           <I.Terminal size={13}/> 로그
@@ -135,9 +216,12 @@ export default function AppV4() {
         <button className={'hbtn' + (webviewOpen ? ' active' : '')} onClick={() => setWebviewOpen(o => !o)} title="웹뷰">
           <I.Globe size={13}/> 웹뷰
         </button>
-        <button className="hbtn" onClick={() => setPluginManagerOpen(true)} title="플러그인">
+        <button
+          className={'hbtn' + (view.kind === 'plugins' ? ' active' : '')}
+          onClick={goPlugins}
+          title="플러그인"
+        >
           <I.Plug size={13}/> 플러그인
-          <span className="hbtn-badge">{plugins.filter(p => p.enabled).length}</span>
         </button>
       </header>
 
@@ -146,9 +230,11 @@ export default function AppV4() {
           {view.kind === 'calendar' && (
             <CalendarV4
               vendor={vendor}
-              setVendor={setVendor}
+              vendors={vendors}
+              setVendor={(v) => setVendor(typeof v === 'string' ? vendors.find(x => x.id === v) || vendor : v)}
               onOpenDate={goPoList}
-              onOpenPlugins={() => setPluginManagerOpen(true)}
+              onOpenPlugins={goPlugins}
+              onOpenSettings={goSettings}
             />
           )}
           {view.kind === 'po-list' && (
@@ -168,6 +254,12 @@ export default function AppV4() {
               onBack={() => goPoList(view.job.date)}
               onRequestPluginWindow={onRequestPluginWindow}
             />
+          )}
+          {view.kind === 'settings' && (
+            <SettingsPage vendor={vendor} onBack={goCalendar} />
+          )}
+          {view.kind === 'plugins' && (
+            <PluginsPage vendor={vendor} onBack={goCalendar} />
           )}
 
           {pluginTakeoverOpen && (
@@ -236,11 +328,75 @@ export default function AppV4() {
         </div>
       </footer>
 
-      {pluginManagerOpen && (
-        <PluginManager plugins={plugins} setPlugins={setPlugins} onClose={() => setPluginManagerOpen(false)}/>
-      )}
       {pluginTakeoverOpen && (
         <PluginTakeover onClose={() => setPluginTakeoverOpen(false)}/>
+      )}
+    </div>
+    </PluginProvider>
+  );
+}
+
+/**
+ * 글로벌 헤더의 벤더 pill — 클릭 시 dropdown 으로 다른 벤더 선택.
+ */
+function VendorPicker({ vendor, vendors, onSelect }) {
+  const [open, setOpen] = useState(false);
+  if (!vendor) return null;
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="vendor-pill"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: 'transparent', cursor: 'pointer',
+          borderColor: open ? 'var(--accent)' : undefined,
+        }}
+        title="벤더 변경"
+      >
+        <span className="swatch" style={{ background: vendor.color }}>{vendor.initial}</span>
+        <span>{vendor.name}</span>
+        <span className="mono ver">{vendor.id}</span>
+        <I.ChevronD size={11} stroke="var(--text-3)" style={{ marginLeft: 2 }} />
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+            minWidth: 240, background: 'var(--bg-elev)',
+            border: '1px solid var(--border)', borderRadius: 6,
+            boxShadow: '0 12px 32px rgba(0,0,0,0.12)', zIndex: 31, padding: 4,
+          }}>
+            {vendors.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => { onSelect(v); setOpen(false); }}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', borderRadius: 4,
+                  background: v.id === vendor.id ? 'var(--accent-soft)' : 'transparent',
+                  color: 'var(--text)', border: 'none', cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={(e) => { if (v.id !== vendor.id) e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
+                onMouseLeave={(e) => { if (v.id !== vendor.id) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{
+                  width: 22, height: 22, borderRadius: 4, background: v.color, color: 'white',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, fontWeight: 700, flexShrink: 0,
+                }}>{v.initial}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{v.name}</div>
+                  <div className="mono" style={{ fontSize: 10, color: 'var(--text-3)' }}>{v.id}</div>
+                </div>
+                {v.id === vendor.id && <I.Check size={13} stroke="var(--accent)" />}
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

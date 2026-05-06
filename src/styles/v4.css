@@ -924,3 +924,10 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
   30%  { box-shadow: 0 0 0 4px oklch(from var(--ok) l c h / 0.5), 0 4px 18px oklch(from var(--ok) l c h / 0.35); }
   100% { box-shadow: 0 0 0 2px oklch(from var(--ok) l c h / 0.5), 0 4px 14px oklch(from var(--ok) l c h / 0.18); }
 }
+
+/* Calendar 셀 — 차수 2개 초과 시 "외 N건" 표시 */
+.cal-day .seq-more {
+  font-size: 10px; color: var(--text-3); padding: 2px 6px;
+  background: var(--bg-panel-2); border-radius: 3px; text-align: center;
+  font-weight: 500;
+}
