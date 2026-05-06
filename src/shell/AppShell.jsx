@@ -21,10 +21,11 @@ import AppHeader from './AppHeader';
  */
 export default function AppShell({
   view, onViewChange,
-  workActive, pluginsEnabled,
-  activeJob,
+  pluginsEnabled, pluginCount,
+  activeJob, poListDate,
   vendor, onVendorChange, vendors,
   webOpen, onToggleWeb,
+  logOpen, onToggleLog,
   license, onOpenLicense,
   children,
 }) {
@@ -33,14 +34,17 @@ export default function AppShell({
       <AppHeader
         view={view}
         onViewChange={onViewChange}
-        workActive={workActive}
         pluginsEnabled={pluginsEnabled}
+        pluginCount={pluginCount}
         activeJob={activeJob}
+        poListDate={poListDate}
         vendor={vendor}
         onVendorChange={onVendorChange}
         vendors={vendors}
         webOpen={webOpen}
         onToggleWeb={onToggleWeb}
+        logOpen={logOpen}
+        onToggleLog={onToggleLog}
         license={license}
         onOpenLicense={onOpenLicense}
       />

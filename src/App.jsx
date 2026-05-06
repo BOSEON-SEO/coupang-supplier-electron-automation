@@ -24,6 +24,8 @@ export default function App() {
   const [view, setView] = useState('calendar');
   // PoList 진입 시 해당 날짜
   const [poListDate, setPoListDate] = useState(null);
+  // 헤더 로그 토글 — M5 에서 글로벌 로그 패널 도입 예정. 현재는 placeholder.
+  const [logOpen, setLogOpen] = useState(false);
 
   // 활성 작업 (vendor + date + sequence + manifest)
   const [activeJob, setActiveJob] = useState(null);
@@ -240,14 +242,17 @@ export default function App() {
       <AppShell
         view={view}
         onViewChange={setView}
-        workActive={!!activeJob}
         pluginsEnabled={pluginsEnabled}
+        pluginCount={effectiveEntitlements.filter((e) => e !== 'core').length}
         activeJob={activeJob}
+        poListDate={poListDate}
         vendor={vendor}
         onVendorChange={setVendor}
         vendors={vendors}
         webOpen={webOpen}
         onToggleWeb={() => setWebOpen((o) => !o)}
+        logOpen={logOpen}
+        onToggleLog={() => setLogOpen((o) => !o)}
         license={license}
         onOpenLicense={() => setView('settings')}
       >

@@ -32,6 +32,12 @@ module.exports = (env, argv) => ({
         test: /\.css$/,
         use: ['style-loader', 'css-loader'],
       },
+      {
+        // 웹폰트 (Pretendard / JetBrains Mono) — asset 모듈로 dist/fonts 에 emit
+        test: /\.(woff2?|ttf|otf|eot)$/,
+        type: 'asset/resource',
+        generator: { filename: 'fonts/[name][ext]' },
+      },
     ],
   },
   resolve: {

@@ -6,6 +6,13 @@ import TransportApp from './TransportApp';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
 import { resolveEntitlementsFromLicense } from './core/entitlements';
+// v4 디자인 폰트 — mockup 의 Pretendard + JetBrains Mono 를 npm 패키지로 로컬 번들.
+// CSP 'self' 제약 때문에 CDN 못 씀 — webpack 이 woff2 를 dist 에 emit.
+import 'pretendard/dist/web/static/pretendard.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/600.css';
+
 import './styles/global.css';
 import './styles/v4.css';
 

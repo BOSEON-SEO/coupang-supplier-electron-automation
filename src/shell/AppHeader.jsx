@@ -3,33 +3,25 @@ import VendorSelector from '../components/VendorSelector';
 import { I } from '../icons/v4-icons';
 
 /**
- * v4 단일 윈도우 셸의 상단 바 (M1).
+ * v4 헤더 — 목업 일치 레이아웃.
+ *   [● Coupang Inbound v4]  [breadcrumb]   ──── spacer ────   [license?] [로그] [웹뷰?] [플러그인 N] [vendor]
  *
- *   [● Coupang Inbound v4]  [달력] [작업] [설정] [플러그인]   ── breadcrumb ──   [VENDOR] [웹뷰] [License]
- *
- * 기존 Sidebar 의 네비를 헤더 nav 버튼으로 흡수. webview 토글은 현재 view 가 'work' 일 때만 의미가 있어
- * WorkDetailView 내부 토글 버튼은 그대로 두고, 헤더에는 단축 토글만 노출.
- *
- * Props:
- *   view, onViewChange — 'calendar' | 'work' | 'settings' | 'plugins'
- *   workActive — 활성 작업이 있을 때만 '작업' 탭 활성화 가능
- *   pluginsEnabled — 플러그인 글로벌 on/off (off 면 탭 숨김)
- *   activeJob — work 모드일 때 breadcrumb 에 표시
- *   vendor, onVendorChange, vendors — 헤더 벤더 셀렉터
- *   webOpen, onToggleWeb — work 모드일 때만 표시
- *   license — near-expiry 시 배지로 알림
- *   onOpenLicense — 클릭 시 setView('settings') 같은 핸들러
+ * 중앙 view-switch nav 는 없음. 설정/플러그인은 calendar 사이드바 시스템 섹션 OR 헤더 우측의
+ * 플러그인 버튼으로만 진입. settings/plugins 진입 시 "← 달력" 백 링크를 breadcrumb 자리에 노출.
  */
 export default function AppHeader({
   view, onViewChange,
-  workActive, pluginsEnabled,
-  activeJob,
+  pluginsEnabled, pluginCount = 0,
+  activeJob, poListDate,
   vendor, onVendorChange, vendors,
   webOpen, onToggleWeb,
+  logOpen, onToggleLog,
   license, onOpenLicense,
 }) {
-  const vendorMeta = (vendors || []).find((v) => v.id === activeJob?.vendor);
-  const vendorName = vendorMeta?.name || activeJob?.vendor || '';
+  const activeVendorMeta = (vendors || []).find((v) => v.id === activeJob?.vendor);
+  const activeVendorName = activeVendorMeta?.name || activeJob?.vendor || '';
+
+  const showBackToCalendar = view === 'settings' || view === 'plugins';
 
   return (
     <header className="shell-header">
@@ -39,58 +31,46 @@ export default function AppHeader({
         <span className="ver">v4</span>
       </div>
 
-      <nav className="shell-header__nav">
+      {showBackToCalendar && (
         <button
           type="button"
-          className={'shell-header__navbtn' + (view === 'calendar' ? ' active' : '')}
+          className="shell-header__back"
           onClick={() => onViewChange('calendar')}
+          title="달력으로"
         >
-          <I.Calendar size={13} /> 달력
+          <I.ChevronL size={13} />
+          <span>달력으로</span>
         </button>
-        <button
-          type="button"
-          className={'shell-header__navbtn' + (view === 'work' ? ' active' : '')}
-          onClick={() => onViewChange('work')}
-          disabled={!workActive}
-          title={workActive ? '활성 작업으로 이동' : '활성 작업이 없습니다'}
-        >
-          <I.Briefcase size={13} /> 작업
-        </button>
-        <button
-          type="button"
-          className={'shell-header__navbtn' + (view === 'settings' ? ' active' : '')}
-          onClick={() => onViewChange('settings')}
-        >
-          <I.Settings size={13} /> 설정
-        </button>
-        {pluginsEnabled && (
-          <button
-            type="button"
-            className={'shell-header__navbtn' + (view === 'plugins' ? ' active' : '')}
-            onClick={() => onViewChange('plugins')}
-          >
-            <I.Plug size={13} /> 플러그인
-          </button>
-        )}
-      </nav>
-
-      {view === 'work' && activeJob && (
-        <div className="shell-header__crumb">
-          <span className="sep">/</span>
-          <span>{vendorName}</span>
-          <span className="sep">/</span>
-          <span style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>{activeJob.date}</span>
-          <span className="sep">/</span>
-          <span>{activeJob.sequence}차</span>
-          {activeJob.completed && (
-            <span style={{
-              marginLeft: 6, padding: '1px 6px', borderRadius: 3,
-              background: 'var(--ok-soft)', color: 'var(--ok)',
-              fontSize: 10, fontWeight: 600,
-            }}>완료</span>
-          )}
-        </div>
       )}
+
+      <div className="shell-header__crumb">
+        {view === 'calendar' && <span className="active">달력</span>}
+        {view === 'po-list' && (
+          <>
+            <span style={{ color: 'var(--text-3)' }}>달력</span>
+            <span className="sep">/</span>
+            <span className="active">
+              <I.Calendar size={12} stroke="var(--text-2)" /> {poListDate || ''} PO
+            </span>
+          </>
+        )}
+        {view === 'work' && activeJob && (
+          <>
+            <span style={{ color: 'var(--text-3)' }}>달력</span>
+            <span className="sep">/</span>
+            <span style={{ color: 'var(--text-3)' }}>{activeJob.date} PO</span>
+            <span className="sep">/</span>
+            <span className="active">
+              {activeVendorMeta?.color && (
+                <span className="swatch" style={{ background: activeVendorMeta.color }} />
+              )}
+              {activeVendorName} · {activeJob.sequence}차
+            </span>
+          </>
+        )}
+        {view === 'settings' && <span className="active">설정</span>}
+        {view === 'plugins' && <span className="active">플러그인</span>}
+      </div>
 
       <div className="shell-header__spacer" />
 
@@ -98,13 +78,26 @@ export default function AppHeader({
         <button
           type="button"
           className="shell-header__hbtn"
-          style={{ color: 'var(--warn)', borderColor: 'oklch(from var(--warn) l c h / 0.4)', background: 'var(--warn-soft)' }}
+          style={{
+            color: 'var(--warn)',
+            borderColor: 'oklch(from var(--warn) l c h / 0.4)',
+            background: 'var(--warn-soft)',
+          }}
           onClick={onOpenLicense}
           title="라이선스 만료 임박"
         >
           <I.AlertTriangle size={13} /> 라이선스 갱신
         </button>
       )}
+
+      <button
+        type="button"
+        className={'shell-header__hbtn' + (logOpen ? ' active' : '')}
+        onClick={onToggleLog}
+        title="실행 로그"
+      >
+        <I.Terminal size={13} /> 로그
+      </button>
 
       {view === 'work' && (
         <button
@@ -114,6 +107,18 @@ export default function AppHeader({
           title="웹뷰 토글"
         >
           <I.Globe size={13} /> 웹뷰
+        </button>
+      )}
+
+      {pluginsEnabled && (
+        <button
+          type="button"
+          className={'shell-header__hbtn' + (view === 'plugins' ? ' active' : '')}
+          onClick={() => onViewChange('plugins')}
+          title="플러그인"
+        >
+          <I.Plug size={13} /> 플러그인
+          {pluginCount > 0 && <span className="shell-header__hbtn-badge">{pluginCount}</span>}
         </button>
       )}
 

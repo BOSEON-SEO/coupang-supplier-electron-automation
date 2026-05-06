@@ -110,10 +110,10 @@ export default function CalendarV4({
         <div className="cal-header">
           <h1>달력</h1>
           <div className="month-nav">
-            <button className="v4-btn ghost sm" onClick={prevMonth}><I.ChevronL size={14} /></button>
+            <button className="btn ghost sm" onClick={prevMonth}><I.ChevronL size={14} /></button>
             <span className="month">{month.y} · {String(month.m).padStart(2, '0')}월</span>
-            <button className="v4-btn ghost sm" onClick={nextMonth}><I.Chevron size={14} /></button>
-            <button className="v4-btn sm" onClick={goToday}>오늘</button>
+            <button className="btn ghost sm" onClick={nextMonth}><I.Chevron size={14} /></button>
+            <button className="btn sm" onClick={goToday}>오늘</button>
           </div>
           <div className="vendor-pick">
             <div className="swatch" style={{ background: vendor.color || 'oklch(0.55 0.14 250)' }}>
@@ -122,7 +122,7 @@ export default function CalendarV4({
             <span style={{ fontSize: 12, fontWeight: 600 }}>{vendor.name || vendor.id}</span>
           </div>
           <div style={{ flex: 1 }} />
-          {loading && <span className="v4-badge">불러오는 중…</span>}
+          {loading && <span className="badge">불러오는 중…</span>}
         </div>
 
         <div className="cal-grid">

@@ -150,7 +150,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
         <div style={{ padding: '0 4px 4px' }}>
           {!isAllView && !isOrphanView && (
             <button
-              className="v4-btn primary"
+              className="btn primary"
               style={{ width: '100%', justifyContent: 'center' }}
               onClick={() => onOpenJob?.(dayJobs.find((j) => (j.id || jobKey(j)) === selectedJobId))}
             >
@@ -159,7 +159,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
           )}
           {isOrphanView && (
             <button
-              className="v4-btn accent"
+              className="btn accent"
               style={{ width: '100%', justifyContent: 'center' }}
               disabled={pickedOrphans.size === 0}
               onClick={handleCreateJob}
@@ -182,12 +182,12 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
             {date} <span style={{ color: 'var(--text-3)', fontWeight: 400, fontSize: 13 }}>· PO 리스트</span>
           </h1>
           {isOrphanView && (
-            <div className="v4-badge warn" style={{ fontSize: 11, padding: '4px 10px' }}>
+            <div className="badge warn" style={{ fontSize: 11, padding: '4px 10px' }}>
               <I.AlertTriangle size={11} /> 어느 차수에도 없는 PO 만 표시
             </div>
           )}
           <div style={{ flex: 1 }} />
-          <div className="v4-search">
+          <div className="search">
             <I.Search size={13} stroke="var(--text-3)" />
             <input
               placeholder="발주·SKU·이름"
@@ -201,7 +201,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
           <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 12 }}>불러오는 중…</div>
         )}
         {!loading && filtered.length === 0 && (
-          <div className="v4-empty">
+          <div className="empty">
             <div className="ic"><I.FolderOpen size={20} stroke="var(--text-3)" /></div>
             <div className="ttl">PO 가 없습니다</div>
             <div className="sub">달력에서 PO 갱신을 통해 쿠팡에서 발주서를 가져오세요.</div>
@@ -215,7 +215,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
                   {isOrphanView && (
                     <th className="check-col">
                       <div
-                        className={'v4-cb ' + (pickedOrphans.size > 0 && pickedOrphans.size === orphans.length ? 'on' : pickedOrphans.size > 0 ? 'partial' : '')}
+                        className={'cb ' + (pickedOrphans.size > 0 && pickedOrphans.size === orphans.length ? 'on' : pickedOrphans.size > 0 ? 'partial' : '')}
                         onClick={togglePickedAll}
                         title="모두 선택/해제"
                       >
@@ -269,7 +269,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
                       {isOrphanView && (
                         <td className="check-col">
                           {isOrphan && (
-                            <div className={'v4-cb ' + (isPicked ? 'on' : '')}>
+                            <div className={'cb ' + (isPicked ? 'on' : '')}>
                               {isPicked && <I.Check size={11} />}
                             </div>
                           )}
@@ -278,11 +278,11 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
                       <td className="row-num">{i + 1}</td>
                       <td>
                         {p.job_vendor ? (
-                          <span className="v4-pill" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>
+                          <span className="pill" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>
                             {p.job_seq}차
                           </span>
                         ) : (
-                          <span className="v4-pill" style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}>
+                          <span className="pill" style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}>
                             미배정
                           </span>
                         )}
@@ -294,7 +294,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
                       <td className="num">{p.req_qty}</td>
                       <td className="mono" style={{ fontSize: 10, color: 'var(--text-3)' }}>{p.order_time}</td>
                       <td>
-                        {p.is_new ? <span className="v4-pill" style={{ background: 'oklch(0.95 0.05 60)', color: 'var(--warn)' }}>NEW</span> : null}
+                        {p.is_new ? <span className="pill" style={{ background: 'oklch(0.95 0.05 60)', color: 'var(--warn)' }}>NEW</span> : null}
                       </td>
                     </tr>
                   );
