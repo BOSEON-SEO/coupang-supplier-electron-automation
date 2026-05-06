@@ -681,6 +681,20 @@ app.whenReady().then(() => {
     return { success: true };
   });
 
+  ipcMain.handle('webview:goBack', () => {
+    if (!webView) return { success: false, error: 'no webview' };
+    if (webView.webContents.canGoBack?.()) webView.webContents.goBack();
+    else webView.webContents.navigationHistory?.goBack?.();
+    return { success: true };
+  });
+
+  ipcMain.handle('webview:goForward', () => {
+    if (!webView) return { success: false, error: 'no webview' };
+    if (webView.webContents.canGoForward?.()) webView.webContents.goForward();
+    else webView.webContents.navigationHistory?.goForward?.();
+    return { success: true };
+  });
+
   ipcMain.handle('webview:getUrl', () => {
     if (!webView) return { url: null };
     return { url: webView.webContents.getURL() };

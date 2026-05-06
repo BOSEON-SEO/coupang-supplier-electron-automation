@@ -345,10 +345,13 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T09:00`;
   })();
   const [from, setFrom] = useState(todayDate);
+  const [excelFile, setExcelFile] = useState(null); // File object
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState(''); // 'downloading' | 'parsing' | 'saving' | 'done'
   const [error, setError] = useState('');
   const [result, setResult] = useState(null); // { added, skipped, addedPoNumbers }
+  const fileInputRef = React.useRef(null);
+  const canSubmit = !busy && (source === 'coupang' || (source === 'excel' && excelFile));
 
   const fetchAndApply = async (filePath) => {
     setStage('parsing');
@@ -384,7 +387,7 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
     try {
       const dateFrom = from.slice(0, 10);
       const args = ['--vendor', vendor.id, '--date-from', dateFrom];
-      const runRes = await window.electronAPI?.runPython?.('po_download.py', args);
+      const runRes = await window.electronAPI?.runPython?.('scripts/po_download.py', args);
       if (!runRes?.success) throw new Error('python 실행 실패: ' + (runRes?.error || 'unknown'));
       // python:done 이벤트 대기
       const filePath = await waitPythonDone('po_download.py');
@@ -398,39 +401,30 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
   };
 
   const handleExcel = async () => {
-    setError('');
-    // 파일 선택은 native dialog 가 없으므로 hidden input file 트릭
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.xlsx,.xls,.csv';
-    input.onchange = async (ev) => {
-      const file = ev.target.files?.[0];
-      if (!file) return;
-      setBusy(true); setStage('parsing'); setResult(null);
-      try {
-        const buf = await file.arrayBuffer();
-        const rows = parsePoBuffer(buf);
-        if (!rows.length) throw new Error('xlsx 에서 PO 행을 찾을 수 없습니다');
-        setStage('saving');
-        const mapped = rows.map((r) => ({
-          po_number: String(r.coupang_order_seq || ''),
-          wh: r.departure_warehouse || '',
-          sku: String(r.sku_id || ''),
-          barcode: r.sku_barcode || null,
-          name: r.sku_name || '',
-          req_qty: Number(r.order_quantity) || 0,
-          order_time: r.order_date || '',
-        })).filter((r) => r.po_number && r.sku);
-        const res = await window.electronAPI?.pos?.addNewOnly?.(vendor.id, mapped);
-        if (!res?.success) throw new Error(res?.error || 'DB 저장 실패');
-        setStage('done'); setResult(res);
-      } catch (err) {
-        setError(err.message); setStage('');
-      } finally {
-        setBusy(false);
-      }
-    };
-    input.click();
+    if (!excelFile) return;
+    setError(''); setBusy(true); setStage('parsing'); setResult(null);
+    try {
+      const buf = await excelFile.arrayBuffer();
+      const rows = parsePoBuffer(buf);
+      if (!rows.length) throw new Error('xlsx 에서 PO 행을 찾을 수 없습니다');
+      setStage('saving');
+      const mapped = rows.map((r) => ({
+        po_number: String(r.coupang_order_seq || ''),
+        wh: r.departure_warehouse || '',
+        sku: String(r.sku_id || ''),
+        barcode: r.sku_barcode || null,
+        name: r.sku_name || '',
+        req_qty: Number(r.order_quantity) || 0,
+        order_time: r.order_date || '',
+      })).filter((r) => r.po_number && r.sku);
+      const res = await window.electronAPI?.pos?.addNewOnly?.(vendor.id, mapped);
+      if (!res?.success) throw new Error(res?.error || 'DB 저장 실패');
+      setStage('done'); setResult(res);
+    } catch (err) {
+      setError(err.message); setStage('');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleSubmit = () => {
@@ -454,21 +448,70 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
           <div className="sub">쿠팡에서 새 발주를 가져옵니다. <strong>발주번호 기준 dedup</strong> — 이미 있는 PO는 건너뜁니다.</div>
         </div>
         <div className="modal-body">
-          <div className="field">
-            <label>소스</label>
-            <div className="radio-group">
-              <div className={'radio' + (source === 'coupang' ? ' on' : '')} onClick={() => !busy && setSource('coupang')}>
-                <div className="dot"/><div className="label">쿠팡 사이트에서 받기 <div className="desc">자동화 — 로그인 + 다운로드</div></div>
+          {/* 좌/우 탭 */}
+          <div className="po-source-tabs">
+            <button
+              type="button"
+              className={'po-source-tab' + (source === 'coupang' ? ' active' : '')}
+              onClick={() => !busy && setSource('coupang')}
+              disabled={busy}
+            >
+              <I.Globe size={18}/>
+              <div className="ttl">쿠팡 사이트</div>
+              <div className="sub">자동화 다운로드</div>
+            </button>
+            <button
+              type="button"
+              className={'po-source-tab' + (source === 'excel' ? ' active' : '')}
+              onClick={() => !busy && setSource('excel')}
+              disabled={busy}
+            >
+              <I.FolderOpen size={18}/>
+              <div className="ttl">Excel 업로드</div>
+              <div className="sub">.xlsx 파일</div>
+            </button>
+          </div>
+
+          {/* 탭별 본문 */}
+          {source === 'coupang' && (
+            <div className="po-source-body">
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label>발주일시 ≥</label>
+                <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)} disabled={busy}/>
               </div>
-              <div className={'radio' + (source === 'excel' ? ' on' : '')} onClick={() => !busy && setSource('excel')}>
-                <div className="dot"/><div className="label">Excel 업로드 <div className="desc">.xlsx 파일 직접 선택</div></div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                쿠팡 서플라이어 허브에 자동 로그인 → PO SKU 목록 페이지에서 위 일시 이후 발주를 다운로드합니다.
               </div>
             </div>
-          </div>
-          {source === 'coupang' && (
-            <div className="field">
-              <label>발주일시 ≥</label>
-              <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)} disabled={busy}/>
+          )}
+          {source === 'excel' && (
+            <div className="po-source-body">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                style={{ display: 'none' }}
+                onChange={(ev) => setExcelFile(ev.target.files?.[0] || null)}
+                disabled={busy}
+              />
+              <div
+                className={'po-file-drop' + (excelFile ? ' picked' : '')}
+                onClick={() => !busy && fileInputRef.current?.click()}
+              >
+                {excelFile ? (
+                  <>
+                    <I.CheckCircle size={20} stroke="var(--ok)"/>
+                    <div className="ttl">{excelFile.name}</div>
+                    <div className="sub mono">{(excelFile.size/1024).toFixed(1)} KB · 다른 파일로 변경하려면 클릭</div>
+                  </>
+                ) : (
+                  <>
+                    <I.FolderOpen size={20} stroke="var(--text-3)"/>
+                    <div className="ttl">파일 선택</div>
+                    <div className="sub">PO SKU 다운로드 .xlsx 를 골라주세요</div>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
@@ -500,7 +543,12 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
           ) : (
             <>
               <button className="btn ghost" onClick={onClose} disabled={busy}>취소</button>
-              <button className="btn primary" onClick={handleSubmit} disabled={busy}>
+              <button
+                className="btn primary"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                title={source === 'excel' && !excelFile ? '파일을 먼저 선택하세요' : ''}
+              >
                 <I.RefreshCw size={13}/> {busy ? '진행 중…' : '받기'}
               </button>
             </>

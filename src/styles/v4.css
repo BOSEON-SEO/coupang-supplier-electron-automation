@@ -931,3 +931,85 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
   background: var(--bg-panel-2); border-radius: 3px; text-align: center;
   font-weight: 500;
 }
+
+/* PO 갱신 모달 — 좌/우 소스 탭 + Excel 드롭존 */
+.po-source-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin-bottom: 14px;
+}
+.po-source-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 14px 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-elev); color: var(--text-2);
+  cursor: pointer; transition: border-color 100ms, background 100ms;
+}
+.po-source-tab:hover:not([disabled]) { border-color: var(--text-3); }
+.po-source-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-soft); color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.po-source-tab .ttl { font-size: 13px; font-weight: 600; margin-top: 2px; }
+.po-source-tab .sub { font-size: 11px; color: var(--text-3); }
+.po-source-tab.active .sub { color: oklch(from var(--accent-strong) l c h / 0.7); }
+.po-source-tab[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.po-source-body {
+  background: var(--bg-panel-2); border-radius: 5px; padding: 12px;
+  margin-bottom: 12px;
+}
+
+.po-file-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 22px 14px;
+  border: 2px dashed var(--border-strong); border-radius: 6px;
+  background: var(--bg-elev); cursor: pointer;
+  transition: border-color 100ms, background 100ms;
+}
+.po-file-drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+.po-file-drop.picked {
+  border-style: solid; border-color: var(--ok);
+  background: var(--ok-soft);
+}
+.po-file-drop .ttl { font-size: 13px; font-weight: 600; color: var(--text); }
+.po-file-drop .sub { font-size: 11px; color: var(--text-3); }
+.po-file-drop.picked .ttl { color: var(--ok); }
+
+/* v4 WebPanel — 슬라이드 우측 패널 toolbar/body 추가 디테일 */
+.web-panel-head input.url {
+  flex: 1; font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px; color: var(--text-2);
+  padding: 5px 10px; height: 26px;
+  background: var(--bg-elev); border: 1px solid var(--border-soft);
+  border-radius: 3px; outline: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.web-panel-head input.url:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px oklch(from var(--accent) l c h / 0.15);
+}
+.web-panel-head .wp-iconbtn {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; cursor: pointer;
+  border-radius: 3px; color: var(--text-3);
+}
+.web-panel-head .wp-iconbtn:hover { background: var(--bg-panel-3); color: var(--text); }
+
+.web-panel-body { position: relative; }
+.wp-overlay {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  background: oklch(from var(--bg-panel) l c h / 0.85);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.wp-overlay-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 18px; border-radius: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  font-size: 12px; font-weight: 600; color: var(--accent-strong);
+  pointer-events: auto;
+}

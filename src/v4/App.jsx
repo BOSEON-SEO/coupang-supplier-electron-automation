@@ -10,7 +10,7 @@ import JobViewV4 from './JobView';
 import { PluginTakeover } from './Plugins';
 import SettingsPage from './SettingsPage';
 import PluginsPage from './PluginsPage';
-import WebView from '../components/WebView';
+import WebPanel from './WebPanel';
 import { PluginProvider } from '../core/plugin-host';
 import { bootstrapPlugins } from '../core/plugin-loader';
 import { resolveEntitlementsFromLicense } from '../core/entitlements';
@@ -286,8 +286,7 @@ export default function AppV4() {
               title="드래그해서 너비 조정"
             />
           )}
-          {/* WebView 자체가 자체 툴바(주소창 + 이동 버튼) + WCV overlay 영역 렌더 */}
-          <WebView vendor={vendor.id} isActive={webviewOpen} />
+          <WebPanel vendor={vendor.id} isActive={webviewOpen} onClose={() => setWebviewOpen(false)} />
         </aside>
       </div>
 

@@ -139,6 +139,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setVisible: (visible) => ipcRenderer.invoke('webview:setVisible', visible),
     navigate: (url) => ipcRenderer.invoke('webview:navigate', url),
     reload: () => ipcRenderer.invoke('webview:reload'),
+    goBack: () => ipcRenderer.invoke('webview:goBack'),
+    goForward: () => ipcRenderer.invoke('webview:goForward'),
     getUrl: () => ipcRenderer.invoke('webview:getUrl'),
     onUrlChanged: (callback) => {
       const handler = (_e, data) => callback(data);
