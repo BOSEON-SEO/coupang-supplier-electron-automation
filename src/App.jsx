@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import Sidebar from './components/Sidebar';
+import AppShell from './shell/AppShell';
 import CalendarView from './components/CalendarView';
 import WorkDetailView from './components/WorkDetailView';
-import VendorSelector from './components/VendorSelector';
 import ToastContainer from './components/Toast';
 import SettingsView from './components/SettingsView';
 import PluginsView from './components/PluginsView';
@@ -235,80 +234,64 @@ export default function App() {
 
   return (
     <PluginProvider entitlements={entitlements} currentVendor={vendor || null}>
-    <div className="app-container">
-      <header className="app-header">
-        <h1 className="app-title">쿠팡 서플라이어 자동화</h1>
-        <VendorSelector value={vendor} onChange={setVendor} />
-      </header>
-
-      {license?.status === 'near-expiry' && (
-        <div className="license-banner">
-          ⚠ 라이선스가 곧 만료됩니다 ({new Date(license.expiredAt).toLocaleDateString('ko-KR')}).
-          {' '}관리자에게 갱신을 요청한 후{' '}
-          <button
-            type="button"
-            className="license-banner__action"
-            onClick={() => setView('settings')}
-          >설정 → 라이선스</button>
-          {' '}에서 재검증하세요.
+      <AppShell
+        view={view}
+        onViewChange={setView}
+        workActive={!!activeJob}
+        pluginsEnabled={pluginsEnabled}
+        activeJob={activeJob}
+        vendor={vendor}
+        onVendorChange={setVendor}
+        vendors={vendors}
+        webOpen={webOpen}
+        onToggleWeb={() => setWebOpen((o) => !o)}
+        license={license}
+        onOpenLicense={() => setView('settings')}
+      >
+        {/* 달력 view */}
+        <div style={{ display: view === 'calendar' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
+          <CalendarView
+            vendors={vendors}
+            activeVendor={vendor}
+            onOpenJob={handleOpenJob}
+          />
         </div>
-      )}
 
-      <div className="app-body">
-        <Sidebar
-          activeView={view}
-          onChange={setView}
-          workActive={!!activeJob}
-          pluginsEnabled={pluginsEnabled}
-        />
+        {/* 작업 view (WCV 항상 마운트 유지) */}
+        <div
+          style={{
+            display: view === 'work' ? 'flex' : 'none',
+            flex: 1, minHeight: 0,
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+          className="app-main--stack"
+        >
+          <WorkDetailView
+            job={activeJob}
+            vendor={vendor}
+            vendors={vendors}
+            webOpen={webOpen}
+            onToggleWeb={() => setWebOpen((o) => !o)}
+            onShowWeb={() => setWebOpen(true)}
+            onHideWeb={() => setWebOpen(false)}
+            onJobUpdated={(updated) => setActiveJob(updated)}
+            onBackToCalendar={() => setView('calendar')}
+          />
+        </div>
 
-        <main className="app-main">
-          {/* 달력 view */}
-          <div style={{ display: view === 'calendar' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
-            <CalendarView
-              vendors={vendors}
-              activeVendor={vendor}
-              onOpenJob={handleOpenJob}
-            />
-          </div>
+        {/* 설정 view */}
+        {view === 'settings' && <SettingsView activeVendor={vendor} />}
 
-          {/* 작업 view (WCV 항상 마운트 유지) */}
-          <div
-            style={{
-              display: view === 'work' ? 'flex' : 'none',
-              flex: 1, minHeight: 0,
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}
-            className="app-main--stack"
-          >
-            <WorkDetailView
-              job={activeJob}
-              vendor={vendor}
-              vendors={vendors}
-              webOpen={webOpen}
-              onToggleWeb={() => setWebOpen((o) => !o)}
-              onShowWeb={() => setWebOpen(true)}
-              onHideWeb={() => setWebOpen(false)}
-              onJobUpdated={(updated) => setActiveJob(updated)}
-              onBackToCalendar={() => setView('calendar')}
-            />
-          </div>
-
-          {/* 설정 view */}
-          {view === 'settings' && <SettingsView activeVendor={vendor} />}
-
-          {/* 플러그인 view — 활성화돼있을 때만 */}
-          {view === 'plugins' && pluginsEnabled && <PluginsView />}
-        </main>
-      </div>
+        {/* 플러그인 view — 활성화돼있을 때만 */}
+        {view === 'plugins' && pluginsEnabled && <PluginsView />}
+      </AppShell>
 
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       <UpdateModal />
       <FindBar />
       {/* 플러그인이 기여하는 전역 모달/오버레이 호스트 */}
       <ViewOutlet role={KNOWN_VIEW_ROLES.APP_OVERLAY} />
-    </div>
     </PluginProvider>
   );
 }

@@ -8,6 +8,7 @@
 }
 
 :root {
+  /* legacy tokens — 기존 컴포넌트 호환 */
   --color-bg: #f5f6fa;
   --color-surface: #ffffff;
   --color-primary: #1a73e8;
@@ -21,6 +22,34 @@
   --color-success: #1e8e3e;
   --radius: 6px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+
+  /* v4 design tokens (M1) — mockup 의 v4-styles.css 토큰 병합 */
+  --bg-panel: #FAFAF9;
+  --bg-panel-2: #F4F4F2;
+  --bg-panel-3: #ECECEA;
+  --bg-elev: #FFFFFF;
+  --border: #E4E4E2;
+  --border-strong: #D4D4D1;
+  --border-soft: #EDEDEB;
+  --text: #18181B;
+  --text-2: #52525B;
+  --text-3: #8B8B92;
+  --accent: oklch(0.55 0.14 250);
+  --accent-soft: oklch(0.95 0.03 250);
+  --accent-strong: oklch(0.45 0.16 250);
+  --ship: oklch(0.55 0.14 220);
+  --ship-soft: oklch(0.95 0.04 220);
+  --milk: oklch(0.58 0.14 80);
+  --milk-soft: oklch(0.96 0.05 80);
+  --warn: oklch(0.65 0.16 60);
+  --warn-soft: oklch(0.96 0.04 60);
+  --danger: oklch(0.55 0.20 25);
+  --danger-soft: oklch(0.96 0.04 25);
+  --ok: oklch(0.58 0.12 155);
+  --ok-soft: oklch(0.95 0.04 155);
+  --plugin: oklch(0.55 0.18 320);
+  --plugin-soft: oklch(0.96 0.04 320);
+  --grid-line: #EAEAE8;
 }
 
 html, body {
@@ -4499,3 +4528,102 @@ button.session-badge:disabled {
 }
 .update-card { margin-top: 12px; }
 
+
+/* ============================================================================
+ * M1 — v4 single-window shell (`.shell-*`)
+ *   기존 `.app-*` 와 충돌 안 하도록 prefix 분리.
+ *   M3+ 에서 sub view 들을 v4 스타일로 마이그레이션하면서 점진적으로 사용.
+ * ========================================================================== */
+
+.shell-root {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg-panel-2);
+  color: var(--text);
+}
+
+.shell-header {
+  height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.shell-header__title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600;
+  padding-right: 12px; border-right: 1px solid var(--border);
+}
+.shell-header__title .dot {
+  width: 8px; height: 8px; border-radius: 2px; background: var(--accent);
+}
+.shell-header__title .ver {
+  color: var(--text-3); font-weight: 400; font-size: 11px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.shell-header__nav {
+  display: flex; align-items: center; gap: 2px;
+}
+.shell-header__navbtn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 10px; border-radius: 4px;
+  font-size: 12px; font-weight: 500; color: var(--text-2);
+  border: 1px solid transparent;
+  background: transparent; cursor: pointer;
+}
+.shell-header__navbtn:hover { background: var(--bg-panel-2); color: var(--text); }
+.shell-header__navbtn.active {
+  background: var(--accent-soft); color: var(--accent-strong);
+  border-color: oklch(from var(--accent) l c h / 0.4);
+  font-weight: 600;
+}
+.shell-header__navbtn[disabled] { opacity: 0.4; cursor: not-allowed; }
+.shell-header__crumb {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-2);
+  margin-left: 4px;
+}
+.shell-header__crumb .sep { color: var(--text-3); font-weight: 400; }
+.shell-header__spacer { flex: 1; }
+.shell-header__vendor {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 12px; font-weight: 500;
+}
+.shell-header__hbtn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 9px; border-radius: 4px;
+  font-size: 12px; color: var(--text-2);
+  border: 1px solid transparent; background: transparent; cursor: pointer;
+}
+.shell-header__hbtn:hover { background: var(--bg-panel-2); color: var(--text); }
+.shell-header__hbtn.active {
+  background: var(--accent-soft); color: var(--accent-strong);
+  border-color: oklch(from var(--accent) l c h / 0.4);
+}
+
+.shell-body {
+  flex: 1; display: flex; min-height: 0;
+}
+.shell-main {
+  flex: 1; display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; overflow: hidden;
+  background: var(--bg-panel-2);
+  position: relative;
+}
+
+.shell-license-banner {
+  flex-shrink: 0;
+  background: var(--warn-soft); color: var(--warn);
+  border-bottom: 1px solid oklch(from var(--warn) l c h / 0.3);
+  padding: 8px 14px;
+  font-size: 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.shell-license-banner__action {
+  background: transparent; border: 1px solid currentColor;
+  color: inherit; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.shell-license-banner__action:hover { background: oklch(from var(--warn) l c h / 0.15); }
