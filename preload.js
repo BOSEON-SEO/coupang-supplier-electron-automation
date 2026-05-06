@@ -147,6 +147,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('webview:url-changed', handler);
       return () => ipcRenderer.removeListener('webview:url-changed', handler);
     },
+    isVisible: () => ipcRenderer.invoke('webview:isVisible'),
+    onVisibilityChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('webview:visibility-changed', handler);
+      return () => ipcRenderer.removeListener('webview:visibility-changed', handler);
+    },
   },
 
   // ── 찾기 (Ctrl+F) ──

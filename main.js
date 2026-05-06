@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -60,12 +60,14 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// ── 메인 윈도우 + 웹 뷰 (WebContentsView) ──────────────────
+// ── 메인 윈도우 + 웹 뷰 (별도 BrowserWindow) ─────────────────
+//   직전 구현은 WebContentsView 를 mainWindow 의 contentView 위에 attach 하는
+//   슬라이드 패널이었지만, BrowserView/WebContentsView 는 native widget 이라
+//   renderer 의 modal/dropdown 위에 항상 얹혀 z-index 로 못 누른다.
+//   별도 BrowserWindow 로 분리해 OS 가 창 관리를 처리하게 한다.
 let mainWindow = null;
-let webView = null;          // 현재 활성 WebContentsView (벤더별)
-let webViewVendor = null;    // 현재 webView가 사용 중인 vendor id
-let webViewBounds = { x: 0, y: 0, width: 0, height: 0 };
-let webViewVisible = false;
+let webWindow = null;        // 현재 활성 webview BrowserWindow (벤더별)
+let webViewVendor = null;    // webWindow 가 사용 중인 vendor id
 
 // ── 플러그인 서브 창 관리 (재고조정 / 운송분배 공용) ─────────
 // jobKey = `${date}/${vendor}/${seq:02d}` 단위로 각 종류별 최대 1개 창.
@@ -168,28 +170,31 @@ function attachFindHandlers(wc, { target = 'main', interceptKeys = true, rendere
 }
 
 /**
- * 벤더별 WebContentsView 생성/교체.
+ * 벤더별 webview BrowserWindow 생성/교체.
  * - partition: persist:vendor-{vendorId} 로 세션 격리
- * - 기존 webView 가 있으면 destroy 후 재생성
+ * - 기존 webWindow 가 있으면 close 후 재생성 (벤더 변경 시)
  * - 초기 URL: https://supplier.coupang.com/dashboard/KR (Keycloak으로 자동 redirect)
+ * - X 클릭 시 destroy 대신 hide 로 세션 보존 (메인 헤더 토글로 다시 show)
  */
 function ensureWebView(vendorId) {
-  if (!mainWindow || mainWindow.isDestroyed()) return null;
   if (!vendorId) return null;
-  if (webViewVendor === vendorId && webView) return webView;
+  if (webViewVendor === vendorId && webWindow && !webWindow.isDestroyed()) return webWindow;
 
   // 기존 제거
-  if (webView) {
-    try {
-      mainWindow.contentView.removeChildView(webView);
-      webView.webContents.close({ waitForBeforeUnload: false });
-    } catch {
-      // 이미 닫힘 — 무시
-    }
-    webView = null;
+  if (webWindow && !webWindow.isDestroyed()) {
+    try { webWindow.removeAllListeners('close'); webWindow.destroy(); } catch (_) { /* ignore */ }
+    webWindow = null;
   }
 
-  const wcv = new WebContentsView({
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    minWidth: 480,
+    minHeight: 400,
+    title: `쿠팡 서플라이어 — ${vendorId}`,
+    backgroundColor: '#ffffff',
+    show: false,
+    parent: mainWindow || undefined,
     webPreferences: {
       partition: `persist:vendor-${vendorId}`,
       contextIsolation: true,
@@ -197,10 +202,27 @@ function ensureWebView(vendorId) {
       sandbox: true,
     },
   });
-  wcv.setBackgroundColor('#ffffff');
-  mainWindow.contentView.addChildView(wcv);
-  wcv.setBounds(webViewVisible ? webViewBounds : { x: 0, y: 0, width: 0, height: 0 });
-  wcv.webContents.loadURL(COUPANG_HOME_URL);
+
+  // 사용자가 X 클릭 → hide. 다음 호출에서 show() 로 복구.
+  win.on('close', (e) => {
+    if (!app.isQuiting && win === webWindow) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+  // 창 표시 상태 변화를 메인 renderer 에 알림 — 헤더 "웹뷰" 토글 active state 동기화
+  const broadcastVisible = (visible) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('webview:visibility-changed', { visible });
+    }
+  };
+  win.on('show', () => broadcastVisible(true));
+  win.on('hide', () => broadcastVisible(false));
+
+  win.loadURL(COUPANG_HOME_URL);
+
+  const wcv = win; // 아래 다운로드/popup/url-changed 등 webContents 작업 호환용
+  // 호환을 위해 .webContents 직접 사용
 
   // 다운로드 훅 — pendingDownloadTarget 에 지정된 경로로 자동 저장하여
   // OS 저장 대화상자를 우회한다. Python 쪽은 expect_download 를 쓰지 않고
@@ -452,15 +474,13 @@ function ensureWebView(vendorId) {
     rendererWc: mainWindow?.webContents,
   });
 
-  webView = wcv;
+  webWindow = win;
   webViewVendor = vendorId;
-  return wcv;
+  return win;
 }
 
-function applyWebViewBounds() {
-  if (!webView) return;
-  webView.setBounds(webViewVisible ? webViewBounds : { x: 0, y: 0, width: 0, height: 0 });
-}
+// 별도 BrowserWindow 라 bounds 추적 불필요. 호환을 위해 빈 함수만 유지.
+function applyWebViewBounds() { /* no-op */ }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -625,88 +645,73 @@ app.whenReady().then(() => {
   // 자동 업데이트 — electron-updater 래퍼. 부팅 후 5초 뒤 1회 체크.
   registerUpdateIpc({ ipcMain, broadcast: broadcastAll });
 
-  // ── WebContentsView 제어 IPC ────────────────────────────
+  // ── webview BrowserWindow 제어 IPC ─────────────────────────
   ipcMain.handle('webview:setVendor', (_e, vendorId) => {
     const v = ensureWebView(vendorId);
     return { success: !!v };
   });
 
-  ipcMain.handle('webview:setBounds', (_e, bounds) => {
-    if (
-      !bounds ||
-      typeof bounds.x !== 'number' ||
-      typeof bounds.y !== 'number' ||
-      typeof bounds.width !== 'number' ||
-      typeof bounds.height !== 'number'
-    ) {
-      return { success: false, error: 'invalid bounds' };
-    }
-    webViewBounds = {
-      x: Math.round(bounds.x),
-      y: Math.round(bounds.y),
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height),
-    };
-    applyWebViewBounds();
-    return { success: true };
-  });
+  // 별도 BrowserWindow — bounds 추적 불필요. 호환을 위해 핸들러는 유지하되 no-op.
+  ipcMain.handle('webview:setBounds', () => ({ success: true }));
 
   ipcMain.handle('webview:setVisible', (_e, visible) => {
-    webViewVisible = !!visible;
-    applyWebViewBounds();
+    if (!webWindow || webWindow.isDestroyed()) return { success: false, error: 'no webview' };
+    if (visible) { webWindow.show(); webWindow.focus(); }
+    else webWindow.hide();
     return { success: true };
   });
 
   ipcMain.handle('webview:navigate', (_e, url) => {
-    if (!webView) return { success: false, error: 'no webview' };
+    if (!webWindow || webWindow.isDestroyed()) return { success: false, error: 'no webview' };
     let target = String(url || '').trim();
     if (!target) return { success: false, error: 'empty url' };
 
     if (!/^[a-zA-Z]+:\/\//.test(target)) {
-      // 스킴 없음 → 도메인-like 면 https:// 보정, 아니면 구글 검색
       const looksLikeDomain = /^[\w-]+(\.[\w-]+)+(\/.*)?$/i.test(target) || /^localhost(:\d+)?(\/.*)?$/i.test(target);
-      if (looksLikeDomain) {
-        target = 'https://' + target;
-      } else {
-        target = 'https://www.google.com/search?q=' + encodeURIComponent(target);
-      }
+      target = looksLikeDomain ? 'https://' + target : 'https://www.google.com/search?q=' + encodeURIComponent(target);
     }
-    webView.webContents.loadURL(target);
+    webWindow.webContents.loadURL(target);
+    if (!webWindow.isVisible()) webWindow.show();
     return { success: true, url: target };
   });
 
   ipcMain.handle('webview:reload', () => {
-    if (!webView) return { success: false, error: 'no webview' };
-    webView.webContents.reload();
+    if (!webWindow || webWindow.isDestroyed()) return { success: false, error: 'no webview' };
+    webWindow.webContents.reload();
     return { success: true };
   });
 
   ipcMain.handle('webview:goBack', () => {
-    if (!webView) return { success: false, error: 'no webview' };
-    if (webView.webContents.canGoBack?.()) webView.webContents.goBack();
-    else webView.webContents.navigationHistory?.goBack?.();
+    if (!webWindow || webWindow.isDestroyed()) return { success: false, error: 'no webview' };
+    const wc = webWindow.webContents;
+    if (wc.canGoBack?.()) wc.goBack();
+    else wc.navigationHistory?.goBack?.();
     return { success: true };
   });
 
   ipcMain.handle('webview:goForward', () => {
-    if (!webView) return { success: false, error: 'no webview' };
-    if (webView.webContents.canGoForward?.()) webView.webContents.goForward();
-    else webView.webContents.navigationHistory?.goForward?.();
+    if (!webWindow || webWindow.isDestroyed()) return { success: false, error: 'no webview' };
+    const wc = webWindow.webContents;
+    if (wc.canGoForward?.()) wc.goForward();
+    else wc.navigationHistory?.goForward?.();
     return { success: true };
   });
 
   ipcMain.handle('webview:getUrl', () => {
-    if (!webView) return { url: null };
-    return { url: webView.webContents.getURL() };
+    if (!webWindow || webWindow.isDestroyed()) return { url: null };
+    return { url: webWindow.webContents.getURL() };
   });
 
+  // 추가 — webview 창 가시 상태 조회 (헤더 토글 active state 동기화용)
+  ipcMain.handle('webview:isVisible', () => ({
+    visible: !!(webWindow && !webWindow.isDestroyed() && webWindow.isVisible()),
+  }));
+
   // ── 찾기 (Ctrl+F) ──
-  //   target === 'webview' → WebContentsView(쿠팡) 대상
-  //   그 외 → event.sender (요청을 보낸 창의 renderer webContents 그대로)
   const resolveFindTarget = (event, target) => {
     if (target === 'webview') {
-      return (webView && !webView.webContents.isDestroyed())
-        ? webView.webContents : null;
+      return (webWindow && !webWindow.isDestroyed() && !webWindow.webContents.isDestroyed())
+        ? webWindow.webContents : null;
     }
     return event.sender && !event.sender.isDestroyed() ? event.sender : null;
   };
@@ -732,6 +737,9 @@ app.whenReady().then(() => {
 
   createWindow();
 });
+
+// 종료 의도 마킹 — webWindow 의 close preventDefault 가 실제 종료 막지 않도록.
+app.on('before-quit', () => { app.isQuiting = true; });
 
 app.on('window-all-closed', () => {
   app.quit();

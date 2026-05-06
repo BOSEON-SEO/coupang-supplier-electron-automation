@@ -10,7 +10,6 @@ import JobViewV4 from './JobView';
 import { PluginTakeover } from './Plugins';
 import SettingsPage from './SettingsPage';
 import PluginsPage from './PluginsPage';
-import WebPanel from './WebPanel';
 import { PluginProvider } from '../core/plugin-host';
 import { bootstrapPlugins } from '../core/plugin-loader';
 import { resolveEntitlementsFromLicense } from '../core/entitlements';
@@ -107,36 +106,45 @@ export default function AppV4() {
   const goSettings = () => setView({ kind: 'settings' });
   const goPlugins = () => setView({ kind: 'plugins' });
 
-  // 웹뷰 패널 폭 — 드래그로 조정, localStorage 영속
-  const WEB_MIN = 320, WEB_MAX = 1100, WEB_DEFAULT = 460;
-  const [webWidth, setWebWidth] = useState(() => {
-    const saved = parseInt(localStorage.getItem('v4WebWidth') || '', 10);
-    return Number.isFinite(saved) && saved >= WEB_MIN && saved <= WEB_MAX ? saved : WEB_DEFAULT;
-  });
-  const [resizingWeb, setResizingWeb] = useState(false);
-  useEffect(() => { if (!resizingWeb) localStorage.setItem('v4WebWidth', String(webWidth)); }, [resizingWeb, webWidth]);
-  const startResizeWeb = useCallback((e) => {
-    e.preventDefault();
-    setResizingWeb(true);
-    const startX = e.clientX;
-    const startW = webWidth;
-    const onMove = (ev) => {
-      const dx = startX - ev.clientX; // 좌측으로 끌수록 폭 증가
-      const next = Math.min(WEB_MAX, Math.max(WEB_MIN, startW + dx));
-      setWebWidth(next);
-    };
-    const onUp = () => {
-      setResizingWeb(false);
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [webWidth]);
+  // webview 는 별도 BrowserWindow — vendor 변경 시 partition 재생성, 가시 상태 동기화.
+  useEffect(() => {
+    if (!vendor?.id) return;
+    window.electronAPI?.webview?.setVendor?.(vendor.id);
+  }, [vendor?.id]);
+
+  useEffect(() => {
+    const api = window.electronAPI?.webview;
+    if (!api?.onVisibilityChanged) return;
+    api.isVisible?.().then((r) => setWebviewOpen(!!r?.visible));
+    const off = api.onVisibilityChanged(({ visible }) => setWebviewOpen(!!visible));
+    return () => { if (typeof off === 'function') off(); };
+  }, []);
+
+  const toggleWebview = useCallback(() => {
+    const next = !webviewOpen;
+    setWebviewOpen(next);
+    window.electronAPI?.webview?.setVisible?.(next);
+  }, [webviewOpen]);
+
+  const goCoupangHome = useCallback(() => {
+    if (!vendor?.id) { alert('먼저 벤더를 선택하세요.'); return; }
+    const api = window.electronAPI?.webview;
+    if (!api) return;
+    api.setVendor?.(vendor.id);
+    api.navigate?.('https://supplier.coupang.com/dashboard/KR');
+  }, [vendor?.id]);
+
+  const handleAutoLogin = useCallback(async () => {
+    if (!vendor?.id) { alert('먼저 벤더를 선택하세요.'); return; }
+    const api = window.electronAPI;
+    const cred = await api?.checkCredentials?.(vendor.id);
+    if (!cred?.hasId || !cred?.hasPassword) {
+      alert('자격증명이 없습니다.\n[설정] 에서 ID/PW 를 먼저 저장하세요.');
+      return;
+    }
+    api?.webview?.setVisible?.(true);
+    await api?.runPython?.('scripts/login.py', ['--vendor', vendor.id]);
+  }, [vendor?.id]);
 
   // JobView 가 dispatch 하는 업로드 상태 — 헤더 인디케이터로 사용
   const [uploadStatus, setUploadStatus] = useState(null);
@@ -214,7 +222,13 @@ export default function AppV4() {
         <button className={'hbtn' + (logOpen ? ' active' : '')} onClick={() => setLogOpen(o => !o)} title="실행 로그">
           <I.Terminal size={13}/> 로그
         </button>
-        <button className={'hbtn' + (webviewOpen ? ' active' : '')} onClick={() => setWebviewOpen(o => !o)} title="웹뷰">
+        <button className="hbtn" onClick={goCoupangHome} title="쿠팡 서플라이어 홈으로 이동">
+          <I.Home size={13}/>
+        </button>
+        <button className="hbtn" onClick={handleAutoLogin} title={vendor ? `${vendor.id} 자동 로그인` : '자동 로그인'}>
+          <I.Key size={13}/>
+        </button>
+        <button className={'hbtn' + (webviewOpen ? ' active' : '')} onClick={toggleWebview} title="웹뷰 창 토글">
           <I.Globe size={13}/> 웹뷰
         </button>
         <button
@@ -272,22 +286,7 @@ export default function AppV4() {
           )}
         </main>
 
-        <aside
-          className={'web-panel' + (webviewOpen ? ' open' : '') + (resizingWeb ? ' resizing' : '')}
-          style={{width: webviewOpen ? webWidth : 0}}
-          aria-hidden={!webviewOpen}
-        >
-          {webviewOpen && (
-            <div
-              className="web-panel-resizer"
-              onPointerDown={startResizeWeb}
-              role="separator"
-              aria-orientation="vertical"
-              title="드래그해서 너비 조정"
-            />
-          )}
-          <WebPanel vendor={vendor.id} isActive={webviewOpen} onClose={() => setWebviewOpen(false)} />
-        </aside>
+        {/* webview 는 별도 BrowserWindow — 메인 윈도우의 슬라이드 패널 폐기 */}
       </div>
 
       <footer className={'log-panel' + (logOpen ? ' open' : '')}>
