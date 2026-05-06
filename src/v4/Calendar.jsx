@@ -1,7 +1,28 @@
 // v4 Calendar — clicking any day opens PO List view (not job directly)
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { I } from './icons';
-import { CAL_JOBS as V4_CAL_JOBS, VENDORS as V4_VENDORS } from './data';
+import { VENDORS as V4_VENDORS } from './data';
+
+// 실 manifest → mockup 셸이 기대하는 모양 변환
+//   manifest: { vendor, date, sequence, completed, ... }
+//   mockup:   { id, vendor, date, seq, state, label, skus, qty }
+function adaptJob(m, todayStr) {
+  const seq = m.sequence ?? m.seq;
+  const state = m.completed ? 'shipped' : (m.date === todayStr ? 'active' : 'draft');
+  const monthDay = m.date.slice(5).replace('-', '/');
+  return {
+    id: `${m.vendor}-${m.date}-${seq}`,
+    vendor: m.vendor,
+    date: m.date,
+    seq,
+    state,
+    label: `${monthDay} ${seq}차`,
+    skus: m.stats?.skuCount || 0,
+    qty: m.stats?.totalQty || 0,
+    completed: !!m.completed,
+    raw: m,
+  };
+}
 
 export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, onOpenDate, onOpenPlugins, onOpenSettings }) {
   const _now = new Date();
@@ -9,6 +30,21 @@ export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, on
   const today = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
   const goToday = () => { const n = new Date(); setMonth({ y: n.getFullYear(), m: n.getMonth() + 1 }); };
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // 실 jobs 데이터 — manifest 들을 listMonthFull 로 한 번에 fetch
+  const [monthManifests, setMonthManifests] = useState([]);
+  useEffect(() => {
+    if (!vendor?.id) { setMonthManifests([]); return; }
+    let cancelled = false;
+    Promise.resolve(window.electronAPI?.jobs?.listMonthFull?.(month.y, month.m, vendor.id))
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res?.jobs) ? res.jobs : [];
+        setMonthManifests(list);
+      })
+      .catch(() => { if (!cancelled) setMonthManifests([]); });
+    return () => { cancelled = true; };
+  }, [month.y, month.m, vendor?.id]);
   const yearList = (() => {
     const y = _now.getFullYear();
     const arr = [];
@@ -36,18 +72,23 @@ export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, on
     return cells;
   }, [month]);
 
+  const adaptedJobs = useMemo(
+    () => monthManifests.map((m) => adaptJob(m, today)),
+    [monthManifests, today]
+  );
+
   const jobsByDate = useMemo(() => {
     const m = {};
-    V4_CAL_JOBS.filter(j => j.vendor === vendor.id).forEach(j => {
+    adaptedJobs.forEach(j => {
       if (!m[j.date]) m[j.date] = [];
       m[j.date].push(j);
     });
     return m;
-  }, [vendor]);
+  }, [adaptedJobs]);
 
-  const monthJobs = V4_CAL_JOBS.filter(j => j.vendor === vendor.id && j.date.startsWith(`${month.y}-${String(month.m).padStart(2,'0')}`));
-  const totalSku = monthJobs.reduce((s,j) => s + j.skus, 0);
-  const totalQty = monthJobs.reduce((s,j) => s + j.qty, 0);
+  const monthJobs = adaptedJobs;
+  const totalSku = monthJobs.reduce((s,j) => s + (j.skus || 0), 0);
+  const totalQty = monthJobs.reduce((s,j) => s + (j.qty || 0), 0);
 
   return (
     <div className="cal-shell" style={{flexDirection:'row'}}>

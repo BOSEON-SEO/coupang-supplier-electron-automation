@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   jobs: {
     list: (date, vendor) => ipcRenderer.invoke('jobs:list', date, vendor),
     listMonth: (year, month, vendor) => ipcRenderer.invoke('jobs:listMonth', year, month, vendor),
+    listMonthFull: (year, month, vendor) => ipcRenderer.invoke('jobs:listMonthFull', year, month, vendor),
     listFiles: (date, vendor, sequence) => ipcRenderer.invoke('jobs:listFiles', date, vendor, sequence),
     recordUpload: (date, vendor, sequence) => ipcRenderer.invoke('jobs:recordUpload', date, vendor, sequence),
     deleteUploadHistory: (date, vendor, sequence, timestamp) =>

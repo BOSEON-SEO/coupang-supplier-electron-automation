@@ -450,6 +450,36 @@ function registerIpcHandlers({
   });
 
   /**
+   * jobs:listMonthFull — 연·월의 모든 manifest 를 한 번에 fetch (v4 Calendar 용).
+   * jobs:listMonth 가 카운트만 주는 데 비해 이건 실제 manifest 배열을 반환.
+   */
+  ipcMain.handle('jobs:listMonthFull', async (_e, year, month, vendor) => {
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+      return { success: false, error: 'invalid year/month', jobs: [] };
+    }
+    const prefix = `${year}-${String(month).padStart(2, '0')}-`;
+    if (!fs.existsSync(dataDir)) return { success: true, jobs: [] };
+
+    const filter = (vendor && isValidVendor(vendor)) ? vendor : null;
+    const jobs = [];
+    for (const name of fs.readdirSync(dataDir)) {
+      if (!name.startsWith(prefix) || !isValidDate(name)) continue;
+      const dayDir = path.join(dataDir, name);
+      try {
+        for (const v of fs.readdirSync(dayDir)) {
+          if (!isValidVendor(v)) continue;
+          if (filter && v !== filter) continue;
+          for (const seq of listVendorSequences(dataDir, name, v)) {
+            const m = readManifest(dataDir, name, v, seq);
+            if (m) jobs.push(m);
+          }
+        }
+      } catch { /* 무시 */ }
+    }
+    return { success: true, jobs };
+  });
+
+  /**
    * jobs:recordUpload — 쿠팡에 업로드한 시점의 confirmation.xlsx 스냅샷을
    * job/history/ 에 복사 보관하고 manifest.uploadHistory 에 엔트리 누적.
    * phase 는 'uploaded' 로 전환.

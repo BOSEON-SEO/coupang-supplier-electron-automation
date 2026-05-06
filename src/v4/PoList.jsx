@@ -1,25 +1,87 @@
 // v4 PO List view — opened from Calendar. Sidebar lists 차수, main shows ALL POs.
 // Selecting a 차수 dims non-member POs. Orphans (no 차수) are color-flagged.
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { I } from './icons';
-import { ALL_POS, CAL_JOBS as V4PL_JOBS } from './data';
+
+// 실 manifest → mockup 차수 모양 변환
+function adaptManifest(m, today) {
+  const seq = m.sequence ?? m.seq;
+  const state = m.completed ? 'shipped' : (m.date === today ? 'active' : 'draft');
+  return {
+    id: `${m.vendor}-${m.date}-${seq}`,
+    vendor: m.vendor,
+    date: m.date,
+    seq,
+    state,
+    label: `${m.date.slice(5).replace('-','/')} ${seq}차`,
+    skus: m.stats?.skuCount || 0,
+    qty: m.stats?.totalQty || 0,
+    raw: m,
+  };
+}
+
+// DB pos row → mockup PO 모양 변환
+//   DB: { id, vendor_id, po_number, wh, sku, barcode, name, req_qty, order_time, job_vendor, job_date, job_seq, is_new }
+//   mockup: { id, jobId, po, wh, sku, barcode, name, reqQty, orderTime, isNew }
+function adaptPos(row) {
+  return {
+    id: row.id,
+    jobId: row.job_vendor && row.job_date && row.job_seq != null
+      ? `${row.job_vendor}-${row.job_date}-${row.job_seq}`
+      : null,
+    po: row.po_number,
+    wh: row.wh,
+    sku: row.sku,
+    barcode: row.barcode || row.sku,
+    name: row.name,
+    reqQty: row.req_qty,
+    orderTime: row.order_time,
+    isNew: !!row.is_new,
+  };
+}
 
 export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJob }) {
-  const dayJobs = useMemo(() => V4PL_JOBS.filter(j => j.vendor === vendor.id && j.date === date), [vendor, date]);
-  const [selectedJobId, setSelectedJobId] = useState(dayJobs[0]?.id || 'all');
+  const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+
+  // 차수 + 전체 PO 풀 (해당 벤더) 동시 fetch
+  const [dayJobs, setDayJobs] = useState([]);
+  const [allPos, setAllPos] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const reload = useCallback(async () => {
+    if (!vendor?.id) return;
+    setLoading(true);
+    try {
+      const [jobsRes, posRes] = await Promise.all([
+        window.electronAPI?.jobs?.list?.(date, vendor.id),
+        window.electronAPI?.pos?.listAll?.(vendor.id),
+      ]);
+      const manifests = Array.isArray(jobsRes?.jobs) ? jobsRes.jobs : [];
+      setDayJobs(manifests.map((m) => adaptManifest(m, today)));
+      const rows = Array.isArray(posRes?.rows) ? posRes.rows : [];
+      setAllPos(rows.map(adaptPos));
+    } finally {
+      setLoading(false);
+    }
+  }, [vendor?.id, date, today]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const [selectedJobId, setSelectedJobId] = useState('all');
+  useEffect(() => { if (dayJobs.length > 0 && selectedJobId === 'all') setSelectedJobId(dayJobs[0].id); }, [dayJobs]);
+
   const [search, setSearch] = useState('');
   const [refreshOpen, setRefreshOpen] = useState(false);
-  // 미배정 PO 새 차수 만들 때 선택된 행 id 집합
+  const [creating, setCreating] = useState(false);
   const [pickedOrphans, setPickedOrphans] = useState(new Set());
   const togglePicked = (id) => setPickedOrphans(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const togglePickedAll = (orphans) => setPickedOrphans(s =>
     orphans.length === s.size ? new Set() : new Set(orphans.map(o => o.id))
   );
 
-  // Filter scope: same vendor, but show all POs (even from other 차수) so we visualize membership
   const scopedPos = useMemo(() =>
-    ALL_POS.filter(p => p.po && (search === '' || `${p.po} ${p.name} ${p.barcode}`.includes(search))),
-    [search]
+    allPos.filter(p => p.po && (search === '' || `${p.po} ${p.name} ${p.barcode}`.includes(search))),
+    [allPos, search]
   );
 
   const orphanCount = scopedPos.filter(p => p.jobId === null).length;
@@ -28,6 +90,37 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
 
   const totalForJob = (jobId) => scopedPos.filter(p => p.jobId === jobId).reduce((s, p) => s + p.reqQty, 0);
   const countForJob = (jobId) => scopedPos.filter(p => p.jobId === jobId).length;
+
+  // 차수 생성 — 선택된 orphan PO 들로 새 sequence 생성 후 assignToJob
+  const handleCreateJob = async () => {
+    if (pickedOrphans.size === 0 || !vendor?.id) return;
+    if (creating) return;
+    setCreating(true);
+    try {
+      const ids = [...pickedOrphans];
+      const createRes = await window.electronAPI?.jobs?.create?.(date, vendor.id, {});
+      if (!createRes?.success) {
+        alert('차수 생성 실패: ' + (createRes?.error || 'unknown'));
+        return;
+      }
+      const seq = createRes.sequence ?? createRes.manifest?.sequence;
+      if (seq == null) { alert('차수 생성 응답에 sequence 없음'); return; }
+      const assignRes = await window.electronAPI?.pos?.assignToJob?.(ids, vendor.id, date, seq);
+      if (!assignRes?.success) {
+        alert('PO 배정 실패: ' + (assignRes?.error || 'unknown'));
+        return;
+      }
+      setPickedOrphans(new Set());
+      await reload();
+      // 선택사항: 생성 즉시 차수 선택
+      setSelectedJobId(`${vendor.id}-${date}-${seq}`);
+      if (onCreateJob) onCreateJob(ids, { date, sequence: seq });
+    } catch (err) {
+      alert('차수 생성 중 오류: ' + err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="cal-shell" style={{flexDirection:'row'}}>
@@ -94,11 +187,11 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
             <button
               className="btn accent"
               style={{width:'100%', justifyContent:'center'}}
-              disabled={pickedOrphans.size === 0}
-              onClick={() => onCreateJob && onCreateJob([...pickedOrphans])}
+              disabled={pickedOrphans.size === 0 || creating}
+              onClick={handleCreateJob}
               title={pickedOrphans.size === 0 ? '체크한 PO 없음' : `선택한 ${pickedOrphans.size}건으로 새 차수 만들기`}
             >
-              <I.Plus size={13}/> 새 차수 만들기 ({pickedOrphans.size})
+              <I.Plus size={13}/> {creating ? '생성 중…' : `새 차수 만들기 (${pickedOrphans.size})`}
             </button>
           )}
           {isAllView && (
