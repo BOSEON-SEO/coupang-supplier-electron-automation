@@ -1013,3 +1013,24 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
   font-size: 12px; font-weight: 600; color: var(--accent-strong);
   pointer-events: auto;
 }
+
+/* WebPanel — 즐겨찾기 바 (Chrome bookmarks bar 느낌) */
+.web-panel-bookmarks {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 10px;
+  background: var(--bg-panel-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.wp-bookmark {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 8px; border-radius: 4px;
+  border: none; background: transparent;
+  font-size: 11px; color: var(--text-2); font-weight: 500;
+  cursor: pointer;
+}
+.wp-bookmark:hover:not([disabled]) { background: var(--bg-panel-3); color: var(--text); }
+.wp-bookmark[disabled] { opacity: 0.4; cursor: not-allowed; }
+.wp-bookmark.busy { color: var(--accent-strong); background: var(--accent-soft); }
+.wp-bookmark.busy svg { animation: wp-spin 1s linear infinite; }
+@keyframes wp-spin { to { transform: rotate(360deg); } }
