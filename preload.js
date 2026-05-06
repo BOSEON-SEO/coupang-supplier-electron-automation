@@ -204,6 +204,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // ── M2 (v4) — PO 풀 / 인박스 / lot ─────────────────────────
+  // ipc/* 컨트롤러가 등록한 신규 채널. M3+ 의 신규 view 가 사용.
+  pos: {
+    listAll: (vendorId) => ipcRenderer.invoke('pos:listAll', vendorId),
+    listByJob: (vendorId, date, sequence) => ipcRenderer.invoke('pos:listByJob', vendorId, date, sequence),
+    listOrphans: (vendorId) => ipcRenderer.invoke('pos:listOrphans', vendorId),
+    assignToJob: (posIds, vendorId, date, sequence) =>
+      ipcRenderer.invoke('pos:assignToJob', posIds, vendorId, date, sequence),
+    unassign: (posIds) => ipcRenderer.invoke('pos:unassign', posIds),
+    upsertMany: (rows) => ipcRenderer.invoke('pos:upsertMany', rows),
+  },
+  inbox: {
+    list: (vendorId, kind, date, sequence) =>
+      ipcRenderer.invoke('inbox:list', vendorId, kind, date, sequence),
+    exclude: (ids) => ipcRenderer.invoke('inbox:exclude', ids),
+    routeFromConfirm: (rows) => ipcRenderer.invoke('inbox:routeFromConfirm', rows),
+  },
+  lots: {
+    listByJob: (vendorId, kind, date, sequence) =>
+      ipcRenderer.invoke('lots:listByJob', vendorId, kind, date, sequence),
+    get: (lotId) => ipcRenderer.invoke('lots:get', lotId),
+    create: (payload) => ipcRenderer.invoke('lots:create', payload),
+    cancel: (lotId) => ipcRenderer.invoke('lots:cancel', lotId),
+    upload: (vendorId, kind, date, sequence, lotIds) =>
+      ipcRenderer.invoke('lots:upload', vendorId, kind, date, sequence, lotIds),
+    listUploadHistory: (vendorId, kind, date, sequence) =>
+      ipcRenderer.invoke('lots:listUploadHistory', vendorId, kind, date, sequence),
+  },
+
   // ── 위험 동작 ──
   confirmDangerous: (actionName) => ipcRenderer.invoke('action:confirmDangerous', actionName),
 

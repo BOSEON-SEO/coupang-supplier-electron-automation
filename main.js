@@ -31,6 +31,8 @@ const { registerIpcHandlers } = require('./ipc-handlers');
 const { loadPluginMainHalves } = require('./plugin-main-loader');
 const { registerLicenseIpc } = require('./license-service');
 const { registerUpdateIpc } = require('./update-service');
+const { openDb } = require('./src/db');
+const { registerV4Handlers } = require('./src/ipc');
 const secrets = require('./secrets');
 
 // 쿠팡 서플라이어 사이트 진입 URL
@@ -569,6 +571,15 @@ function openTransportWindow(opts) {
 app.whenReady().then(() => {
   // safeStorage 의존하는 모듈은 whenReady 이후에 초기화
   secrets.init(DATA_DIR);
+
+  // SQLite (M2) — pos / inbox / lots / upload_history. 부팅 시 마이그레이션 자동 적용.
+  try {
+    openDb({ dataDir: DATA_DIR });
+    registerV4Handlers();
+  } catch (err) {
+    console.error('[db] init failed', err);
+    // DB 실패해도 앱은 띄움 — 기존 manifest/JSON 흐름은 그대로 동작.
+  }
 
   registerIpcHandlers({
     ipcMain,
