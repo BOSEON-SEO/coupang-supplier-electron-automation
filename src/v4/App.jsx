@@ -222,12 +222,6 @@ export default function AppV4() {
         <button className={'hbtn' + (logOpen ? ' active' : '')} onClick={() => setLogOpen(o => !o)} title="실행 로그">
           <I.Terminal size={13}/> 로그
         </button>
-        <button className="hbtn" onClick={goCoupangHome} title="쿠팡 서플라이어 홈으로 이동">
-          <I.Home size={13}/>
-        </button>
-        <button className="hbtn" onClick={handleAutoLogin} title={vendor ? `${vendor.id} 자동 로그인` : '자동 로그인'}>
-          <I.Key size={13}/>
-        </button>
         <button className={'hbtn' + (webviewOpen ? ' active' : '')} onClick={toggleWebview} title="웹뷰 창 토글">
           <I.Globe size={13}/> 웹뷰
         </button>

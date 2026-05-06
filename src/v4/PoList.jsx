@@ -385,9 +385,16 @@ function PoUpdateModalV4({ vendor, onClose, onRefreshed }) {
   const handleCoupang = async () => {
     setBusy(true); setError(''); setStage('downloading'); setResult(null);
     try {
+      const api = window.electronAPI;
+      // 1) webview 창 자동 노출 (자동화 진행을 보면서 디버그)
+      await api?.webview?.setVendor?.(vendor.id);
+      await api?.webview?.setVisible?.(true);
+      // 2) 약간 대기 — 새 창이 처음 생성되는 경우 page load 시간 확보
+      await new Promise((r) => setTimeout(r, 400));
+
       const dateFrom = from.slice(0, 10);
       const args = ['--vendor', vendor.id, '--date-from', dateFrom];
-      const runRes = await window.electronAPI?.runPython?.('scripts/po_download.py', args);
+      const runRes = await api?.runPython?.('scripts/po_download.py', args);
       if (!runRes?.success) throw new Error('python 실행 실패: ' + (runRes?.error || 'unknown'));
       // python:done 이벤트 대기
       const filePath = await waitPythonDone('po_download.py');
