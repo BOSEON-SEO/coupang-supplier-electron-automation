@@ -1038,3 +1038,12 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
 .wp-bookmark.busy { color: var(--accent-strong); background: var(--accent-soft); }
 .wp-bookmark.busy svg { animation: wp-spin 1s linear infinite; }
 @keyframes wp-spin { to { transform: rotate(360deg); } }
+
+/* PO 갱신 Excel 드롭존 — drag-over 강조 */
+.po-file-drop.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: scale(1.01);
+  transition: transform 100ms;
+}
+.po-file-drop.drag-over .ttl { color: var(--accent-strong); }

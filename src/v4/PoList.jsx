@@ -356,6 +356,7 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
   const [result, setResult] = useState(null); // { added, skipped, addedPoNumbers }
   const cancelledRef = React.useRef(false);
   const fileInputRef = React.useRef(null);
+  const [dragActive, setDragActive] = useState(false);
   const canSubmit = !busy && (source === 'coupang' || (source === 'excel' && excelFile));
 
   const fetchAndApply = async (filePath) => {
@@ -530,20 +531,31 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
                 disabled={busy}
               />
               <div
-                className={'po-file-drop' + (excelFile ? ' picked' : '')}
+                className={'po-file-drop' + (excelFile ? ' picked' : '') + (dragActive ? ' drag-over' : '')}
                 onClick={() => !busy && fileInputRef.current?.click()}
+                onDragEnter={(e) => { if (busy) return; e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                onDragOver={(e) => { if (busy) return; e.preventDefault(); e.stopPropagation(); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                onDrop={(e) => {
+                  if (busy) return;
+                  e.preventDefault(); e.stopPropagation(); setDragActive(false);
+                  const f = e.dataTransfer?.files?.[0];
+                  if (!f) return;
+                  if (!/\.(xlsx|xls)$/i.test(f.name)) { setError('xlsx/xls 파일만 업로드 가능합니다'); return; }
+                  setExcelFile(f);
+                }}
               >
                 {excelFile ? (
                   <>
                     <I.CheckCircle size={20} stroke="var(--ok)"/>
                     <div className="ttl">{excelFile.name}</div>
-                    <div className="sub mono">{(excelFile.size/1024).toFixed(1)} KB · 다른 파일로 변경하려면 클릭</div>
+                    <div className="sub mono">{(excelFile.size/1024).toFixed(1)} KB · 다른 파일로 변경하려면 클릭/드롭</div>
                   </>
                 ) : (
                   <>
                     <I.FolderOpen size={20} stroke="var(--text-3)"/>
-                    <div className="ttl">파일 선택</div>
-                    <div className="sub">PO SKU 다운로드 .xlsx 를 골라주세요</div>
+                    <div className="ttl">{dragActive ? '여기에 놓기' : '파일 선택 또는 드래그'}</div>
+                    <div className="sub">PO SKU 다운로드 .xlsx</div>
                   </>
                 )}
               </div>
