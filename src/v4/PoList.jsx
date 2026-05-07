@@ -419,10 +419,8 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
       await new Promise((r) => setTimeout(r, 400));
 
       const dateFrom = from.slice(0, 10);
-      // --date-to 미지정 시 script default = 오늘. dateFrom > 오늘이면 from>to 되어
-      // 결과 0건. "이 날짜 이후 전부" 의미를 살리려면 충분히 먼 미래로 설정.
-      const dateTo = '2099-12-31';
-      const args = ['--vendor', vendor.id, '--date-from', dateFrom, '--date-to', dateTo];
+      // 입고예정일 단일 일자 필터 — from = to (그 날짜 입고분만).
+      const args = ['--vendor', vendor.id, '--date-from', dateFrom, '--date-to', dateFrom];
       const runRes = await api?.runPython?.('scripts/po_download.py', args);
       if (!runRes?.success) throw new Error('python 실행 실패: ' + (runRes?.error || 'unknown'));
       // python:done 이벤트 대기
