@@ -500,12 +500,23 @@ function createWindow() {
 
   const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
   if (isDev) {
+    // dev server (webpack-dev-server) 가 LISTEN 중이라도 첫 bundle 컴파일이
+    // 끝나야 응답이 옴 (수십 초 가능). 짧은 timeout 으로 fallback 하면 dist
+    // 빌드의 옛 bundle 이 로드돼 stale UI 가 보이는 함정. retries 로 충분히
+    // 기다리되, 한 번이라도 응답이 오면 즉시 dev URL 로드.
     const http = require('http');
     const devUrl = 'http://localhost:3100';
-    const checkDevServer = () => new Promise((resolve) => {
-      const req = http.get(devUrl, () => resolve(true));
-      req.on('error', () => resolve(false));
-      req.setTimeout(1000, () => { req.destroy(); resolve(false); });
+    const checkDevServer = (maxRetries = 60) => new Promise((resolve) => {
+      const tryOnce = (n) => {
+        const req = http.get(devUrl, (res) => { res.resume(); resolve(true); });
+        const fail = () => {
+          if (n > 0) setTimeout(() => tryOnce(n - 1), 500);
+          else resolve(false);
+        };
+        req.on('error', fail);
+        req.setTimeout(2000, () => { req.destroy(); fail(); });
+      };
+      tryOnce(maxRetries);
     });
     checkDevServer().then((isRunning) => {
       if (isRunning) {

@@ -643,6 +643,16 @@ function registerIpcHandlers({
       stats: {},
     };
     writeManifest(dataDir, manifest);
+    // jobs_index 도 같이 동기화 (pos.assignToJob 등이 FK 로 참조)
+    try {
+      require('./src/db/repos/jobs').upsert({
+        vendor_id: vendor, date, sequence: newSeq,
+        state: 'active',
+        label: `${date.slice(5).replace('-', '/')} ${newSeq}차`,
+      });
+    } catch (err) {
+      sendToRenderer('python:error', { line: `[system] jobs_index upsert 실패: ${err.message}` });
+    }
     return { success: true, manifest };
   });
 
@@ -690,24 +700,33 @@ function registerIpcHandlers({
       return { success: false, error: 'path escape' };
     }
     try {
-      if (!fs.existsSync(target)) {
-        return { success: true, removedDay: false };
-      }
-      fs.rmSync(target, { recursive: true, force: true });
+      const folderExists = fs.existsSync(target);
+      if (folderExists) {
+        fs.rmSync(target, { recursive: true, force: true });
 
-      // 벤더 폴더가 비었으면 삭제
-      const vendorDir = path.join(dataDir, date, vendor);
-      if (fs.existsSync(vendorDir) && fs.readdirSync(vendorDir).length === 0) {
-        fs.rmdirSync(vendorDir);
+        // 벤더 폴더가 비었으면 삭제
+        const vendorDir = path.join(dataDir, date, vendor);
+        if (fs.existsSync(vendorDir) && fs.readdirSync(vendorDir).length === 0) {
+          fs.rmdirSync(vendorDir);
+        }
+        // 날짜 폴더가 비었으면 삭제
+        const dayDir = path.join(dataDir, date);
+        let removedDay = false;
+        if (fs.existsSync(dayDir) && fs.readdirSync(dayDir).length === 0) {
+          fs.rmdirSync(dayDir);
+          removedDay = true;
+        }
+        // jobs_index DELETE — ON DELETE SET NULL 로 pos 의 job_* 가 자동 NULL 화 (orphan 환원)
+        try {
+          require('./src/db/repos/jobs').remove(vendor, date, sequence);
+        } catch (err) {
+          sendToRenderer('python:error', { line: `[system] jobs_index 삭제 실패: ${err.message}` });
+        }
+        return { success: true, removedDay };
       }
-      // 날짜 폴더가 비었으면 삭제
-      const dayDir = path.join(dataDir, date);
-      let removedDay = false;
-      if (fs.existsSync(dayDir) && fs.readdirSync(dayDir).length === 0) {
-        fs.rmdirSync(dayDir);
-        removedDay = true;
-      }
-      return { success: true, removedDay };
+      // 폴더가 없어도 DB 인덱스는 정리
+      try { require('./src/db/repos/jobs').remove(vendor, date, sequence); } catch (_) {}
+      return { success: true, removedDay: false };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -934,18 +953,40 @@ function registerIpcHandlers({
     }
 
     // ── PO 다운로드 경로 지정 (Electron will-download 훅이 소비) ──
-    // po_download.py 호출 시 --vendor / --date-from / --sequence 로부터
+    // po_download.py 호출 시 --vendor 와 (선택) --date-from / --sequence 로
     // 저장 경로를 계산해 main 의 setPendingDownloadTarget 에 넘긴다.
+    //   - sequence 지정: {date}/{vendor}/{NN}/po.csv (작업 폴더)
+    //   - sequence 미지정: {vendor}-{YYYYMMDD}-{NN}.csv (PO 갱신/dedup 용 평면)
     if (baseName.includes('po_download') && typeof setPendingDownloadTarget === 'function') {
       const vIdx = safeArgs.indexOf('--vendor');
       const dIdx = safeArgs.indexOf('--date-from');
       const sIdx = safeArgs.indexOf('--sequence');
-      if (vIdx !== -1 && dIdx !== -1 && sIdx !== -1) {
+      if (vIdx !== -1 && isValidVendor(safeArgs[vIdx + 1])) {
         const v = safeArgs[vIdx + 1];
-        const d = safeArgs[dIdx + 1];
-        const s = parseInt(safeArgs[sIdx + 1], 10);
-        if (isValidVendor(v) && isValidDate(d) && isValidSeq(s)) {
-          const target = path.join(dataDir, d, v, String(s).padStart(2, '0'), 'po.csv');
+        let target = null;
+        if (dIdx !== -1 && sIdx !== -1) {
+          const d = safeArgs[dIdx + 1];
+          const s = parseInt(safeArgs[sIdx + 1], 10);
+          if (isValidDate(d) && isValidSeq(s)) {
+            target = path.join(dataDir, d, v, String(s).padStart(2, '0'), 'po.csv');
+          }
+        } else {
+          // 평면 — 다음 seq 자동 계산 (Python _next_sequence 와 동일 규칙)
+          const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          let nextSeq = 1;
+          try {
+            if (fs.existsSync(dataDir)) {
+              const re = new RegExp(`^${escapeRegex(v)}-${ymd}-(\\d{2})\\.(csv|xlsx)$`, 'i');
+              const maxSeq = fs.readdirSync(dataDir).reduce((acc, name) => {
+                const m = name.match(re);
+                return m ? Math.max(acc, parseInt(m[1], 10)) : acc;
+              }, 0);
+              nextSeq = Math.min(99, maxSeq + 1);
+            }
+          } catch (_) { /* ignore */ }
+          target = path.join(dataDir, `${v}-${ymd}-${String(nextSeq).padStart(2, '0')}.csv`);
+        }
+        if (target) {
           try {
             fs.mkdirSync(path.dirname(target), { recursive: true });
             setPendingDownloadTarget(target);

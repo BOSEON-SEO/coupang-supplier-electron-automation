@@ -252,7 +252,6 @@ export default function AppV4() {
               date={view.date}
               onOpenJob={goJob}
               onBack={goCalendar}
-              onCreateJob={(ids) => alert(`새 차수 생성 (POC 미구현)\n선택한 미배정 PO ${ids?.length || 0}건: ${(ids || []).join(', ')}`)}
             />
           )}
           {view.kind === 'job' && (

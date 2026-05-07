@@ -91,6 +91,29 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
   const totalForJob = (jobId) => scopedPos.filter(p => p.jobId === jobId).reduce((s, p) => s + p.reqQty, 0);
   const countForJob = (jobId) => scopedPos.filter(p => p.jobId === jobId).length;
 
+  // 차수 삭제 — DB FK ON DELETE SET NULL 로 PO 들이 자동 orphan 으로 환원
+  const [deleting, setDeleting] = useState(false);
+  const handleDeleteJob = async () => {
+    const job = dayJobs.find(j => j.id === selectedJobId);
+    if (!job || !vendor?.id) return;
+    const memberCount = countForJob(job.id);
+    const msg = memberCount > 0
+      ? `${job.label} 차수를 삭제할까요?\n배정된 PO ${memberCount}건이 미배정으로 되돌아갑니다.`
+      : `${job.label} 차수를 삭제할까요?`;
+    if (!window.confirm(msg)) return;
+    setDeleting(true);
+    try {
+      const res = await window.electronAPI?.jobs?.delete?.(job.date, job.vendor, job.seq);
+      if (!res?.success) { alert('차수 삭제 실패: ' + (res?.error || 'unknown')); return; }
+      setSelectedJobId('all');
+      await reload();
+    } catch (err) {
+      alert('차수 삭제 중 오류: ' + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // 차수 생성 — 선택된 orphan PO 들로 새 sequence 생성 후 assignToJob
   const handleCreateJob = async () => {
     if (pickedOrphans.size === 0 || !vendor?.id) return;
@@ -179,9 +202,25 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
         {/* Action depends on selection */}
         <div style={{padding: '0 8px 8px'}}>
           {!isAllView && !isOrphanView && (
-            <button className="btn primary" style={{width:'100%', justifyContent:'center'}} onClick={() => onOpenJob(dayJobs.find(j => j.id === selectedJobId))}>
-              <I.Maximize size={13}/> 작업 창 열기
-            </button>
+            <div style={{display:'flex', gap:6, alignItems:'stretch'}}>
+              <button
+                className="btn danger icon"
+                onClick={handleDeleteJob}
+                disabled={deleting}
+                title="이 차수 삭제"
+                aria-label="이 차수 삭제"
+                style={{padding:'0 9px', flex:'0 0 auto'}}
+              >
+                <I.Trash size={13}/>
+              </button>
+              <button
+                className="btn primary"
+                style={{flex:1, justifyContent:'center'}}
+                onClick={() => onOpenJob(dayJobs.find(j => j.id === selectedJobId))}
+              >
+                <I.Maximize size={13}/> 작업 창 열기
+              </button>
+            </div>
           )}
           {isOrphanView && (
             <button
@@ -264,7 +303,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
               {scopedPos.map((p, i) => {
                 const isMember = isAllView ? true : isOrphanView ? p.jobId === null : p.jobId === selectedJobId;
                 const isOrphan = p.jobId === null;
-                const job = V4PL_JOBS.find(j => j.id === p.jobId);
+                const job = dayJobs.find(j => j.id === p.jobId);
                 const isPicked = pickedOrphans.has(p.id);
 
                 let style = {};
