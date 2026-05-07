@@ -3,7 +3,8 @@
 // WebView 는 우측 슬라이드 패널, 로그는 하단 collapsible 패널.
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { I } from './icons';
-import { VENDORS as V_VENDORS, PLUGINS as V_PLUGINS, LOG_LINES as V_LOGS } from './data';
+import { VENDORS as V_VENDORS } from './data';
+import { listInstalledManifests } from '../core/plugin-loader';
 import CalendarV4 from './Calendar';
 import PoListView from './PoList';
 import JobViewV4 from './JobView';
@@ -92,8 +93,25 @@ export default function AppV4() {
     });
   }, [effectiveEntitlements, vendor?.id, perPluginEnabled]);
 
-  // 옵션: JobView 의 plugin gating UI 용 mock — 실제 hook 동작은 PluginProvider 가 담당.
-  const [plugins, setPlugins] = useState(V_PLUGINS);
+  // 설치된 플러그인 manifest + 설정의 enabled 토글 → JobView/Calendar 가 사용하는 plugins 배열.
+  // settings-changed 이벤트로 globalSettings 가 갱신되면 자동으로 재계산됨.
+  const installedManifests = useMemo(() => listInstalledManifests(), []);
+  const plugins = useMemo(() => {
+    const ps = globalSettings?.plugins || {};
+    return installedManifests.map((m) => {
+      const conf = ps[m.id] || {};
+      const enabled = pluginsEnabled && conf.enabled !== false;
+      return {
+        id: m.id,
+        name: m.name || m.id,
+        version: m.version || '0.0.0',
+        enabled,
+        entitlement: m.entitlement || null,
+        description: m.description || '',
+      };
+    });
+  }, [installedManifests, globalSettings, pluginsEnabled]);
+  const activePluginCount = plugins.filter((p) => p.enabled).length;
 
   // view: { kind: 'calendar' } | { kind: 'po-list', date } | { kind: 'job', job }
   const [view, setView] = useState({ kind: 'calendar' });
@@ -101,6 +119,20 @@ export default function AppV4() {
   const [pluginTakeoverOpen, setPluginTakeoverOpen] = useState(false);
   const [webviewOpen, setWebviewOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+
+  // 로그 창 가시 상태 동기화 (헤더 버튼 active state)
+  useEffect(() => {
+    const api = window.electronAPI?.logWindow;
+    if (!api?.onVisibilityChanged) return;
+    api.isVisible?.().then((r) => setLogOpen(!!r?.visible));
+    const off = api.onVisibilityChanged(({ visible }) => setLogOpen(!!visible));
+    return () => { if (typeof off === 'function') off(); };
+  }, []);
+  const toggleLogWindow = useCallback(() => {
+    const next = !logOpen;
+    setLogOpen(next);
+    window.electronAPI?.logWindow?.setVisible?.(next);
+  }, [logOpen]);
 
   const goCalendar = () => setView({ kind: 'calendar' });
   const goSettings = () => setView({ kind: 'settings' });
@@ -110,6 +142,7 @@ export default function AppV4() {
   useEffect(() => {
     if (!vendor?.id) return;
     window.electronAPI?.webview?.setVendor?.(vendor.id);
+    window.electronAPI?.log?.info?.(`벤더 선택: ${vendor.id} (${vendor.name})`, 'vendor');
   }, [vendor?.id]);
 
   useEffect(() => {
@@ -143,6 +176,7 @@ export default function AppV4() {
       return;
     }
     api?.webview?.setVisible?.(true);
+    api?.log?.info?.(`자동 로그인 시작: ${vendor.id}`, 'auth');
     await api?.runPython?.('scripts/login.py', ['--vendor', vendor.id]);
   }, [vendor?.id]);
 
@@ -219,7 +253,7 @@ export default function AppV4() {
 
         <VendorPicker vendor={vendor} vendors={vendors} onSelect={setVendor} />
 
-        <button className={'hbtn' + (logOpen ? ' active' : '')} onClick={() => setLogOpen(o => !o)} title="실행 로그">
+        <button className={'hbtn' + (logOpen ? ' active' : '')} onClick={toggleLogWindow} title="실행 로그 창 토글">
           <I.Terminal size={13}/> 로그
         </button>
         <button className={'hbtn' + (webviewOpen ? ' active' : '')} onClick={toggleWebview} title="웹뷰 창 토글">
@@ -244,6 +278,8 @@ export default function AppV4() {
               onOpenDate={goPoList}
               onOpenPlugins={goPlugins}
               onOpenSettings={goSettings}
+              activePluginCount={activePluginCount}
+              installedPluginCount={plugins.length}
             />
           )}
           {view.kind === 'po-list' && (
@@ -281,25 +317,6 @@ export default function AppV4() {
 
         {/* webview 는 별도 BrowserWindow — 메인 윈도우의 슬라이드 패널 폐기 */}
       </div>
-
-      <footer className={'log-panel' + (logOpen ? ' open' : '')}>
-        <div className="log-panel-head">
-          <I.Terminal size={12}/>
-          실행 로그
-          <span className="mono ver">{vendor.name} · tail -f</span>
-          <div style={{flex:1}}/>
-          <button className="x" onClick={() => setLogOpen(false)}><I.X size={12}/></button>
-        </div>
-        <div className="log-panel-body">
-          {V_LOGS.map((l, i) => (
-            <div key={i} className="line">
-              <span className="ts">{l.ts}</span>
-              <span className={'lvl ' + l.lvl}>[{l.lvl}]</span>
-              <span>{l.msg}</span>
-            </div>
-          ))}
-        </div>
-      </footer>
 
       {pluginTakeoverOpen && (
         <PluginTakeover onClose={() => setPluginTakeoverOpen(false)}/>

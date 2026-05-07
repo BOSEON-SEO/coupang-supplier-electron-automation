@@ -155,6 +155,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // ── 통합 로그 ──
+  // 어디서든 호출 가능. logWindow + 메인 (어떤 창도 listen 가능) 동시 broadcast.
+  log: {
+    info:   (message, source) => ipcRenderer.invoke('app:log', { level: 'info',   message, source }),
+    ok:     (message, source) => ipcRenderer.invoke('app:log', { level: 'ok',     message, source }),
+    warn:   (message, source) => ipcRenderer.invoke('app:log', { level: 'warn',   message, source }),
+    error:  (message, source) => ipcRenderer.invoke('app:log', { level: 'error',  message, source }),
+    plugin: (message, pluginId) => ipcRenderer.invoke('app:log', { level: 'plugin', message, source: pluginId || 'plugin' }),
+  },
+
+  // ── 실행 로그 창 ──
+  logWindow: {
+    setVisible: (visible) => ipcRenderer.invoke('logWindow:setVisible', visible),
+    isVisible: () => ipcRenderer.invoke('logWindow:isVisible'),
+    fetchBuffer: () => ipcRenderer.invoke('logWindow:fetchBuffer'),
+    onVisibilityChanged: (callback) => {
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on('logWindow:visibility-changed', handler);
+      return () => ipcRenderer.removeListener('logWindow:visibility-changed', handler);
+    },
+  },
+
   // ── 찾기 (Ctrl+F) ──
   find: {
     query: (target, text, options) =>
@@ -224,6 +246,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     unassign: (posIds) => ipcRenderer.invoke('pos:unassign', posIds),
     upsertMany: (rows) => ipcRenderer.invoke('pos:upsertMany', rows),
     addNewOnly: (vendorId, rows) => ipcRenderer.invoke('pos:addNewOnly', vendorId, rows),
+    review: (posId, action, opts) => ipcRenderer.invoke('pos:review', posId, action, opts),
+    reviewMany: (posIds, action, opts) => ipcRenderer.invoke('pos:reviewMany', posIds, action, opts),
+    reviewSummary: (vendorId, date, sequence) =>
+      ipcRenderer.invoke('pos:reviewSummary', vendorId, date, sequence),
   },
   inbox: {
     list: (vendorId, kind, date, sequence) =>

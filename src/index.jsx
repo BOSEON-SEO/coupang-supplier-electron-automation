@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import AppV4 from './v4/App';
 import StockAdjustApp from './StockAdjustApp';
 import TransportApp from './TransportApp';
+import LogPage from './v4/LogPage';
 import { PluginProvider } from './core/plugin-host';
 import { bootstrapPlugins } from './core/plugin-loader';
 import { resolveEntitlementsFromLicense } from './core/entitlements';
@@ -26,6 +27,7 @@ function parseRoute() {
   };
   if (h.startsWith('#/stock-adjust')) return { name: 'stock-adjust', params: parseQs() };
   if (h.startsWith('#/transport'))    return { name: 'transport',    params: parseQs() };
+  if (h === '#log' || h.startsWith('#log'))  return { name: 'log' };
   return { name: 'main' };
 }
 
@@ -99,6 +101,7 @@ root.render(
         <TransportApp params={route.params} />
       </PopupShell>
     )}
+    {route.name === 'log' && <LogPage />}
     {route.name === 'main' && <AppV4 />}
   </React.StrictMode>
 );

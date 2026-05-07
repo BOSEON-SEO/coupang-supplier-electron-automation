@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -43,6 +43,8 @@ const COUPANG_HOME_URL = 'https://supplier.coupang.com/dashboard/KR';
 // 환경변수 CDP_PORT로 오버라이드 가능 (기본: 9222).
 const CDP_PORT = parseInt(process.env.CDP_PORT, 10) || 9222;
 app.commandLine.appendSwitch('remote-debugging-port', String(CDP_PORT));
+// 상단 File/Edit/View/Window/Help 메뉴 바 제거 (모든 BrowserWindow 적용)
+Menu.setApplicationMenu(null);
 // Chromium 111+ 는 file:// origin 에서 CDP attach 를 거부 — 패키지 빌드는
 // dist/index.html 을 file:// 로 로드하므로 명시적으로 모든 origin 허용 필요.
 // 9222 는 loopback 만 바인딩이라 외부 노출 위험은 없음.
@@ -68,6 +70,9 @@ if (!fs.existsSync(DATA_DIR)) {
 let mainWindow = null;
 let webWindow = null;        // 현재 활성 webview BrowserWindow (벤더별)
 let webViewVendor = null;    // webWindow 가 사용 중인 vendor id
+let logWindow = null;        // 실행 로그 BrowserWindow (벤더 무관 단일)
+const logBuffer = [];        // 최근 로그 보관 (창 mount 시 backfill 용)
+const LOG_BUFFER_MAX = 1000;
 
 // ── 플러그인 서브 창 관리 (재고조정 / 운송분배 공용) ─────────
 // jobKey = `${date}/${vendor}/${seq:02d}` 단위로 각 종류별 최대 1개 창.
@@ -616,6 +621,11 @@ app.whenReady().then(() => {
   registerIpcHandlers({
     ipcMain,
     getWindow: () => mainWindow,
+    getLogWindow: () => logWindow,
+    appendLogBuffer: (line) => {
+      logBuffer.push(line);
+      if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.splice(0, logBuffer.length - LOG_BUFFER_MAX);
+    },
     dataDir: DATA_DIR,
     cdpPort: CDP_PORT,
     setPendingDownloadTarget,
@@ -718,6 +728,51 @@ app.whenReady().then(() => {
   ipcMain.handle('webview:isVisible', () => ({
     visible: !!(webWindow && !webWindow.isDestroyed() && webWindow.isVisible()),
   }));
+
+  // ── 실행 로그 창 ─────────────────────────────────────────────
+  // logWindow 는 단일 인스턴스. 모든 python:* 이벤트가 broadcast 됨.
+  function ensureLogWindow() {
+    if (logWindow && !logWindow.isDestroyed()) return logWindow;
+    const win = new BrowserWindow({
+      width: 900, height: 500, minWidth: 480, minHeight: 240,
+      title: '실행 로그',
+      backgroundColor: '#0a0a0a', show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true, nodeIntegration: false, sandbox: false,
+      },
+    });
+    win.on('close', (e) => {
+      if (!app.isQuiting && win === logWindow) { e.preventDefault(); win.hide(); }
+    });
+    const broadcastVisible = (visible) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('logWindow:visibility-changed', { visible });
+      }
+    };
+    win.on('show', () => broadcastVisible(true));
+    win.on('hide', () => broadcastVisible(false));
+
+    // 메인과 같은 bundle 의 #log hash — index.jsx 가 LogPage 분기 렌더.
+    const isDev = !app.isPackaged && !process.env.ELECTRON_LOAD_DIST;
+    if (isDev) win.loadURL('http://localhost:3100/#log');
+    else win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: 'log' });
+
+    logWindow = win;
+    return win;
+  }
+
+  ipcMain.handle('logWindow:setVisible', (_e, visible) => {
+    const win = ensureLogWindow();
+    if (visible) { win.show(); win.focus(); }
+    else win.hide();
+    return { success: true };
+  });
+  ipcMain.handle('logWindow:isVisible', () => ({
+    visible: !!(logWindow && !logWindow.isDestroyed() && logWindow.isVisible()),
+  }));
+  // mount 후 backfill 요청 — logBuffer 의 누적 라인 반환
+  ipcMain.handle('logWindow:fetchBuffer', () => ({ lines: logBuffer.slice() }));
 
   // ── 찾기 (Ctrl+F) ──
   const resolveFindTarget = (event, target) => {

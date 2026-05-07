@@ -2,11 +2,37 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { I } from './icons';
 import {
-  ACTIVE_ROWS as V4_ACTIVE,
   SHIP_INBOX as V4_SHIP,
   MILK_INBOX as V4_MILK,
   HISTORY as V4_HIST,
 } from './data';
+
+// DB pos row → 검토 화면 row shape.
+// conf_qty 가 NULL 이면 발주수량 default 표시 (미검토 상태).
+// tbnws plugin 컬럼들 (returnQty / priceDiff / delivery / gtStock / fulfillStock)
+// 은 plugin 이 enrich 하기 전까지 null. UI 는 '—' 로 표시.
+function adaptDbPos(row) {
+  return {
+    id: row.id,
+    po: row.po_number,
+    wh: row.wh,
+    sku: row.sku,
+    barcode: row.barcode || row.sku,
+    name: row.name,
+    reqQty: row.req_qty,
+    confQty: row.conf_qty != null ? row.conf_qty : row.req_qty,
+    reviewed: !!row.reviewed,
+    short: row.short_reason || '',
+    orderTime: row.order_time,
+    // tbnws plugin enrich 대상
+    productCode: null,
+    returnQty: null,
+    priceDiff: null,
+    delivery: null,
+    gtStock: null,
+    fulfillStock: null,
+  };
+}
 
 const STEPS_V4 = [
   { key: 'review',  name: '검토',         desc: '행 단위 OK/반려' },
@@ -18,7 +44,205 @@ const STEPS_V4 = [
 
 export default function JobViewV4({ job, vendor, plugins, onBack, onRequestPluginWindow }) {
   const [view, setView] = useState('review');
-  const [rows, setRows] = useState(V4_ACTIVE);
+  const [rows, setRows] = useState([]);
+  const [rowsLoaded, setRowsLoaded] = useState(false);
+
+  // 발주서 검증 상태: 'idle' | 'syncing' | 'verifying' | 'done' | 'error'
+  const [verifyState, setVerifyState] = useState('idle');
+  const [verifyError, setVerifyError] = useState('');
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
+  const [verifyDialogSyncFulfill, setVerifyDialogSyncFulfill] = useState(true);
+
+  // 차수 PO 행 DB 로드 (검토 단계 source of truth)
+  useEffect(() => {
+    if (!vendor?.id || !job?.date || job?.seq == null) return;
+    let cancelled = false;
+    (async () => {
+      const res = await window.electronAPI?.pos?.listByJob?.(vendor.id, job.date, job.seq);
+      if (cancelled) return;
+      const dbRows = Array.isArray(res?.rows) ? res.rows : [];
+      setRows(dbRows.map(adaptDbPos));
+      setRowsLoaded(true);
+      window.electronAPI?.log?.info?.(`작업 창 진입: ${vendor.id} · ${job.date} · ${job.seq}차 (PO ${dbRows.length}건)`, 'job');
+    })();
+    return () => { cancelled = true; };
+  }, [vendor?.id, job?.date, job?.seq]);
+
+  // 검토 행 변경 → DB 영속화. action: 'set' | 'accept' | 'reject' | 'unset'
+  const persistReview = async (posId, action, opts) => {
+    try { await window.electronAPI?.pos?.review?.(posId, action, opts || {}); }
+    catch (err) { console.warn('[review persist] failed:', err.message); }
+  };
+
+  // 차수 rows 를 쿠팡 PO_SKU_LIST xlsx 형식 ArrayBuffer 로 변환.
+  // 백엔드 (tbnws-admin-back) 는 23 컬럼 원본 헤더로 파싱하며, 매입가 등이
+  // null 이면 BigDecimal.subtract NPE → 모든 숫자 컬럼은 default 0.
+  const buildPoXlsxBuffer = async (rowsForBuf) => {
+    const XLSX = (await import('xlsx')).default || (await import('xlsx'));
+    const header = [
+      '발주번호', '발주유형', '발주현황', 'SKU ID', 'SKU 이름', 'SKU Barcode',
+      '물류센터', '입고예정일', '발주일', '발주수량', '확정수량', '입고수량',
+      '매입유형', '면세여부', '생산연도', '제조일자', '유통(소비)기한',
+      '매입가', '공급가', '부가세', '총발주 매입금', '입고금액', 'Xdock',
+    ];
+    const aoa = [header];
+    for (const r of rowsForBuf) {
+      aoa.push([
+        r.po, 'Normal', 'Counterparty Verification Request',
+        r.sku, r.name, r.barcode,
+        r.wh, job.date, r.orderTime, r.reqQty, r.confQty ?? r.reqQty, 0,
+        'Direct Purchase', 'N', '', '', '',
+        0, 0, 0, 0, 0, 'N',
+      ]);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'PO');
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    return out instanceof ArrayBuffer ? out : out.buffer;
+  };
+
+  // 응답 데이터 → row 매핑 (sku + 센터 단위)
+  const enrichRowsWithVerifyData = (responseData) => {
+    const map = new Map();
+    for (const r of responseData) {
+      const skuId = String(r.sku_id ?? r.product_sku ?? '');
+      const wh = String(r.departure_warehouse ?? r.logistics_center ?? '');
+      if (!skuId) continue;
+      map.set(`${skuId}|${wh}`, r);
+    }
+    // 1) raw 응답 → 행에 enrich (확정수량은 일단 보류)
+    // 2) export_yn='N' 이면 무조건 반려, 'Y' 면 SKU 단위 가용재고 기반 FIFO 분배.
+    //    가용재고 = 지티 + 풀필 + 반출수량(행 합).
+    //    분배 우선순위: 발주일시 오래된 순 (orderTime asc).
+    setRows((rs) => {
+      const enriched = rs.map((r) => {
+        const m = map.get(`${r.sku}|${r.wh}`) || map.get(`${r.sku}|`);
+        if (!m) return r;
+        return {
+          ...r,
+          productCode: m.tobe_product_code ?? m.product_code ?? r.productCode ?? null,
+          returnQty: Number(m.fulfillment_export_qty) || 0,
+          priceDiff: (Number(m.rtn_sku_delivery_price) || 0) - (Number(m.purchase_price) || 0),
+          delivery: m.export_yn || null,
+          gtStock: Number(m.rtn_tobe_stock) || 0,
+          fulfillStock: Number(m.rtn_fulfillment_stock) || 0,
+        };
+      });
+
+      // SKU 단위 그룹핑 후 분배
+      const groups = new Map();
+      for (const r of enriched) {
+        if (!groups.has(r.sku)) groups.set(r.sku, []);
+        groups.get(r.sku).push(r);
+      }
+      const allocated = new Map(); // id → { confQty, short, reviewed }
+      for (const list of groups.values()) {
+        const isRejectAll = list.some((r) => r.delivery === 'N');
+        if (isRejectAll) {
+          for (const r of list) {
+            allocated.set(r.id, { confQty: 0, short: '협력사 재고', reviewed: true });
+          }
+          continue;
+        }
+        // export_yn=Y → 가용재고 분배 (FIFO 발주순)
+        const gt = list[0]?.gtStock || 0;
+        const fulfill = list[0]?.fulfillStock || 0;
+        const returnSum = list.reduce((s, r) => s + (r.returnQty || 0), 0);
+        let remaining = gt + fulfill + returnSum;
+        const sorted = [...list].sort((a, b) => String(a.orderTime || '').localeCompare(String(b.orderTime || '')));
+        for (const r of sorted) {
+          const give = Math.max(0, Math.min(remaining, r.reqQty || 0));
+          remaining -= give;
+          const short = give === 0 ? '재고 부족' : (give < (r.reqQty || 0) ? '재고 부족' : '');
+          allocated.set(r.id, { confQty: give, short, reviewed: true });
+        }
+      }
+
+      return enriched.map((r) => {
+        const a = allocated.get(r.id);
+        return a ? { ...r, ...a } : r;
+      });
+    });
+
+    // DB 영속화 — setRows 가 비동기 적용된 후의 스냅샷에서 분배 결과를 읽어 pos.review 호출.
+    setTimeout(async () => {
+      const api = window.electronAPI;
+      for (const r of setRowsSnapshot()) {
+        if (!r.reviewed) continue;
+        try {
+          if (r.confQty === 0) {
+            await api?.pos?.review?.(r.id, 'reject', { shortReason: r.short || '협력사 재고' });
+          } else {
+            await api?.pos?.review?.(r.id, 'set', { confQty: r.confQty });
+          }
+        } catch (_) { /* ignore */ }
+      }
+    }, 0);
+  };
+
+  // setRows 가 비동기라 위 분배 직후 즉시 새 rows 를 읽기 위해 ref 스냅샷.
+  const rowsRef = useRef([]);
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
+  const setRowsSnapshot = () => rowsRef.current;
+
+  const handleVerifyConfirm = async () => {
+    setVerifyDialogOpen(false);
+    setVerifyError('');
+    const api = window.electronAPI;
+    try {
+      // 1) 풀필 동기화 (옵션)
+      if (verifyDialogSyncFulfill) {
+        setVerifyState('syncing');
+        api?.log?.plugin?.(`[tbnws] 풀필 재고 동기화 시작 (최대 5분 소요)`, 'tbnws');
+        const sync = await api?.invokePluginChannel?.('tbnws', 'fulfillment.refetch');
+        if (!sync?.success) {
+          throw new Error('풀필 동기화 실패: ' + (sync?.error || 'unknown'));
+        }
+        api?.log?.plugin?.(`[tbnws] 풀필 재고 동기화 완료`, 'tbnws');
+      }
+      // 2) 발주서 검증
+      setVerifyState('verifying');
+      api?.log?.plugin?.(`[tbnws] 발주서 검증 시작 — ${rows.length}행`, 'tbnws');
+      const buffer = await buildPoXlsxBuffer(rows);
+      const res = await api?.invokePluginChannel?.('tbnws', 'po.startWork', {
+        fileName: `${vendor.id}-${job.date}-${String(job.seq).padStart(2, '0')}.xlsx`,
+        fileBuffer: buffer,
+        inboundDate: job.date,
+        category: vendor.id,
+        round: job.seq,
+      });
+      if (!res?.success) {
+        throw new Error('발주서 검증 실패: ' + (res?.error || 'unknown'));
+      }
+      enrichRowsWithVerifyData(Array.isArray(res.data) ? res.data : []);
+      api?.log?.ok?.(`[tbnws] 발주서 검증 완료 — workSeq=${res.workSeq}, 응답 ${res.data?.length ?? 0}행`, 'tbnws');
+      setVerifyState('done');
+      // workSeq manifest 영속화
+      if (res.workSeq != null) {
+        try {
+          await api?.jobs?.updateManifest?.(job.date, vendor.id, job.seq, {
+            pluginData: { tbnws: { workSeq: res.workSeq, verifiedAt: new Date().toISOString() } },
+          });
+        } catch (_) { /* ignore */ }
+      }
+    } catch (err) {
+      setVerifyState('error');
+      setVerifyError(err.message || String(err));
+      window.electronAPI?.log?.error?.(`[tbnws] ${err.message || err}`, 'tbnws');
+    }
+  };
+
+  // 검토 완료 — manifest phase 갱신 + 다음 step 으로
+  const onCompleteReview = async () => {
+    if (!vendor?.id || !job?.date || job?.seq == null) return;
+    try {
+      await window.electronAPI?.jobs?.updateManifest?.(job.date, vendor.id, job.seq, { phase: 'reviewed' });
+    } catch (_) { /* manifest 동기화 실패는 stage 진행을 막지 않음 */ }
+    const rejected = rows.filter((r) => r.reviewed && r.confQty === 0).length;
+    window.electronAPI?.log?.ok?.(`검토 완료 — 전체 ${rows.length}건, 반려 ${rejected}건`, 'review');
+    setView('confirm');
+  };
   // 미배정 풀 (lot 안 묶인 복합키) — kind 별. 항목별 원본 수량 보존하기 위해 total 필드 추가
   const [shipInbox, setShipInbox] = useState(() => V4_SHIP.map(i => ({ ...i, total: i.qty })));
   const [milkInbox, setMilkInbox] = useState(() => V4_MILK.map(i => ({ ...i, total: i.qty })));
@@ -254,7 +478,27 @@ export default function JobViewV4({ job, vendor, plugins, onBack, onRequestPlugi
           <span className="badge ok"><span style={{width:6,height:6,borderRadius:'50%',background:'currentColor'}}/>저장 14:39</span>
         </div>
 
-        {view === 'review' && <ReviewViewV4 rows={rows} setRows={setRows} tbnws={tbnws} onExclude={askExclude}/>}
+        {view === 'review' && (
+          <ReviewViewV4
+            rows={rows} setRows={setRows} tbnws={tbnws}
+            onExclude={askExclude}
+            persistReview={persistReview}
+            onComplete={onCompleteReview}
+            loaded={rowsLoaded}
+            verifyState={verifyState}
+            verifyError={verifyError}
+            onOpenVerifyDialog={() => setVerifyDialogOpen(true)}
+          />
+        )}
+        {verifyDialogOpen && (
+          <VerifyConfirmDialog
+            verifyState={verifyState}
+            syncFulfill={verifyDialogSyncFulfill}
+            setSyncFulfill={setVerifyDialogSyncFulfill}
+            onConfirm={handleVerifyConfirm}
+            onCancel={() => setVerifyDialogOpen(false)}
+          />
+        )}
         {view === 'confirm' && <ConfirmViewV4 rows={rows} setRows={setRows} onUpload={() => { setUploadingLot(null); setUploadStage('countdown'); }}/>}
         {view === 'admin-sync' && <AdminSyncViewV4 onOpenPluginWindow={() => onRequestPluginWindow('tbnws-admin')}/>}
         {view === 'ship' && <LotAssignViewV4 kind="ship" items={shipInbox} setItems={setShipInbox} lots={lots.ship} uploadHistory={uploadHistory.ship} createLot={createLot} uploadLot={uploadLots} cancelLot={cancelLot} invoicePrinter={invoicePrinter} onExclude={askExcludeInbox}/>}
@@ -281,6 +525,40 @@ export default function JobViewV4({ job, vendor, plugins, onBack, onRequestPlugi
   );
 }
 
+function VerifyConfirmDialog({ verifyState, syncFulfill, setSyncFulfill, onConfirm, onCancel }) {
+  const isRetry = verifyState === 'done';
+  return (
+    <div className="overlay">
+      <div className="modal" style={{width:420}}>
+        <div className="modal-head">
+          <h3><I.Plug size={14} stroke="var(--plugin)"/>발주서 검증</h3>
+          <div className="sub">tbnws 어드민의 풀필 재고 + 발주서 검증 API 를 호출합니다.</div>
+        </div>
+        <div className="modal-body" style={{display:'flex', flexDirection:'column', gap:10}}>
+          <div style={{fontSize:13, lineHeight:1.6}}>
+            {isRetry
+              ? '이 차수는 이미 검증되었습니다. 다시 진행하시겠습니까?'
+              : '발주서 검증을 진행하시겠습니까?'}
+          </div>
+          <label style={{display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--bg-elev)', borderRadius:5, cursor:'pointer'}}>
+            <input type="checkbox" checked={syncFulfill} onChange={(e) => setSyncFulfill(e.target.checked)}/>
+            <div style={{fontSize:12}}>
+              <div>풀필 재고 동기화 먼저 실행</div>
+              <div style={{fontSize:10, color:'var(--text-3)'}}>최대 5분 소요. 끄면 캐시된 재고로 검증.</div>
+            </div>
+          </label>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onCancel}>취소</button>
+          <button className="btn primary" onClick={onConfirm}>
+            <I.Plug size={12}/> {isRetry ? '재검증' : '검증 진행'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmDialog({ title, message, onConfirm, onCancel }) {
   return (
     <div className="overlay">
@@ -298,21 +576,34 @@ function ConfirmDialog({ title, message, onConfirm, onCancel }) {
   );
 }
 
-function ReviewViewV4({ rows, setRows, tbnws, onExclude }) {
+function ReviewViewV4({ rows, setRows, tbnws, onExclude, persistReview, onComplete, loaded, verifyState, verifyError, onOpenVerifyDialog }) {
   const { useState, useMemo } = React;
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const reviewedCount = rows.filter(r => r.reviewed).length;
   const unreviewedCount = rows.length - reviewedCount;
-  const rejectedCount = rows.filter(r => r.confQty === 0 || r.short).length;
+  const rejectedCount = rows.filter(r => r.confQty === 0 && r.reviewed).length;
 
   let filt = rows.filter(r => !search || `${r.po} ${r.name} ${r.barcode}`.includes(search));
   if (filter === 'unreviewed') filt = filt.filter(r => !r.reviewed);
-  if (filter === 'rejected') filt = filt.filter(r => r.confQty === 0);
+  if (filter === 'rejected') filt = filt.filter(r => r.reviewed && r.confQty === 0);
 
-  const setQty = (id, q) => setRows(rs => rs.map(r => r.id === id ? { ...r, confQty: q, reviewed: true, short: q === 0 ? (r.short || '협력사 재고') : '' } : r));
-  const reject = (id) => setRows(rs => rs.map(r => r.id === id ? { ...r, confQty: 0, short: '협력사 재고', reviewed: true } : r));
-  const accept = (id) => setRows(rs => rs.map(r => r.id === id ? { ...r, confQty: r.reqQty, short: '', reviewed: true } : r));
+  const setQty = (id, q) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, confQty: q, reviewed: true, short: q === 0 ? (r.short || '협력사 재고') : '' } : r));
+    persistReview && persistReview(id, 'set', { confQty: q });
+  };
+  // 반출수량 — 사용자가 input 으로 직접 조정 (DB 영속화는 미구현 — 메모리 only)
+  const setReturnQty = (id, q) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, returnQty: Math.max(0, q || 0) } : r));
+  };
+  const reject = (id) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, confQty: 0, short: '협력사 재고', reviewed: true } : r));
+    persistReview && persistReview(id, 'reject', { shortReason: '협력사 재고' });
+  };
+  const accept = (id) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, confQty: r.reqQty, short: '', reviewed: true } : r));
+    persistReview && persistReview(id, 'accept');
+  };
 
   const grouped = useMemo(() => {
     if (!tbnws) return null;
@@ -320,6 +611,19 @@ function ReviewViewV4({ rows, setRows, tbnws, onExclude }) {
     filt.forEach(r => { (g[r.sku] = g[r.sku] || []).push(r); });
     return Object.entries(g);
   }, [filt, tbnws]);
+
+  if (loaded === false) {
+    return <div className="job-view" style={{padding:'40px 22px', color:'var(--text-3)', fontSize:13}}>데이터 로드 중…</div>;
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="job-view" style={{padding:'40px 22px', display:'flex', flexDirection:'column', gap:8, alignItems:'center', color:'var(--text-3)'}}>
+        <I.AlertTriangle size={20}/>
+        <div style={{fontSize:13}}>이 차수에 배정된 PO 가 없습니다.</div>
+        <div style={{fontSize:11}}>PO 리스트에서 미배정 PO 를 이 차수로 옮겨 주세요.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="job-view">
@@ -343,7 +647,35 @@ function ReviewViewV4({ rows, setRows, tbnws, onExclude }) {
           <button className={'chip' + (filter === 'rejected' ? ' active' : '')} onClick={() => setFilter('rejected')}>반려 <span className="n">{rejectedCount}</span></button>
         </div>
         <div style={{flex:1}}/>
-        <button className="btn primary" disabled={unreviewedCount > 0}>
+        {tbnws && (
+          <button
+            className="btn"
+            onClick={onOpenVerifyDialog}
+            disabled={verifyState === 'syncing' || verifyState === 'verifying'}
+            style={{
+              background: verifyState === 'done' ? 'var(--ok-soft)'
+                : verifyState === 'error' ? 'var(--danger-soft)'
+                : 'var(--plugin-soft)',
+              color: verifyState === 'done' ? 'var(--ok)'
+                : verifyState === 'error' ? 'var(--danger)'
+                : 'var(--plugin)',
+              border: '1px solid currentColor',
+            }}
+            title={verifyError || (
+              verifyState === 'done' ? '검증 완료 — 클릭 시 재검증'
+                : verifyState === 'syncing' ? '풀필 재고 동기화 중…'
+                : verifyState === 'verifying' ? '발주서 검증 중…'
+                : '발주서 검증 실행'
+            )}
+          >
+            {verifyState === 'syncing' && <><I.Loader size={12}/> 풀필 동기화 중…</>}
+            {verifyState === 'verifying' && <><I.Loader size={12}/> 검증 중…</>}
+            {verifyState === 'done' && <><I.CheckCircle size={12}/> 검증 완료</>}
+            {verifyState === 'error' && <><I.AlertTriangle size={12}/> 검증 실패</>}
+            {verifyState === 'idle' && <>발주서 검증 전</>}
+          </button>
+        )}
+        <button className="btn primary" disabled={unreviewedCount > 0} onClick={onComplete}>
           검토 완료 <I.ArrowRight size={13}/>
         </button>
       </div>
@@ -355,29 +687,53 @@ function ReviewViewV4({ rows, setRows, tbnws, onExclude }) {
               <th className="row-num">#</th>
               <th>발주번호</th>
               <th>물류센터</th>
-              <th>바코드</th>
-              <th>상품명</th>
+              {!tbnws && <th>바코드</th>}
+              {!tbnws && <th>상품명</th>}
               <th style={{textAlign:'right'}}>발주</th>
               <th style={{textAlign:'right'}}>확정</th>
               <th>상태</th>
-              {tbnws && <th className="plugin-col">총가능 <I.Plug size={9} stroke="currentColor" style={{marginLeft:3}}/></th>}
-              {tbnws && <th className="plugin-col">유통기한</th>}
+              {tbnws && <th className="plugin-col" style={{textAlign:'right'}}>반출수량</th>}
+              {tbnws && <th className="plugin-col" style={{textAlign:'right'}}>매입가차액</th>}
+              {tbnws && <th className="plugin-col" style={{textAlign:'center'}}>납품여부</th>}
               <th>발주일시</th>
               <th style={{textAlign:'center', width:160}}>판단</th>
             </tr>
           </thead>
           <tbody>
-            {tbnws && grouped ? grouped.map(([sku, list]) => (
-              <React.Fragment key={sku}>
-                <tr className="group-header">
-                  <td colSpan={12}>
-                    <I.Plug size={11} style={{marginRight:6}}/>
-                    SKU {sku} · {list[0].name} — {list.length}센터 · 요청 {list.reduce((s,r)=>s+r.reqQty,0)} / 가능 {list.reduce((s,r)=>s+r.confQty,0)}
-                  </td>
-                </tr>
-                {list.map((r, i) => <ReviewRowV4 key={r.id} r={r} i={i} tbnws={tbnws} setQty={setQty} accept={accept} reject={reject} onExclude={onExclude}/>)}
-              </React.Fragment>
-            )) : filt.map((r, i) => <ReviewRowV4 key={r.id} r={r} i={i} tbnws={tbnws} setQty={setQty} accept={accept} reject={reject} onExclude={onExclude}/>)}
+            {tbnws && grouped ? grouped.map(([sku, list]) => {
+              const reqSum = list.reduce((s, r) => s + (r.reqQty || 0), 0);
+              const confSum = list.reduce((s, r) => s + (r.confQty || 0), 0);
+              // 그룹 단위 어그리게이트 — tbnws 가 채울 값. 일단 row 의 첫 값 사용.
+              const productCode = list[0]?.productCode;
+              const gtStock = list[0]?.gtStock;
+              const fulfillStock = list[0]?.fulfillStock;
+              // tbnws ON: # 발주 센터 발주 확정 상태 + plugin 3 + 발주일시 판단 = 11
+              const colCount = 11;
+              return (
+                <React.Fragment key={sku}>
+                  <tr className="group-header">
+                    <td colSpan={colCount}>
+                      <div className="group-header-inner">
+                        <span className="mono">SKU {sku}</span> · {list[0].name}
+                        {productCode && (
+                          <span style={{color:'var(--plugin)', marginLeft:8, fontSize:11}}>
+                            · 상품코드 <strong className="mono">{productCode}</strong>
+                          </span>
+                        )}
+                        <span style={{color:'var(--text-3)', marginLeft:8}}>— {list.length}센터 · 요청 {reqSum} / 가능 {confSum}</span>
+                        {(gtStock != null || fulfillStock != null) && (
+                          <span style={{color:'var(--plugin)', marginLeft:10, fontSize:11}}>
+                            · 지티재고 <strong className="mono">{gtStock ?? '—'}</strong>
+                            {' · '}풀필재고 <strong className="mono">{fulfillStock ?? '—'}</strong>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {list.map((r, i) => <ReviewRowV4 key={r.id} r={r} i={i} tbnws={tbnws} setQty={setQty} setReturnQty={setReturnQty} accept={accept} reject={reject} onExclude={onExclude}/>)}
+                </React.Fragment>
+              );
+            }) : filt.map((r, i) => <ReviewRowV4 key={r.id} r={r} i={i} tbnws={tbnws} setQty={setQty} setReturnQty={setReturnQty} accept={accept} reject={reject} onExclude={onExclude}/>)}
           </tbody>
         </table>
       </div>
@@ -385,7 +741,7 @@ function ReviewViewV4({ rows, setRows, tbnws, onExclude }) {
   );
 }
 
-function ReviewRowV4({ r, i, tbnws, setQty, accept, reject, onExclude }) {
+function ReviewRowV4({ r, i, tbnws, setQty, setReturnQty, accept, reject, onExclude }) {
   const isReject = r.confQty === 0;
   const isUnreviewed = !r.reviewed;
   return (
@@ -396,8 +752,8 @@ function ReviewRowV4({ r, i, tbnws, setQty, accept, reject, onExclude }) {
         {r.po}
       </td>
       <td>{r.wh}</td>
-      <td className="mono" style={{fontSize:11}}>{r.barcode}</td>
-      <td>{r.name}</td>
+      {!tbnws && <td className="mono" style={{fontSize:11}}>{r.barcode}</td>}
+      {!tbnws && <td>{r.name}</td>}
       <td className="num">{r.reqQty}</td>
       <td className="num">
         <input type="number" value={r.confQty} onChange={e => setQty(r.id, Math.max(0, Math.min(r.reqQty, +e.target.value)))}
@@ -405,11 +761,39 @@ function ReviewRowV4({ r, i, tbnws, setQty, accept, reject, onExclude }) {
       </td>
       <td>
         {isUnreviewed ? <span className="pill unreviewed">미검토</span> :
-         r.short ? <span className="pill reject">{r.short}</span> :
+         r.confQty === 0 ? <span className="pill reject">불가</span> :
+         r.confQty < r.reqQty ? <span className="pill" style={{background:'var(--warn-soft)', color:'var(--warn)'}}>부분</span> :
          <span className="pill send">정상</span>}
       </td>
-      {tbnws && <td className="num" style={{color:'var(--plugin)'}}>{r.confQty}</td>}
-      {tbnws && <td className="mono" style={{fontSize:10, color:'var(--plugin)'}}>2027-12</td>}
+      {tbnws && (
+        <td className="num" style={{color:'var(--plugin)'}}>
+          <input
+            type="number"
+            value={r.returnQty != null ? r.returnQty : ''}
+            placeholder="—"
+            onChange={(e) => setReturnQty(r.id, e.target.value === '' ? null : +e.target.value)}
+            style={{width:60, padding:'2px 6px', border:'1px solid var(--border)', borderRadius:3, fontFamily:'JetBrains Mono', fontSize:11, textAlign:'right', color:'var(--plugin)'}}
+          />
+        </td>
+      )}
+      {tbnws && (
+        <td className="num mono" style={{
+          fontSize:11,
+          color: r.priceDiff != null && Math.abs(r.priceDiff) >= 5000 ? 'var(--warn)' : 'var(--plugin)',
+          fontWeight: r.priceDiff != null && Math.abs(r.priceDiff) >= 5000 ? 700 : 400,
+        }}>
+          {r.priceDiff != null ? r.priceDiff.toLocaleString() : <span style={{color:'var(--text-3)'}}>—</span>}
+        </td>
+      )}
+      {tbnws && (
+        <td style={{textAlign:'center'}}>
+          {r.delivery === 'Y'
+            ? <span className="pill send">Y</span>
+            : r.delivery === 'N'
+              ? <span className="pill reject">N</span>
+              : <span style={{color:'var(--text-3)'}}>—</span>}
+        </td>
+      )}
       <td className="mono" style={{fontSize:10, color:'var(--text-3)'}}>{r.orderTime}</td>
       <td style={{textAlign:'center'}}>
         <div style={{display:'inline-flex', gap:3}}>

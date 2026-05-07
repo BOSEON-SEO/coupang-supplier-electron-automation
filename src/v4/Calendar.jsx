@@ -24,7 +24,7 @@ function adaptJob(m, todayStr) {
   };
 }
 
-export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, onOpenDate, onOpenPlugins, onOpenSettings }) {
+export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, onOpenDate, onOpenPlugins, onOpenSettings, activePluginCount = 0, installedPluginCount = 0 }) {
   const _now = new Date();
   const [month, setMonth] = useState({ y: _now.getFullYear(), m: _now.getMonth() + 1 });
   const today = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
@@ -111,7 +111,14 @@ export default function CalendarV4({ vendor, setVendor, vendors = V4_VENDORS, on
         <div className="cal-sb-section">시스템</div>
         <button className="cal-sb-item" onClick={onOpenPlugins}>
           <I.Plug size={14}/><span className="label">플러그인</span>
-          <span className="badge plugin" style={{fontSize:10}}>1 활성</span>
+          {installedPluginCount > 0 && (
+            <span
+              className={'badge ' + (activePluginCount > 0 ? 'plugin' : '')}
+              style={{fontSize:10, opacity: activePluginCount > 0 ? 1 : 0.5}}
+            >
+              {activePluginCount > 0 ? `${activePluginCount} 활성` : '비활성'}
+            </span>
+          )}
         </button>
         <button className="cal-sb-item" onClick={onOpenSettings}>
           <I.Settings size={14}/><span className="label">설정</span>

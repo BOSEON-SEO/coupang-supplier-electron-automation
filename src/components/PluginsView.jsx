@@ -61,6 +61,7 @@ export default function PluginsView() {
     });
     if (res?.success) {
       window.dispatchEvent(new Event('settings-changed'));
+      window.electronAPI?.log?.plugin?.(`플러그인 토글: ${pluginId} ${nextEnabled ? 'ON' : 'OFF'}`, pluginId);
     }
   }, []);
 
@@ -229,8 +230,10 @@ function PluginDetailModal({ plugin, onClose }) {
       if (!res?.success) throw new Error(res?.error || 'settings save 실패');
       setStatus('저장됨');
       window.dispatchEvent(new Event('settings-changed'));
+      window.electronAPI?.log?.plugin?.(`플러그인 설정 저장: ${plugin.id}`, plugin.id);
     } catch (err) {
       setStatus(`저장 실패: ${err.message}`);
+      window.electronAPI?.log?.error?.(`플러그인 설정 저장 실패: ${plugin.id} — ${err.message}`, plugin.id);
     } finally {
       setSaving(false);
       setTimeout(() => setStatus(''), 2500);

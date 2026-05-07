@@ -240,7 +240,8 @@ function findConfirmedQtyColIndex(headerRow) {
 }
 
 function registerIpcHandlers({
-  ipcMain, getWindow, dataDir, cdpPort, setPendingDownloadTarget, setPendingDownloadDir,
+  ipcMain, getWindow, getLogWindow, appendLogBuffer,
+  dataDir, cdpPort, setPendingDownloadTarget, setPendingDownloadDir,
   openStockAdjustWindow, openTransportWindow,
   isJobLocked, getLockedJobKeys, getLockedJobsByType, closeStockAdjustWindow,
 }) {
@@ -325,7 +326,38 @@ function registerIpcHandlers({
     } catch {
       // 윈도우가 닫힌 상태 — 무시
     }
+    // 로그 관련 채널은 logWindow 에도 broadcast + buffer 누적 (창 mount 후 backfill 용)
+    if (channel === 'python:log' || channel === 'python:error' || channel === 'python:done') {
+      try {
+        const logWin = getLogWindow?.();
+        if (logWin && !logWin.isDestroyed()) {
+          logWin.webContents.send(channel, payload);
+        }
+      } catch { /* 무시 */ }
+      try {
+        if (typeof appendLogBuffer === 'function') {
+          appendLogBuffer({ channel, payload, ts: Date.now() });
+        }
+      } catch { /* 무시 */ }
+    }
   }
+
+  // ── 통합 로그 ─────────────────────────────────────────────
+  // renderer 어디서든 window.electronAPI.log.info('...') 호출 → 'python:log'
+  // 채널로 forward 됨. python:log/error 는 sendToRenderer 가 logWindow 와 buffer
+  // 양쪽에 broadcast 해주므로 별도 처리 불필요.
+  ipcMain.handle('app:log', (_e, payload) => {
+    try {
+      const level = String(payload?.level || 'info').toLowerCase();
+      const source = payload?.source ? `[${payload.source}] ` : '';
+      const message = source + String(payload?.message ?? '');
+      const channel = level === 'error' ? 'python:error' : 'python:log';
+      sendToRenderer(channel, { line: message, level, source: payload?.source || null, ts: Date.now() });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
 
   // ── 벤더 관리 ──
   ipcMain.handle('vendors:load', async () => {

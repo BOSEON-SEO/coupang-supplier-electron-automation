@@ -350,7 +350,12 @@ table.gtable { border-collapse: separate; border-spacing: 0; width: max-content;
 .gtable td.num { text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 .gtable tbody tr.group-header td {
   background: var(--plugin-soft) !important; font-weight: 600; color: var(--plugin); font-size: 11px;
-  border-top: 2px solid var(--plugin); padding: 8px 12px; height: auto;
+  border-top: 2px solid var(--plugin); padding: 0; height: auto;
+}
+/* td 자체 sticky 는 colSpan width 때문에 좌측이 잘림 — 내부 inline-block div 만 sticky */
+.gtable tbody tr.group-header .group-header-inner {
+  position: sticky; left: 0; display: inline-block; padding: 8px 12px;
+  white-space: nowrap; z-index: 3;
 }
 .unreviewed-marker {
   width: 4px; height: 4px; border-radius: 50%; background: var(--warn); display: inline-block; margin-right: 5px;
@@ -1047,3 +1052,27 @@ svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
   transition: transform 100ms;
 }
 .po-file-drop.drag-over .ttl { color: var(--accent-strong); }
+
+/* ── 별도 BrowserWindow — 실행 로그 페이지 ─────────────────── */
+.logpage { display: flex; flex-direction: column; height: 100vh; background: #0a0a0a; color: #d4d4d8; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.logpage-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #18181b; border-bottom: 1px solid #27272a; flex-shrink: 0; }
+.logpage-title { font-weight: 600; color: #fafafa; }
+.logpage-meta { color: #71717a; font-size: 11px; }
+.logpage-btn { background: #27272a; border: 1px solid #3f3f46; color: #d4d4d8; padding: 3px 9px; border-radius: 3px; font-size: 11px; cursor: pointer; }
+.logpage-btn:hover { background: #3f3f46; }
+.logpage-body { flex: 1; overflow: auto; padding: 8px 14px; }
+.logpage-empty { color: #52525b; padding: 24px; text-align: center; font-style: italic; }
+.logpage-line { display: flex; gap: 10px; padding: 1px 0; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.logpage-ts { color: #71717a; flex-shrink: 0; }
+.logpage-lvl { flex-shrink: 0; min-width: 56px; }
+.logpage-line.lvl-info .logpage-lvl { color: #60a5fa; }
+.logpage-line.lvl-error .logpage-lvl { color: #f87171; }
+.logpage-line.lvl-error .logpage-text { color: #fca5a5; }
+.logpage-line.lvl-done .logpage-lvl { color: #4ade80; }
+.logpage-line.lvl-done .logpage-text { color: #86efac; }
+.logpage-line.lvl-ok .logpage-lvl { color: #34d399; }
+.logpage-line.lvl-warn .logpage-lvl { color: #fbbf24; }
+.logpage-line.lvl-warn .logpage-text { color: #fcd34d; }
+.logpage-line.lvl-plugin .logpage-lvl { color: #c084fc; }
+.logpage-line.lvl-plugin .logpage-text { color: #ddd6fe; }
+.logpage-text { flex: 1; }

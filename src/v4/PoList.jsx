@@ -21,8 +21,8 @@ function adaptManifest(m, today) {
 }
 
 // DB pos row → mockup PO 모양 변환
-//   DB: { id, vendor_id, po_number, wh, sku, barcode, name, req_qty, order_time, job_vendor, job_date, job_seq, is_new }
-//   mockup: { id, jobId, po, wh, sku, barcode, name, reqQty, orderTime, isNew }
+//   DB: { ..., inbound_date }
+//   mockup: { ..., inboundDate }
 function adaptPos(row) {
   return {
     id: row.id,
@@ -36,8 +36,27 @@ function adaptPos(row) {
     name: row.name,
     reqQty: row.req_qty,
     orderTime: row.order_time,
+    inboundDate: row.inbound_date || null,
     isNew: !!row.is_new,
   };
+}
+
+// Excel serial date / 'YYYY-MM-DD' string / Date / null → 'YYYY-MM-DD' | null
+function toIsoDate(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'string') {
+    const m = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+  }
+  if (typeof v === 'number' && v > 0) {
+    // Excel epoch 1899-12-30 보정 (1900 윤년 버그)
+    const ms = Math.round((v - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return null;
 }
 
 export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJob }) {
@@ -79,10 +98,24 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
     orphans.length === s.size ? new Set() : new Set(orphans.map(o => o.id))
   );
 
-  const scopedPos = useMemo(() =>
-    allPos.filter(p => p.po && (search === '' || `${p.po} ${p.name} ${p.barcode}`.includes(search))),
-    [allPos, search]
-  );
+  // 해당 날짜 view 와 무관한 PO 는 제외:
+  //   - 차수에 묶인 PO: 차수의 date 가 view.date 와 일치할 때만
+  //   - 미배정(orphan) PO: inbound_date 가 view.date 와 일치할 때만
+  //     (inbound_date NULL = 구 데이터 → 통과 — 마이그레이션 이전 행)
+  const dayJobIdSet = useMemo(() => new Set(dayJobs.map((j) => j.id)), [dayJobs]);
+  const scopedPos = useMemo(() => {
+    return allPos.filter((p) => {
+      if (!p.po) return false;
+      if (p.jobId) {
+        if (!dayJobIdSet.has(p.jobId)) return false;
+      } else {
+        // orphan: inbound_date 있을 때만 그 날짜만 필터
+        if (p.inboundDate && p.inboundDate !== date) return false;
+      }
+      if (search && !`${p.po} ${p.name} ${p.barcode}`.includes(search)) return false;
+      return true;
+    });
+  }, [allPos, search, dayJobIdSet, date]);
 
   const orphanCount = scopedPos.filter(p => p.jobId === null).length;
   const isOrphanView = selectedJobId === 'orphan';
@@ -104,7 +137,12 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
     setDeleting(true);
     try {
       const res = await window.electronAPI?.jobs?.delete?.(job.date, job.vendor, job.seq);
-      if (!res?.success) { alert('차수 삭제 실패: ' + (res?.error || 'unknown')); return; }
+      if (!res?.success) {
+        window.electronAPI?.log?.error?.(`차수 삭제 실패: ${res?.error || 'unknown'}`, 'po-list');
+        alert('차수 삭제 실패: ' + (res?.error || 'unknown'));
+        return;
+      }
+      window.electronAPI?.log?.ok?.(`차수 삭제: ${job.label} — 배정된 ${memberCount}건이 미배정으로 환원됨`, 'po-list');
       setSelectedJobId('all');
       await reload();
     } catch (err) {
@@ -123,6 +161,7 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
       const ids = [...pickedOrphans];
       const createRes = await window.electronAPI?.jobs?.create?.(date, vendor.id, {});
       if (!createRes?.success) {
+        window.electronAPI?.log?.error?.(`차수 생성 실패: ${createRes?.error || 'unknown'}`, 'po-list');
         alert('차수 생성 실패: ' + (createRes?.error || 'unknown'));
         return;
       }
@@ -130,13 +169,20 @@ export default function PoListView({ vendor, date, onOpenJob, onBack, onCreateJo
       if (seq == null) { alert('차수 생성 응답에 sequence 없음'); return; }
       const assignRes = await window.electronAPI?.pos?.assignToJob?.(ids, vendor.id, date, seq);
       if (!assignRes?.success) {
+        window.electronAPI?.log?.error?.(`PO 배정 실패: ${assignRes?.error || 'unknown'}`, 'po-list');
         alert('PO 배정 실패: ' + (assignRes?.error || 'unknown'));
         return;
       }
+      window.electronAPI?.log?.ok?.(`차수 생성: ${vendor.id} · ${date} · ${seq}차 — ${ids.length}건 배정`, 'po-list');
       setPickedOrphans(new Set());
       await reload();
-      // 선택사항: 생성 즉시 차수 선택
-      setSelectedJobId(`${vendor.id}-${date}-${seq}`);
+      // 생성 직후 작업 뷰로 자동 진입
+      const newJob = {
+        id: `${vendor.id}-${date}-${seq}`,
+        vendor: vendor.id, date, seq,
+        label: `${date.slice(5).replace('-', '/')} ${seq}차`,
+      };
+      if (onOpenJob) onOpenJob(newJob);
       if (onCreateJob) onCreateJob(ids, { date, sequence: seq });
     } catch (err) {
       alert('차수 생성 중 오류: ' + err.message);
@@ -418,10 +464,12 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
       name: r.sku_name || '',
       req_qty: Number(r.order_quantity) || 0,
       order_time: r.order_date || '',
+      inbound_date: toIsoDate(r.expected_arrival_date),
     })).filter((r) => r.po_number && r.sku);
 
     const res = await window.electronAPI?.pos?.addNewOnly?.(vendor.id, mapped);
     if (!res?.success) throw new Error('DB 저장 실패: ' + (res?.error || 'unknown'));
+    window.electronAPI?.log?.ok?.(`PO 갱신(쿠팡): ${rows.length}건 파싱 → 신규 ${res.added}건 / 중복 ${res.skipped}건`, 'po-refresh');
     setStage('done');
     setResult(res);
     return res;
@@ -462,10 +510,17 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
       const args = ['--vendor', vendor.id, '--date-from', dateFrom, '--date-to', dateFrom];
       const runRes = await api?.runPython?.('scripts/po_download.py', args);
       if (!runRes?.success) throw new Error('python 실행 실패: ' + (runRes?.error || 'unknown'));
-      // python:done 이벤트 대기
-      const filePath = await waitPythonDone('po_download.py');
-      if (!filePath) throw new Error('다운로드 결과 파일을 찾을 수 없습니다');
-      await fetchAndApply(filePath);
+      // python:done 이벤트 대기 — 결과 객체 ({ empty } | { filePath } | null)
+      const r = await waitPythonDone('po_download.py');
+      if (!r) throw new Error('다운로드 결과를 받지 못했습니다');
+      if (r.empty) {
+        // 쿠팡 사이트에서 검색 결과 0건 — 파싱/DB 머지 단계 skip.
+        api?.log?.info?.(`PO 갱신: ${dateFrom} 검색 결과 0건`, 'po-refresh');
+        setStage('done');
+        setResult({ added: 0, skipped: 0, empty: true });
+        return;
+      }
+      await fetchAndApply(r.filePath);
     } catch (err) {
       setError(err.message); setStage('');
     } finally {
@@ -492,6 +547,7 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
       })).filter((r) => r.po_number && r.sku);
       const res = await window.electronAPI?.pos?.addNewOnly?.(vendor.id, mapped);
       if (!res?.success) throw new Error(res?.error || 'DB 저장 실패');
+      window.electronAPI?.log?.ok?.(`PO 갱신(Excel): ${rows.length}건 파싱 → 신규 ${res.added}건 / 중복 ${res.skipped}건`, 'po-refresh');
       setStage('done'); setResult(res);
     } catch (err) {
       setError(err.message); setStage('');
@@ -609,9 +665,11 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
             <div style={{padding:10, background:'var(--ok-soft)', borderRadius:5, fontSize:12, color:'var(--ok)', display:'flex', flexDirection:'column', gap:4}}>
               <div style={{display:'flex', gap:8, alignItems:'center', fontWeight:600}}>
                 <I.CheckCircle size={13}/>
-                갱신 완료
+                {result.empty ? '검색 결과 없음' : '갱신 완료'}
               </div>
-              <div>신규 추가 <strong className="mono">{result.added}</strong>건 · 중복 제외 <strong className="mono">{result.skipped}</strong>건</div>
+              {result.empty
+                ? <div>해당 일자(<span className="mono">{from.slice(0,10)}</span>) 입고예정 PO 가 없습니다.</div>
+                : <div>신규 추가 <strong className="mono">{result.added}</strong>건 · 중복 제외 <strong className="mono">{result.skipped}</strong>건</div>}
             </div>
           )}
           {error && (
@@ -649,31 +707,43 @@ function PoUpdateModalV4({ vendor, date, onClose, onRefreshed }) {
 
 // python:done 이벤트 대기 + 결과 파일 경로 추출.
 // po_download.py 가 다운로드한 파일을 찾기 위해 file:listVendorFiles 로 latest 검색.
+// python:log 채널의 parsed.type==='result' 라인을 가로채 결과 객체 보유.
+// done 이벤트 도달 시 그 결과로 분기 — listVendorFiles 의 stale 파일 fallback 제거.
+//
+// 반환: { empty: true } | { filePath: '...' } | null
 function waitPythonDone(scriptSuffix) {
   return new Promise((resolve, reject) => {
     const api = window.electronAPI;
-    if (!api?.onPythonDone) { reject(new Error('python IPC 미지원')); return; }
-    const timer = setTimeout(() => { unsub?.(); reject(new Error('타임아웃 (10분 초과)')); }, 10 * 60 * 1000);
-    const unsub = api.onPythonDone(async (data) => {
+    if (!api?.onPythonDone || !api?.onPythonLog) {
+      reject(new Error('python IPC 미지원')); return;
+    }
+    let lastResult = null;
+    const offLog = api.onPythonLog((data) => {
+      const name = data?.scriptName || '';
+      if (!name.includes(scriptSuffix)) return;
+      const parsed = data?.parsed;
+      if (parsed?.type === 'result' && typeof parsed.data === 'string') {
+        try { lastResult = JSON.parse(parsed.data); } catch (_) { /* ignore */ }
+      }
+    });
+
+    const timer = setTimeout(() => {
+      try { offLog?.(); } catch (_) {}
+      try { offDone?.(); } catch (_) {}
+      reject(new Error('타임아웃 (10분 초과)'));
+    }, 10 * 60 * 1000);
+
+    const offDone = api.onPythonDone((data) => {
       const name = data?.scriptName || '';
       if (!name.includes(scriptSuffix)) return;
       clearTimeout(timer);
-      try { unsub(); } catch (_) { /* ignore */ }
+      try { offLog?.(); } catch (_) {}
+      try { offDone?.(); } catch (_) {}
       if (data.killed) { reject(new Error('사용자 취소')); return; }
       if (data.exitCode !== 0) { reject(new Error('python 실패 (exitCode=' + data.exitCode + ')')); return; }
-      // 갱신된 결과 파일 검색 — 가장 최근의 {vendor}-{date}-{seq}.xlsx
-      try {
-        const v = data.vendorId || data.scriptName || '';
-        const list = await api.listVendorFiles?.();
-        const files = (list?.files || []).filter((f) => /\.xlsx$/i.test(f));
-        files.sort((a, b) => b.localeCompare(a)); // 이름 desc — 날짜+seq 가 들어있어 최신이 위
-        if (!files.length) { resolve(null); return; }
-        const top = files[0];
-        const resolved = await api.resolveVendorPath?.(top);
-        resolve(resolved?.path || null);
-      } catch (err) {
-        reject(err);
-      }
+      if (lastResult?.empty) { resolve({ empty: true }); return; }
+      if (lastResult?.filePath) { resolve({ filePath: lastResult.filePath }); return; }
+      resolve(null);
     });
   });
 }

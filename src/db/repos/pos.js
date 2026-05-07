@@ -7,22 +7,24 @@ function makePosId(vendor_id, po_number, sku) {
 }
 
 function upsertMany(rows) {
-  // rows: [{ vendor_id, po_number, wh, sku, barcode, name, req_qty, order_time, job_vendor, job_date, job_seq, is_new }]
+  // rows: [{ vendor_id, po_number, wh, sku, barcode, name, req_qty, order_time, inbound_date,
+  //          job_vendor, job_date, job_seq, is_new }]
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO pos (id, vendor_id, po_number, wh, sku, barcode, name, req_qty, order_time,
+    INSERT INTO pos (id, vendor_id, po_number, wh, sku, barcode, name, req_qty, order_time, inbound_date,
                      job_vendor, job_date, job_seq, is_new, imported_at)
-    VALUES (@id, @vendor_id, @po_number, @wh, @sku, @barcode, @name, @req_qty, @order_time,
+    VALUES (@id, @vendor_id, @po_number, @wh, @sku, @barcode, @name, @req_qty, @order_time, @inbound_date,
             @job_vendor, @job_date, @job_seq, @is_new, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
-      wh         = excluded.wh,
-      barcode    = excluded.barcode,
-      name       = excluded.name,
-      req_qty    = excluded.req_qty,
-      order_time = excluded.order_time,
-      job_vendor = COALESCE(pos.job_vendor, excluded.job_vendor),
-      job_date   = COALESCE(pos.job_date,   excluded.job_date),
-      job_seq    = COALESCE(pos.job_seq,    excluded.job_seq)
+      wh           = excluded.wh,
+      barcode      = excluded.barcode,
+      name         = excluded.name,
+      req_qty      = excluded.req_qty,
+      order_time   = excluded.order_time,
+      inbound_date = COALESCE(excluded.inbound_date, pos.inbound_date),
+      job_vendor   = COALESCE(pos.job_vendor, excluded.job_vendor),
+      job_date     = COALESCE(pos.job_date,   excluded.job_date),
+      job_seq      = COALESCE(pos.job_seq,    excluded.job_seq)
   `);
   const tx = db.transaction((rs) => {
     for (const r of rs) {
@@ -37,6 +39,7 @@ function upsertMany(rows) {
         name: r.name,
         req_qty: r.req_qty,
         order_time: r.order_time,
+        inbound_date: r.inbound_date || null,
         job_vendor: r.job_vendor || null,
         job_date: r.job_date || null,
         job_seq: r.job_seq != null ? r.job_seq : null,
@@ -137,4 +140,60 @@ function addNewOnly(vendor_id, rows) {
   return { added, skipped: rows.length - added, addedPoNumbers: [...newPoNumbers] };
 }
 
-module.exports = { makePosId, upsertMany, addNewOnly, listAll, listByJob, listOrphans, assignToJob, unassign };
+/**
+ * 단일 PO 행의 검토 상태 갱신.
+ * action:
+ *   'accept' — 확정 = 발주수량 (또는 명시 conf_qty), reviewed=1, short_reason=NULL
+ *   'reject' — 확정 = 0, reviewed=1, short_reason=명시값 또는 '협력사 재고'
+ *   'set'    — conf_qty 직접 지정. conf_qty=0 이면 reject 동치, >0 이면 accept 동치
+ *   'unset'  — reviewed=0, conf_qty=NULL, short_reason=NULL (검토 해제)
+ */
+function reviewSet(posId, action, opts = {}) {
+  const db = getDb();
+  if (action === 'accept') {
+    return db.prepare(`
+      UPDATE pos SET reviewed=1, conf_qty = COALESCE(?, req_qty), short_reason=NULL WHERE id=?
+    `).run(opts.confQty != null ? opts.confQty : null, posId).changes;
+  }
+  if (action === 'reject') {
+    return db.prepare(`
+      UPDATE pos SET reviewed=1, conf_qty=0, short_reason=COALESCE(?, '협력사 재고') WHERE id=?
+    `).run(opts.shortReason || null, posId).changes;
+  }
+  if (action === 'set') {
+    const q = Number(opts.confQty) || 0;
+    return db.prepare(`
+      UPDATE pos
+      SET reviewed=1, conf_qty=?, short_reason = CASE WHEN ?=0 THEN COALESCE(?, '협력사 재고') ELSE NULL END
+      WHERE id=?
+    `).run(q, q, opts.shortReason || null, posId).changes;
+  }
+  if (action === 'unset') {
+    return db.prepare(`
+      UPDATE pos SET reviewed=0, conf_qty=NULL, short_reason=NULL WHERE id=?
+    `).run(posId).changes;
+  }
+  throw new Error(`unknown review action: ${action}`);
+}
+
+/** 차수의 검토 진행률. */
+function reviewSummary(vendor_id, date, sequence) {
+  const row = getDb().prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN reviewed=1 THEN 1 ELSE 0 END) AS reviewed,
+      SUM(CASE WHEN reviewed=1 AND conf_qty=0 THEN 1 ELSE 0 END) AS rejected
+    FROM pos WHERE job_vendor=? AND job_date=? AND job_seq=?
+  `).get(vendor_id, date, sequence);
+  return {
+    total: row?.total || 0,
+    reviewed: row?.reviewed || 0,
+    rejected: row?.rejected || 0,
+    pending: (row?.total || 0) - (row?.reviewed || 0),
+  };
+}
+
+module.exports = {
+  makePosId, upsertMany, addNewOnly, listAll, listByJob, listOrphans,
+  assignToJob, unassign, reviewSet, reviewSummary,
+};

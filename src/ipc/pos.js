@@ -44,6 +44,36 @@ function register() {
     return { success: true, count: n };
   });
 
+  // 검토 — 단일 행
+  ipcMain.handle('pos:review', (_e, posId, action, opts) => {
+    if (!posId) return { success: false, error: 'posId required' };
+    try {
+      const n = posRepo.reviewSet(posId, action, opts || {});
+      return { success: true, changes: n };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // 검토 — 다건 일괄 (예: 그룹핑된 SKU 묶음 수락/반려)
+  ipcMain.handle('pos:reviewMany', (_e, posIds, action, opts) => {
+    if (!Array.isArray(posIds) || posIds.length === 0) return { success: false, error: 'posIds required' };
+    try {
+      let n = 0;
+      for (const id of posIds) n += posRepo.reviewSet(id, action, opts || {});
+      return { success: true, changes: n };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('pos:reviewSummary', (_e, vendorId, date, sequence) => {
+    if (!vendorId || !date || sequence == null) {
+      return { success: false, error: 'vendor/date/sequence required' };
+    }
+    return { success: true, summary: posRepo.reviewSummary(vendorId, date, sequence) };
+  });
+
   // PO 갱신 (po_number 단위 dedup) — 기존 발주번호는 skip, 신규만 추가.
   ipcMain.handle('pos:addNewOnly', (_e, vendorId, rows) => {
     if (!vendorId) return { success: false, error: 'vendor required' };
